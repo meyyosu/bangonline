@@ -4,7 +4,16 @@ Phiên bản web của board game **Bang!** (bản gốc) để chơi cùng bạ
 
 **Không cần cài thư viện nào.** Chỉ cần Node.js 18 trở lên.
 
-## Chạy trên máy
+## Cách nhanh nhất (Windows): bấm đúp `CHAY-GAME.bat`
+
+Giải nén rồi bấm đúp **`CHAY-GAME.bat`**. Script sẽ tự:
+1. Tải Node.js bản portable vào thư mục `node/` (chỉ lần đầu, cần Internet). Không cài gì vào hệ thống.
+2. Mở cổng 3000 trên tường lửa (chỉ lần đầu; khi Windows hỏi quyền Administrator thì bấm **Yes**).
+3. Tìm IP Radmin VPN (26.x.x.x), copy link cho bạn bè vào clipboard và mở trình duyệt.
+
+Giữ cửa sổ đen mở trong lúc chơi; đóng nó là tắt server. Bạn bè chỉ cần mở link bằng trình duyệt, không phải cài gì.
+
+## Chạy thủ công
 
 ```bash
 cd bang-online
