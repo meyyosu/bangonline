@@ -5,6 +5,7 @@ const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 const { Game, GameError, CARD_INFO, CHAR_INFO, ROLE_INFO } = require('./game');
+const { syncTimer, tickTimer } = require('./room-timer');
 
 const PORT = Number(process.env.PORT) || 3000;
 const DATA_DIR = path.join(__dirname, 'data');
@@ -34,7 +35,7 @@ function newCode() {
 }
 
 function roomSummary(r) {
-  return { code: r.code, name: r.name, host: r.host, players: r.players, status: r.status, max: 7 };
+  return { code: r.code, name: r.name, host: r.host, players: r.players, status: r.status, max: 7, hasPassword: !!r.passwordHash, turnSeconds: r.turnSeconds };
 }
 
 function roomView(r, user) {
@@ -44,6 +45,8 @@ function roomView(r, user) {
     online: [...new Set(online)],
     chat: r.chat.slice(-60),
     game: r.game ? r.game.viewFor(user) : null,
+    serverNow: Date.now(),
+    timer: r.clock ? { deadline: r.clock.deadline, player: r.clock.player, response: !!r.clock.pending } : null,
   };
 }
 
@@ -57,6 +60,22 @@ function broadcastLobby() {
   for (const res of lobbyClients) sse(res, { type: 'lobby', rooms: list });
 }
 function findRoomOf(user) { return [...rooms.values()].find((r) => r.players.includes(user)); }
+
+function updateSettings(r, body) {
+  if (body.turnSeconds !== undefined) {
+    if (!Number.isInteger(body.turnSeconds) || (body.turnSeconds !== 0 && (body.turnSeconds < 10 || body.turnSeconds > 600))) {
+      throw new GameError('Thời gian mỗi lượt phải là 0 (tắt) hoặc từ 10 đến 600 giây.');
+    }
+  }
+  if (body.password !== undefined && (typeof body.password !== 'string' || body.password.length > 64)) {
+    throw new GameError('Mật khẩu phòng tối đa 64 ký tự.');
+  }
+  if (body.password !== undefined) {
+    r.passwordSalt = body.password ? crypto.randomBytes(16).toString('hex') : null;
+    r.passwordHash = body.password ? hashPw(body.password, r.passwordSalt) : null;
+  }
+  if (body.turnSeconds !== undefined) r.turnSeconds = body.turnSeconds;
+}
 
 function leaveRoom(r, user) {
   r.players = r.players.filter((p) => p !== user);
@@ -156,9 +175,12 @@ const server = http.createServer(async (req, res) => {
     }
     if (method === 'POST' && pathname === '/api/rooms') {
       if (findRoomOf(user)) return err(res, 'Bạn đang ở trong một phòng khác.');
-      const { name } = await readBody(req);
+      const body = await readBody(req);
+      const { name } = body;
       const code = newCode();
       const r = { code, name: String(name || `Phòng của ${user}`).slice(0, 40), host: user, players: [user], status: 'waiting', game: null, chat: [] };
+      r.turnSeconds = 0;
+      updateSettings(r, body);
       rooms.set(code, r);
       broadcastLobby();
       return send(res, 200, { code });
@@ -188,10 +210,19 @@ const server = http.createServer(async (req, res) => {
         if (findRoomOf(user)) return err(res, 'Bạn đang ở trong một phòng khác.');
         if (r.status !== 'waiting') return err(res, 'Phòng đang chơi, không thể vào.');
         if (r.players.length >= 7) return err(res, 'Phòng đã đủ 7 người.');
+        if (r.passwordHash && (typeof body.password !== 'string' || body.password.length > 64 ||
+          !crypto.timingSafeEqual(Buffer.from(hashPw(body.password, r.passwordSalt), 'hex'), Buffer.from(r.passwordHash, 'hex')))) {
+          return send(res, 403, { error: 'Phòng yêu cầu mật khẩu hoặc mật khẩu chưa đúng.', passwordRequired: true });
+        }
         r.players.push(user);
         r.chat.push({ system: true, text: `${user} đã vào phòng.` });
       } else if (!r.players.includes(user)) {
         return err(res, 'Bạn không ở trong phòng này.', 403);
+      } else if (sub === 'settings') {
+        if (r.host !== user) return err(res, 'Chỉ chủ phòng mới đổi được cài đặt.', 403);
+        if (r.status !== 'waiting') return err(res, 'Chỉ có thể đổi cài đặt trong phòng chờ.');
+        updateSettings(r, body);
+        r.chat.push({ system: true, text: 'Chủ phòng đã cập nhật cài đặt phòng.' });
       } else if (sub === 'leave') {
         if (r.status === 'playing' && r.game?.players[r.game.idx(user)]?.alive) return err(res, 'Không thể rời phòng khi đang chơi.');
         leaveRoom(r, user);
@@ -211,6 +242,7 @@ const server = http.createServer(async (req, res) => {
         r.game = null; r.status = 'waiting';
       } else if (sub === 'action') {
         if (!r.game) return err(res, 'Chưa có ván đấu.');
+        if (tickTimer(r)) { broadcastRoom(r); broadcastLobby(); return err(res, 'Đã hết thời gian. Vui lòng thực hiện theo lượt hiện tại.'); }
         r.game.act(user, body.action || {});
         if (r.game.winner) r.status = 'ended';
       } else if (sub === 'chat') {
@@ -219,6 +251,7 @@ const server = http.createServer(async (req, res) => {
         if (r.chat.length > 200) r.chat.shift();
       } else return err(res, 'Not found', 404);
 
+      syncTimer(r);
       if (rooms.has(r.code)) broadcastRoom(r);
       else for (const c of roomClients.get(r.code) || []) sse(c.res, { type: 'closed' });
       broadcastLobby();
@@ -231,6 +264,13 @@ const server = http.createServer(async (req, res) => {
     return err(res, 'Lỗi server.', 500);
   }
 });
+
+// Timer chạy trên server kể cả khi người chơi mất kết nối.
+setInterval(() => {
+  for (const r of rooms.values()) {
+    if (tickTimer(r)) { broadcastRoom(r); broadcastLobby(); }
+  }
+}, 250);
 
 // giữ kết nối SSE sống qua proxy
 setInterval(() => {

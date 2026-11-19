@@ -192,6 +192,7 @@ class Game {
   // ---------- lượt chơi ----------
   startTurn() {
     if (this.winner) return;
+    this.turnNumber = (this.turnNumber || 0) + 1;
     const pi = this.turn, p = this.players[pi];
     this.bangsPlayed = 0;
     this.phase = 'start';
@@ -400,6 +401,24 @@ class Game {
       this.nextTurn();
     } else fail('Hành động không hợp lệ.');
     this.afterAction();
+  }
+
+  timeout() {
+    if (this.winner) return;
+    const pend = this.pending;
+    const p = this.players[pend ? pend.player : this.turn];
+    this.addLog(`⏱ ${p.name} đã hết thời gian${pend ? ' phản hồi' : ' lượt chơi'}.`);
+    if (pend) {
+      let action = { type: 'take' };
+      if (pend.type === 'draw') action = { type: 'drawChoice', from: 'deck' };
+      if (pend.type === 'kit') action = { type: 'kit', cardIds: pend.cards.slice(0, 2).map((c) => c.id) };
+      if (pend.type === 'store') action = { type: 'pick', cardId: pend.cards[0].id };
+      this.act(p.name, action);
+    } else {
+      const excess = p.hand.length - p.hp;
+      if (excess > 0) this.act(p.name, { type: 'discard', cardIds: p.hand.slice(0, excess).map((c) => c.id) });
+      this.act(p.name, { type: 'endTurn' });
+    }
   }
 
   respond(pi, p, pend, a) {
