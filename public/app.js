@@ -345,6 +345,16 @@ function hpHTML(p) {
 function roleBadge(p) {
   return p.role ? `<span class="role ${p.role}" title="${esc(META.roles[p.role].goal)}">${ROLE_VI[p.role]}</span>` : '<span class="role unknown">?</span>';
 }
+// Song sắt phủ lên người vừa rút Jail thất bại; hiệu ứng sập xuống chỉ chạy lần đầu thấy
+const jailSeen = new Set();
+function jailBarsHTML(p) {
+  if (!p.jailed) return '';
+  const key = `${p.name}:${p.jailed}`;
+  const slam = !jailSeen.has(key);
+  jailSeen.add(key);
+  return `<div class="jail-bars ${slam ? 'slam' : ''}" aria-hidden="true"></div>
+    <div class="jail-tag" title="Rút Jail không ra ♥ nên mất lượt; song sắt mở khi tới lượt kế tiếp">⛓️ Bị giam · mất lượt</div>`;
+}
 
 function effectiveName(c, me) {
   if (me.char === 'Calamity Janet' && c.name === 'Missed') return 'Bang';
@@ -407,9 +417,10 @@ function renderGame() {
       !p.alive ? 'dead' : '',
       p.winner ? 'winner' : '',
       tfilter ? (tfilter(p) ? 'targetable' : 'notarget') : '',
+      p.jailed ? 'jailed' : '',
     ].join(' ');
     const ch = META.chars[p.char];
-    return `<div class="player ${cls}" data-player="${esc(p.name)}">
+    return `<div class="player ${cls}" data-player="${esc(p.name)}">${jailBarsHTML(p)}
       <div class="pname"><span class="dot ${ROOM.online.includes(p.name) ? 'on' : ''}"></span>${esc(p.name)} ${roleBadge(p)}</div>
       <span class="pchar" title="${esc(ch.desc)}">${esc(p.char)}</span>
       <div class="hp">${p.alive ? hpHTML(p) : '☠️ Đã chết'}</div>
@@ -435,8 +446,8 @@ function renderGame() {
     const role = META.roles[meP.role];
     const playableIds = new Set(g.me.hand.filter((c) => isClickable(c, g, meP)).map((c) => c.id));
     meHTML = `
-      <div class="me ${myTurn ? 'turn' : ''} ${!meP.alive ? 'dead' : ''}">
-        <div class="me-head">
+      <div class="me ${myTurn ? 'turn' : ''} ${!meP.alive ? 'dead' : ''} ${meP.jailed ? 'jailed' : ''}">
+        <div class="me-head">${jailBarsHTML(meP)}
           <div class="idcard"><span class="role ${meP.role}" style="margin:0">${ROLE_VI[meP.role]}</span> <b>Vai trò của bạn (bí mật)</b>
             <div style="margin-top:4px">${esc(role.goal)}</div></div>
           <div class="idcard"><b>${esc(meP.char)}</b> — ${esc(ch.desc)}</div>
