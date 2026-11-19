@@ -108,7 +108,7 @@ class Game {
       const role = roles[i];
       const char = opts.chars?.[name] || chars[i];
       const maxHp = CHAR_INFO[char].hp + (role === 'Sheriff' ? 1 : 0);
-      return { name, role, char, maxHp, hp: maxHp, hand: [], eq: [], alive: true };
+      return { name, role, char, maxHp, hp: maxHp, hand: [], eq: [], alive: true, jailed: 0 };
     });
     this.deck = shuffle(buildDeck(), this.rng);
     this.discard = [];
@@ -196,6 +196,7 @@ class Game {
     const pi = this.turn, p = this.players[pi];
     this.bangsPlayed = 0;
     this.phase = 'start';
+    p.jailed = 0; // hết vòng bị giam (nếu có)
     this.addLog(`— Lượt của ${p.name} —`);
 
     const dyn = p.eq.find((c) => c.name === 'Dynamite');
@@ -221,6 +222,7 @@ class Game {
       p.eq.splice(p.eq.indexOf(jail), 1);
       this.toDiscard(jail);
       if (!free) {
+        p.jailed = this.turnNumber; // hiện song sắt đến lượt sau của người này
         this.addLog(`${p.name} bị giam, mất lượt.`);
         return this.nextTurn();
       }
@@ -651,6 +653,7 @@ class Game {
         role: (p.role === 'Sheriff' || !p.alive || i === me || this.winner) ? p.role : null,
         distance: meAlive && p.alive ? this.distance(me, i) : null,
         winner: this.isWinner(p),
+        jailed: p.alive && !this.winner ? (p.jailed || 0) : 0,
       })),
       me: me >= 0 ? { index: me, hand: this.players[me].hand, range: this.range(this.players[me]), unlimitedBang: this.unlimitedBang(this.players[me]) } : null,
       turn: this.turn, phase: this.phase, bangsPlayed: this.bangsPlayed,

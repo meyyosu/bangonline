@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "bang-server",
+      "runtimeExecutable": "node\\node.exe",
+      "runtimeArgs": ["server.js"],
+      "port": 3000
+    }
+  ]
+}
