@@ -34,6 +34,8 @@ Cách chơi: mỗi người tự đăng ký tài khoản → chủ phòng bấm 
 
 - Đăng ký/đăng nhập (mật khẩu được băm bằng scrypt, lưu trong `data/users.json`)
 - Sảnh xem các phòng đang mở; vào phòng bằng mã hoặc link; chủ phòng có thể mời người khác ra
+- Cài đặt tại lúc tạo phòng hoặc trong phòng chờ: chủ phòng đặt, đổi, xóa mật khẩu; người vào bằng mã/link cũng phải nhập mật khẩu (thành viên quay lại không cần nhập lại).
+- Timer mỗi lượt: mặc định tắt (0), có thể đặt 10–600 giây. Hết giờ tự bỏ các lá đầu tay cho đủ giới hạn máu rồi kết thúc lượt. Khi chờ phản hồi, timer lượt tạm dừng; mỗi bước phản hồi có cùng thời lượng riêng. Hết giờ phản hồi sẽ tự chịu đòn, rút từ bộ bài hoặc chọn các lá đầu tiên. Timer tiếp tục chạy khi mất kết nối.
 - Cập nhật thời gian thực (Server-Sent Events); tải lại trang hay mất mạng thì vẫn vào lại được ván đang chơi
 - Chat trong phòng, nhật ký diễn biến ván đấu, chấm xanh báo ai đang online
 - Đủ luật bản gốc: 80 lá bài, 16 nhân vật với kỹ năng riêng, 4 vai trò, khoảng cách và tầm súng, Dynamite, Jail, Barrel, General Store, Duel, Indians, Gatling, phần thưởng khi hạ Outlaw và hình phạt khi Sheriff giết Deputy
@@ -58,4 +60,4 @@ data/            Tự tạo khi chạy: users.json, sessions.json
 
 ## Phát triển tiếp
 
-Một vài ý tưởng: cho chọn nhân vật, đặt giới hạn thời gian mỗi lượt, thêm bản mở rộng (Dodge City…), thêm hiệu ứng âm thanh, lưu phòng vào file để không mất khi khởi động lại.
+Một vài ý tưởng: cho chọn nhân vật, thêm bản mở rộng (Dodge City…), thêm hiệu ứng âm thanh, lưu phòng vào file để không mất khi khởi động lại.

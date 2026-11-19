@@ -17,7 +17,7 @@ async function api(path, body) {
     body: body === undefined ? undefined : JSON.stringify(body),
   });
   const j = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(j.error || 'Có lỗi xảy ra.');
+  if (!res.ok) { const e = new Error(j.error || 'Có lỗi xảy ra.'); e.passwordRequired = j.passwordRequired; throw e; }
   return j;
 }
 function toast(msg, ok = false) {
@@ -71,10 +71,49 @@ async function afterLogin() {
   const hashCode = location.hash.slice(1).toUpperCase();
   if (me.room) return enterRoom(me.room);
   if (hashCode) {
-    try { await api(`/api/rooms/${hashCode}/join`, {}); return enterRoom(hashCode); }
+    try { if (await joinRoom(hashCode)) return; }
     catch (e) { toast(e.message); history.replaceState(null, '', '/'); }
   }
   showLobby();
+}
+
+function askRoomPassword(code) {
+  return new Promise((resolve) => {
+    const dialog = document.createElement('dialog');
+    dialog.className = 'panel password-dialog';
+    dialog.innerHTML = `<form><h2>Vào phòng ${esc(code)}</h2><label for="joinPassword">Mật khẩu phòng</label>
+      <input id="joinPassword" type="password" maxlength="64" autocomplete="off" required>
+      <div class="row" style="margin-top:16px"><button class="btn">Tham gia</button><button type="button" class="btn secondary">Hủy</button></div></form>`;
+    const done = (value) => { dialog.remove(); resolve(value); };
+    dialog.querySelector('form').onsubmit = (e) => { e.preventDefault(); done(dialog.querySelector('input').value); };
+    dialog.querySelector('[type=button]').onclick = () => done(null);
+    dialog.oncancel = (e) => { e.preventDefault(); done(null); };
+    document.body.appendChild(dialog);
+    dialog.showModal();
+    dialog.querySelector('input').focus();
+  });
+}
+
+async function joinRoom(code) {
+  let password;
+  for (;;) {
+    try {
+      await api(`/api/rooms/${code}/join`, { password });
+      enterRoom(code);
+      return true;
+    } catch (e) {
+      if (!e.passwordRequired) throw e;
+      if (password !== undefined) toast(e.message);
+      password = await askRoomPassword(code);
+      if (password === null) return false;
+    }
+  }
+}
+
+function timerField(value = 0) {
+  return `<label for="turnSeconds">Thời gian mỗi lượt (giây)</label>
+    <input id="turnSeconds" type="number" name="turnSeconds" min="0" max="600" step="1" value="${esc(value)}" required>
+    <p class="muted">0 = tắt; từ 10–600 giây. Tạm dừng lượt khi chờ phản hồi; mỗi phản hồi có timer riêng cùng thời lượng.</p>`;
 }
 
 // ---------- sảnh ----------
@@ -88,6 +127,8 @@ function showLobby() {
         <h2>Tạo phòng</h2>
         <form id="createForm">
           <label>Tên phòng</label><input type="text" name="name" placeholder="Phòng của ${esc(ME)}" maxlength="40">
+          <label for="createPassword">Mật khẩu phòng (không bắt buộc)</label><input id="createPassword" type="password" name="password" maxlength="64" autocomplete="new-password">
+          ${timerField()}
           <button class="btn" style="width:100%;margin-top:10px">🎲 Tạo phòng mới</button>
         </form>
         <h2 style="margin-top:22px">Vào bằng mã</h2>
@@ -104,14 +145,14 @@ function showLobby() {
     </div>`;
   $('#createForm').onsubmit = run(async (e) => {
     e.preventDefault();
-    const r = await api('/api/rooms', { name: new FormData(e.target).get('name') });
+    const f = new FormData(e.target);
+    const r = await api('/api/rooms', { name: f.get('name'), password: f.get('password'), turnSeconds: Number(f.get('turnSeconds')) });
     enterRoom(r.code);
   });
   $('#joinForm').onsubmit = run(async (e) => {
     e.preventDefault();
     const code = String(new FormData(e.target).get('code')).trim().toUpperCase();
-    await api(`/api/rooms/${code}/join`, {});
-    enterRoom(code);
+    await joinRoom(code);
   });
   lobbyES = new EventSource('/api/lobby/stream');
   lobbyES.onmessage = (ev) => {
@@ -123,8 +164,8 @@ function showLobby() {
     list.innerHTML = d.rooms.map((r) => `
       <div class="room-item">
         <div>
-          <div><b>${esc(r.name)}</b> <span class="code">${r.code}</span></div>
-          <div class="muted">Chủ phòng: ${esc(r.host)} · ${r.players.length}/7 người</div>
+          <div><b>${esc(r.name)}</b> <span class="code">${r.code}</span> ${r.hasPassword ? '🔒' : ''}</div>
+          <div class="muted">Chủ phòng: ${esc(r.host)} · ${r.players.length}/7 người · ${r.turnSeconds ? r.turnSeconds + ' giây/lượt' : 'Không giới hạn giờ'}</div>
         </div>
         <div class="row">
           <span class="badge ${r.status}">${r.status === 'waiting' ? 'Đang chờ' : r.status === 'playing' ? 'Đang chơi' : 'Đã xong'}</span>
@@ -133,8 +174,7 @@ function showLobby() {
         </div>
       </div>`).join('');
     list.querySelectorAll('[data-join]').forEach((b) => b.onclick = run(async () => {
-      await api(`/api/rooms/${b.dataset.join}/join`, {});
-      enterRoom(b.dataset.join);
+      await joinRoom(b.dataset.join);
     }));
   };
 }
@@ -143,6 +183,7 @@ function showLobby() {
 function enterRoom(code) {
   closeStreams();
   ui.mode = null; ui.selected = []; ui.lastLogLen = 0;
+  ui.settingsDraft = null;
   history.replaceState(null, '', '#' + code);
   app.innerHTML = `
     <div class="room">
@@ -150,6 +191,7 @@ function enterRoom(code) {
         <div class="row"><h2 id="roomName"></h2><span class="code">${code}</span>
           <button class="btn ghost small" id="copyLink">📋 Copy link mời</button></div>
         <div class="row" id="roomBtns"></div>
+        <div id="turnClock" role="timer"></div>
       </div>
       <div id="mainArea"></div>
       <div class="side">
@@ -178,6 +220,7 @@ function enterRoom(code) {
     if (d.type !== 'room') return;
     if (!d.room.players.includes(ME)) { toast('Bạn không còn ở trong phòng.'); return showLobby(); }
     ROOM = d.room;
+    ui.serverOffset = ROOM.serverNow - Date.now();
     renderRoom();
   };
   roomES.onerror = () => { if (roomES && roomES.readyState === EventSource.CLOSED) showLobby(); };
@@ -186,6 +229,7 @@ function enterRoom(code) {
 function renderRoom() {
   const r = ROOM;
   $('#roomName').textContent = r.name;
+  updateClock();
   const btns = $('#roomBtns');
   const isHost = r.host === ME;
   const g = r.game;
@@ -219,6 +263,17 @@ function renderWaiting() {
           <b>${esc(p)}</b> ${p === r.host ? '👑' : ''} ${p === ME ? '<span class="muted">(bạn)</span>' : ''}
           ${isHost && p !== ME ? `<button class="btn small secondary" style="margin-left:auto" data-kick="${esc(p)}">Mời ra</button>` : ''}</li>`).join('')}
       </ul>
+      <div class="room-settings">
+        <h3>Cài đặt phòng</h3>
+        <p>${r.hasPassword ? '🔒 Có mật khẩu' : '🔓 Không có mật khẩu'} · ${r.turnSeconds ? r.turnSeconds + ' giây/lượt' : 'Không giới hạn thời gian'}</p>
+        ${isHost ? `<form id="settingsForm">
+          ${timerField(ui.settingsDraft?.turnSeconds ?? r.turnSeconds)}
+          <label for="roomPassword">Mật khẩu mới (để trống để giữ nguyên)</label>
+          <input id="roomPassword" type="password" name="password" maxlength="64" autocomplete="new-password" value="${esc(ui.settingsDraft?.password || '')}">
+          <label><input type="checkbox" name="removePassword" ${ui.settingsDraft?.removePassword ? 'checked' : ''}> Xóa mật khẩu phòng</label>
+          <button class="btn small blue">Lưu cài đặt</button>
+        </form>` : '<p class="muted">Chủ phòng có thể đổi cài đặt trước khi bắt đầu.</p>'}
+      </div>
       <div class="row" style="margin-top:16px">
         ${isHost ? `<button class="btn" id="startBtn" ${n < 4 ? 'disabled' : ''}>🔫 Bắt đầu ván</button>` : '<span class="muted">Chờ chủ phòng bắt đầu…</span>'}
         ${n < 4 ? `<span class="muted">Cần thêm ${4 - n} người nữa.</span>` : ''}
@@ -234,8 +289,39 @@ function renderWaiting() {
       </div>
     </div>`;
   $('#startBtn') && ($('#startBtn').onclick = run(() => api(`/api/rooms/${r.code}/start`, {})));
+  const settings = $('#settingsForm');
+  if (settings) {
+    settings.oninput = () => {
+      const f = new FormData(settings);
+      ui.settingsDraft = { turnSeconds: f.get('turnSeconds'), password: f.get('password'), removePassword: f.has('removePassword') };
+    };
+    settings.onsubmit = run(async (e) => {
+      e.preventDefault();
+      const f = new FormData(settings);
+      const body = { turnSeconds: Number(f.get('turnSeconds')) };
+      if (f.has('removePassword')) body.password = '';
+      else if (f.get('password')) body.password = f.get('password');
+      await api(`/api/rooms/${r.code}/settings`, body);
+      ui.settingsDraft = null;
+      if (ROOM && !ROOM.game) renderWaiting();
+      toast('Đã lưu cài đặt phòng.', true);
+    });
+  }
   document.querySelectorAll('[data-kick]').forEach((b) => b.onclick = run(() => api(`/api/rooms/${r.code}/kick`, { player: b.dataset.kick })));
 }
+
+function updateClock() {
+  const el = $('#turnClock');
+  if (!el) return;
+  const t = ROOM?.timer;
+  el.hidden = !t;
+  if (!t) return;
+  const seconds = Math.max(0, Math.ceil((t.deadline - Date.now() - (ui.serverOffset || 0)) / 1000));
+  const name = ROOM.game.players[t.player].name;
+  el.textContent = `⏱ ${name} · ${t.response ? 'Phản hồi' : 'Lượt chơi'}: ${seconds}s`;
+  el.classList.toggle('urgent', seconds <= 10);
+}
+setInterval(updateClock, 250);
 
 // ---------- bàn chơi ----------
 const cardInfo = (c) => META.cards[c.name];
