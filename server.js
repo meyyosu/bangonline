@@ -126,7 +126,7 @@ function serveStatic(req, res, pathname) {
         res.writeHead(200, { 'Content-Type': MIME['.html'] }); res.end(d2);
       });
     }
-    res.writeHead(200, { 'Content-Type': MIME[path.extname(file)] || 'application/octet-stream' });
+    res.writeHead(200, { 'Content-Type': MIME[path.extname(file)] || 'application/octet-stream', 'Cache-Control': 'no-cache' });
     res.end(data);
   });
 }
