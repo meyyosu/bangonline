@@ -437,7 +437,7 @@ function renderGame() {
     meHTML = `
       <div class="me ${myTurn ? 'turn' : ''} ${!meP.alive ? 'dead' : ''}">
         <div class="me-head">
-          <div class="idcard"><span class="role ${meP.role}" style="margin:0">${ROLE_VI[meP.role]}</span> <b>Vai trò của bạn (bí mật)</b>
+          <div class="idcard"><span class="role ${meP.role}" style="margin:0">${ROLE_VI[meP.role]}</span> <b>Vai trò của bạn${meP.role === 'Sheriff' ? '' : ' (bí mật)'}</b>
             <div style="margin-top:4px">${esc(role.goal)}</div></div>
           <div class="idcard"><b>${esc(meP.char)}</b> — ${esc(ch.desc)}</div>
           <div class="idcard"><div class="hp" style="margin:0">${meP.alive ? hpHTML(meP) : '☠️ Bạn đã chết'}</div>
