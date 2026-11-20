@@ -9,6 +9,76 @@ let META = null, ME = null, ROOM = null;
 let lobbyES = null, roomES = null;
 const ui = { mode: null, selected: [], lastLogLen: 0, drawTarget: null };
 
+// ---------- tooltip bám chuột ----------
+function tooltipAttrs(title, description) {
+  return `data-tooltip-title="${esc(title)}" data-tooltip="${esc(description)}"`;
+}
+
+function initTooltips() {
+  const tooltip = document.createElement('div');
+  tooltip.id = 'gameTooltip';
+  tooltip.className = 'game-tooltip';
+  tooltip.setAttribute('role', 'tooltip');
+  tooltip.hidden = true;
+  const heading = document.createElement('strong');
+  const description = document.createElement('div');
+  tooltip.append(heading, description);
+  document.body.appendChild(tooltip);
+
+  let active = null, pointer = null;
+  function hide() {
+    active?.removeAttribute('aria-describedby');
+    active = null;
+    tooltip.hidden = true;
+  }
+  function update(target) {
+    const source = target?.closest?.('[data-tooltip]');
+    if (!source || !pointer) { hide(); return; }
+    if (active !== source) {
+      hide();
+      active = source;
+      source.setAttribute('aria-describedby', tooltip.id);
+    }
+    heading.textContent = source.dataset.tooltipTitle || '';
+    heading.hidden = !heading.textContent;
+    description.textContent = source.dataset.tooltip;
+    tooltip.hidden = false;
+
+    const { width, height } = tooltip.getBoundingClientRect();
+    const gap = 16, edge = 8;
+    let x = pointer.x + gap, y = pointer.y + gap;
+    if (x + width > window.innerWidth - edge) x = pointer.x - width - gap;
+    if (y + height > window.innerHeight - edge) y = pointer.y - height - gap;
+    tooltip.style.left = `${Math.max(edge, Math.min(x, window.innerWidth - width - edge))}px`;
+    tooltip.style.top = `${Math.max(edge, Math.min(y, window.innerHeight - height - edge))}px`;
+  }
+  function track(event) {
+    if (event.pointerType === 'touch') return;
+    pointer = { x: event.clientX, y: event.clientY };
+    update(event.target);
+  }
+  document.addEventListener('pointerover', track);
+  document.addEventListener('pointermove', track);
+  document.addEventListener('pointerout', (event) => {
+    if (event.pointerType === 'touch') return;
+    if (!event.relatedTarget) pointer = null;
+    update(event.relatedTarget);
+  });
+  document.addEventListener('pointercancel', () => { pointer = null; hide(); });
+  window.addEventListener('blur', () => { pointer = null; hide(); });
+  document.addEventListener('visibilitychange', () => { if (document.hidden) { pointer = null; hide(); } });
+  document.addEventListener('keydown', (event) => { if (event.key === 'Escape') hide(); });
+  const refresh = () => { if (pointer) update(document.elementFromPoint(pointer.x, pointer.y)); };
+  document.addEventListener('scroll', refresh, true);
+  window.addEventListener('resize', refresh);
+  // SSE và thao tác chọn bài thay DOM: kiểm tra lại vùng hover dù chuột đứng yên.
+  const observer = new MutationObserver(refresh);
+  observer.observe(app, { childList: true, subtree: true });
+  observer.observe($('#modal'), { childList: true, subtree: true, attributes: true, attributeFilter: ['class'] });
+}
+
+initTooltips();
+
 // ---------- tiện ích ----------
 async function api(path, body) {
   const res = await fetch(path, {
@@ -328,14 +398,14 @@ const cardInfo = (c) => META.cards[c.name];
 function cardHTML(c, cls = '') {
   const info = cardInfo(c);
   const red = c.suit === 'H' || c.suit === 'D';
-  return `<div class="card ${info.type} ${cls}" data-card="${c.id}" title="${esc(c.name + ': ' + info.desc)}">
+  return `<div class="card ${info.type} ${cls}" data-card="${c.id}" ${tooltipAttrs(c.name, info.desc)}>
     <div class="corner ${red ? 'red' : ''}">${c.rank}${SUIT[c.suit]}</div>
     <div class="icon">${info.icon}</div><div class="cname">${esc(c.name)}</div>
     ${info.range ? `<div class="range">tầm ${info.range}</div>` : ''}</div>`;
 }
 function chipHTML(c, cls = '') {
   const info = cardInfo(c);
-  return `<span class="chip ${info.type === 'gun' ? 'gun' : ''} ${cls}" data-eq="${c.id}" title="${esc(info.desc)}">${info.icon} ${esc(c.name)}</span>`;
+  return `<span class="chip ${info.type === 'gun' ? 'gun' : ''} ${cls}" data-eq="${c.id}" ${tooltipAttrs(c.name, info.desc)}>${info.icon} ${esc(c.name)}</span>`;
 }
 function hpHTML(p) {
   let s = '';
@@ -343,7 +413,7 @@ function hpHTML(p) {
   return s;
 }
 function roleBadge(p) {
-  return p.role ? `<span class="role ${p.role}" title="${esc(META.roles[p.role].goal)}">${ROLE_VI[p.role]}</span>` : '<span class="role unknown">?</span>';
+  return p.role ? `<span class="role ${p.role}" ${tooltipAttrs(ROLE_VI[p.role], META.roles[p.role].goal)}>${ROLE_VI[p.role]}</span>` : `<span class="role unknown" ${tooltipAttrs('Vai trò bí mật', 'Vai trò của người chơi này chưa được tiết lộ.')}>?</span>`;
 }
 // Song sắt phủ lên người vừa rút Jail thất bại; hiệu ứng sập xuống chỉ chạy lần đầu thấy
 const jailSeen = new Set();
@@ -353,7 +423,7 @@ function jailBarsHTML(p) {
   const slam = !jailSeen.has(key);
   jailSeen.add(key);
   return `<div class="jail-bars ${slam ? 'slam' : ''}" aria-hidden="true"></div>
-    <div class="jail-tag" title="Rút Jail không ra ♥ nên mất lượt; song sắt mở khi tới lượt kế tiếp">⛓️ Bị giam · mất lượt</div>`;
+    <div class="jail-tag" ${tooltipAttrs('Bị giam', 'Rút Jail không ra ♥ nên mất lượt; song sắt mở khi tới lượt kế tiếp.')}>⛓️ Bị giam · mất lượt</div>`;
 }
 
 function effectiveName(c, me) {
@@ -422,10 +492,10 @@ function renderGame() {
     const ch = META.chars[p.char];
     return `<div class="player ${cls}" data-player="${esc(p.name)}">${jailBarsHTML(p)}
       <div class="pname"><span class="dot ${ROOM.online.includes(p.name) ? 'on' : ''}"></span>${esc(p.name)} ${roleBadge(p)}</div>
-      <span class="pchar" title="${esc(ch.desc)}">${esc(p.char)}</span>
+      <span class="pchar" ${tooltipAttrs(p.char, ch.desc)}>${esc(p.char)}</span>
       <div class="hp">${p.alive ? hpHTML(p) : '☠️ Đã chết'}</div>
-      <div class="pstats"><span title="Số lá trên tay">🂠 ${p.handCount}</span>
-        ${p.distance != null ? `<span title="Khoảng cách từ bạn">📏 ${p.distance}</span>` : ''}
+      <div class="pstats"><span ${tooltipAttrs('Bài trên tay', 'Số lá bài người chơi đang giữ trên tay.')}>🂠 ${p.handCount}</span>
+        ${p.distance != null ? `<span ${tooltipAttrs('Khoảng cách từ bạn', 'Khoảng cách để kiểm tra mục tiêu có nằm trong tầm của thẻ bài hay không.')}>📏 ${p.distance}</span>` : ''}
         ${g.turn === i && !g.winner ? '<b style="color:#b5332a">⭐ Đang chơi</b>' : ''}</div>
       <div class="eq">${p.eq.map((c) => chipHTML(c)).join('')}</div>
     </div>`;
@@ -448,9 +518,9 @@ function renderGame() {
     meHTML = `
       <div class="me ${myTurn ? 'turn' : ''} ${!meP.alive ? 'dead' : ''} ${meP.jailed ? 'jailed' : ''}">
         <div class="me-head">${jailBarsHTML(meP)}
-          <div class="idcard"><span class="role ${meP.role}" style="margin:0">${ROLE_VI[meP.role]}</span> <b>Vai trò của bạn (bí mật)</b>
+          <div class="idcard" ${tooltipAttrs(ROLE_VI[meP.role], role.goal)}><span class="role ${meP.role}" style="margin:0">${ROLE_VI[meP.role]}</span> <b>Vai trò của bạn (bí mật)</b>
             <div style="margin-top:4px">${esc(role.goal)}</div></div>
-          <div class="idcard"><b>${esc(meP.char)}</b> — ${esc(ch.desc)}</div>
+          <div class="idcard" ${tooltipAttrs(meP.char, ch.desc)}><b>${esc(meP.char)}</b> — ${esc(ch.desc)}</div>
           <div class="idcard"><div class="hp" style="margin:0">${meP.alive ? hpHTML(meP) : '☠️ Bạn đã chết'}</div>
             <div class="muted">Tầm bắn: ${g.me.range}${g.me.unlimitedBang ? ' · Bang! không giới hạn' : ''}</div></div>
         </div>
@@ -670,7 +740,7 @@ function chooseTargetCard(card, p) {
   modal.innerHTML = `<div class="panel"><h3>${esc(card.name)}: chọn lá của ${esc(p.name)}</h3>
     <div class="row">
       ${p.handCount ? `<button class="btn" data-tc="hand">🂠 1 lá ngẫu nhiên trên tay (${p.handCount})</button>` : ''}
-      ${p.eq.map((c) => `<button class="btn blue" data-tc="${c.id}">${cardInfo(c).icon} ${esc(c.name)}</button>`).join('')}
+      ${p.eq.map((c) => `<button class="btn blue" data-tc="${c.id}" ${tooltipAttrs(c.name, cardInfo(c).desc)}>${cardInfo(c).icon} ${esc(c.name)}</button>`).join('')}
     </div>
     <div class="row" style="margin-top:14px"><button class="btn secondary small" data-tc="cancel">Huỷ</button></div></div>`;
   modal.classList.remove('hidden');

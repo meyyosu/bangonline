@@ -173,6 +173,26 @@ label { font-weight: 600; font-size: 14px; display: block; margin: 10px 0 4px; }
 .card.small .icon { font-size: 22px; }
 
 /* ---------- modal & toast ---------- */
+.game-tooltip {
+  position: fixed;
+  z-index: 100;
+  pointer-events: none;
+  width: max-content;
+  max-width: min(320px, calc(100vw - 16px));
+  max-height: calc(100vh - 16px);
+  overflow: hidden;
+  padding: 10px 14px;
+  border: 1px solid var(--gold);
+  border-radius: 8px;
+  background: var(--wood);
+  color: var(--paper);
+  box-shadow: 0 5px 18px rgba(0,0,0,.4);
+  font-size: 13px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+.game-tooltip strong { display: block; margin-bottom: 4px; color: var(--gold); }
+.game-tooltip[hidden], .game-tooltip strong[hidden] { display: none; }
 .modal { position: fixed; inset: 0; background: rgba(0,0,0,.6); display: flex; align-items: center; justify-content: center; z-index: 50; }
 .modal .panel { max-width: 520px; width: 92%; }
 #toasts { position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%); display: flex; flex-direction: column; gap: 8px; z-index: 60; }
