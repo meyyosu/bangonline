@@ -104,12 +104,7 @@ class Game {
     const roles = shuffle([...ROLE_SETS[names.length]], this.rng);
     const chars = shuffle(Object.keys(CHAR_INFO), this.rng);
     const order = shuffle([...names], this.rng);
-    this.players = order.map((name, i) => {
-      const role = roles[i];
-      const char = opts.chars?.[name] || chars[i];
-      const maxHp = CHAR_INFO[char].hp + (role === 'Sheriff' ? 1 : 0);
-      return { name, role, char, maxHp, hp: maxHp, hand: [], eq: [], alive: true, jailed: 0 };
-    });
+    this.players = order.map((name, i) => ({ name, role: roles[i], char: null, maxHp: 0, hp: 0, hand: [], eq: [], alive: true, jailed: 0 }));
     this.deck = shuffle(buildDeck(), this.rng);
     this.discard = [];
     this.log = [];
@@ -117,11 +112,43 @@ class Game {
     this.pending = null;
     this.winner = null;
     this.bangsPlayed = 0;
+    this.turn = this.players.findIndex((p) => p.role === 'Sheriff');
+
+    // Mỗi người rút X lá nhân vật để chọn 1; 16 nhân vật nên X tự giảm khi đông người. X = 1 hoặc opts.chars: chia thẳng.
+    const x = Math.min(Math.max(1, Number(opts.charChoices) || 1), Math.floor(chars.length / names.length));
+    if (opts.chars || x <= 1) {
+      this.players.forEach((p, i) => this.setChar(p, opts.chars?.[p.name] || chars[i]));
+      return this.beginGame();
+    }
+    this.phase = 'choose';
+    this.charChoices = x;
+    this.players.forEach((p, i) => { p.choices = chars.slice(i * x, (i + 1) * x); });
+    this.addLog(`Vai trò đã chia! Sheriff là ${this.players[this.turn].name}. Mỗi người chọn 1 trong ${x} nhân vật.`);
+  }
+
+  setChar(p, char) {
+    p.char = char;
+    p.maxHp = p.hp = CHAR_INFO[char].hp + (p.role === 'Sheriff' ? 1 : 0);
+  }
+
+  // Mọi người đã có nhân vật: chia bài theo máu và bắt đầu lượt của Sheriff
+  beginGame() {
+    for (const p of this.players) { delete p.choices; delete p.picked; }
     this.phase = 'start';
     for (const p of this.players) p.hand.push(...this.draw(p.hp));
-    this.turn = this.players.findIndex((p) => p.role === 'Sheriff');
     this.addLog(`Ván đấu bắt đầu! Sheriff là ${this.players[this.turn].name}.`);
+    for (const p of this.players) this.addLog(`${p.name} chơi ${p.char}.`);
     this.startTurn();
+  }
+
+  chooseChar(p, char) {
+    if (!p.choices?.includes(char)) fail('Hãy chọn một trong các nhân vật được chia.');
+    if (p.picked) fail('Bạn đã chọn nhân vật rồi.');
+    p.picked = char;
+    if (this.players.every((q) => q.picked)) {
+      for (const q of this.players) this.setChar(q, q.picked);
+      this.beginGame();
+    }
   }
 
   // ---------- tiện ích ----------
@@ -179,14 +206,20 @@ class Game {
     to.hand.push(c);
     return c;
   }
-  // "Rút kiểm tra" (Draw!)
+  // "Rút kiểm tra" (Draw!). Kết quả lần rút gần nhất lưu ở lastCheck để giao diện lật bài cho mọi người xem.
   check(p, success, label) {
     const cards = this.draw(p.char === 'Lucky Duke' ? 2 : 1);
     const chosen = cards.find(success) || cards[0];
     this.toDiscard(...cards);
     const ok = !!chosen && success(chosen);
     this.addLog(`${p.name} rút kiểm tra (${label}): ${cards.map(cardStr).join(', ')} → ${ok ? 'thành công' : 'thất bại'}.`);
+    this.checkSeq = (this.checkSeq || 0) + 1;
+    this.lastCheck = { seq: this.checkSeq, player: this.idx(p.name), kind: label, cards, chosen: chosen ? chosen.id : null, ok };
     return ok;
+  }
+  // Chờ người chơi tự bấm rút kiểm tra; resume = pending 'bang' cần quay lại sau khi rút Barrel
+  askCheck(pi, kind, resume = null) {
+    this.pending = { type: 'check', player: pi, kind, resume };
   }
 
   // ---------- lượt chơi ----------
@@ -196,12 +229,24 @@ class Game {
     const pi = this.turn, p = this.players[pi];
     this.bangsPlayed = 0;
     this.phase = 'start';
-    p.jailed = 0; // hết vòng bị giam (nếu có)
     this.addLog(`— Lượt của ${p.name} —`);
+    this.continueTurnStart();
+  }
 
-    const dyn = p.eq.find((c) => c.name === 'Dynamite');
-    if (dyn) {
+  // Đầu lượt: lần lượt chờ rút kiểm tra Dynamite rồi Jail, sau đó mới tới bước rút bài
+  continueTurnStart() {
+    const pi = this.turn, p = this.players[pi];
+    if (p.eq.some((c) => c.name === 'Dynamite')) return this.askCheck(pi, 'Dynamite');
+    if (p.eq.some((c) => c.name === 'Jail')) return this.askCheck(pi, 'Jail');
+    this.beginDraw();
+  }
+
+  resolveCheck(pi, p, pend) {
+    if (pend.kind !== 'Barrel' && !p.eq.some((c) => c.name === pend.kind)) { this.pending = null; return this.continueTurnStart(); }
+    if (pend.kind === 'Dynamite') {
+      const dyn = p.eq.find((c) => c.name === 'Dynamite');
       const safe = this.check(p, (c) => !(c.suit === 'S' && rankVal(c.rank) >= 2 && rankVal(c.rank) <= 9), 'Dynamite');
+      this.pending = null;
       p.eq.splice(p.eq.indexOf(dyn), 1);
       if (!safe) {
         this.addLog(`💥 Dynamite nổ! ${p.name} mất 3 máu.`);
@@ -214,21 +259,31 @@ class Game {
         nx.eq.push(dyn);
         this.addLog(`Dynamite được chuyền sang ${nx.name}.`);
       }
+      return this.continueTurnStart();
     }
-
-    const jail = p.eq.find((c) => c.name === 'Jail');
-    if (jail) {
+    if (pend.kind === 'Jail') {
+      const jail = p.eq.find((c) => c.name === 'Jail');
       const free = this.check(p, (c) => c.suit === 'H', 'Jail');
+      this.pending = null;
       p.eq.splice(p.eq.indexOf(jail), 1);
       this.toDiscard(jail);
+      p.jailed = 0; // đã rút kiểm tra: bỏ song sắt dù thoát hay không
       if (!free) {
-        p.jailed = this.turnNumber; // hiện song sắt đến lượt sau của người này
         this.addLog(`${p.name} bị giam, mất lượt.`);
         return this.nextTurn();
       }
       this.addLog(`${p.name} thoát khỏi nhà tù!`);
+      return this.continueTurnStart();
     }
+    // Barrel: rút xong thì quay lại phát Bang! đang chờ
+    const bang = pend.resume;
+    if (this.check(p, (c) => c.suit === 'H', 'Barrel')) bang.got++;
+    if (bang.got >= bang.need) { this.addLog(`${p.name} đã né được!`); return this.nextPending(); }
+    this.pending = bang;
+  }
 
+  beginDraw() {
+    const pi = this.turn, p = this.players[pi];
     this.phase = 'draw';
     if (p.char === 'Kit Carlson') {
       this.pending = { type: 'kit', player: pi, cards: this.draw(3) };
@@ -364,6 +419,11 @@ class Game {
     const pi = this.idx(name);
     if (pi < 0) fail('Bạn không tham gia ván này.');
     const p = this.players[pi];
+    if (this.phase === 'choose') {
+      if (a.type !== 'chooseChar') fail('Hãy chọn nhân vật trước.');
+      return this.chooseChar(p, a.char);
+    }
+    if (a.type === 'chooseChar') fail('Đã qua bước chọn nhân vật.');
     if (!p.alive) fail('Bạn đã chết.');
 
     if (a.type === 'sid') {
@@ -407,11 +467,17 @@ class Game {
 
   timeout() {
     if (this.winner) return;
+    if (this.phase === 'choose') {
+      this.addLog('⏱ Hết giờ chọn nhân vật: ai chưa chọn sẽ nhận lá đầu tiên.');
+      for (const p of this.players) if (!p.picked) this.chooseChar(p, p.choices[0]);
+      return;
+    }
     const pend = this.pending;
     const p = this.players[pend ? pend.player : this.turn];
     this.addLog(`⏱ ${p.name} đã hết thời gian${pend ? ' phản hồi' : ' lượt chơi'}.`);
     if (pend) {
       let action = { type: 'take' };
+      if (pend.type === 'check') action = { type: 'checkDraw' };
       if (pend.type === 'draw') action = { type: 'drawChoice', from: 'deck' };
       if (pend.type === 'kit') action = { type: 'kit', cardIds: pend.cards.slice(0, 2).map((c) => c.id) };
       if (pend.type === 'store') action = { type: 'pick', cardId: pend.cards[0].id };
@@ -425,6 +491,10 @@ class Game {
 
   respond(pi, p, pend, a) {
     switch (pend.type) {
+      case 'check': {
+        if (a.type !== 'checkDraw') fail('Hãy bấm vào chồng bài để rút kiểm tra.');
+        return this.resolveCheck(pi, p, pend);
+      }
       case 'draw': {
         if (a.type !== 'drawChoice' || !pend.options.includes(a.from)) fail('Lựa chọn không hợp lệ.');
         if (a.from === 'player') {
@@ -476,7 +546,7 @@ class Game {
         if (a.type === 'barrel') {
           if (pend.barrels <= 0) fail('Bạn không còn Barrel để dùng.');
           pend.barrels--;
-          if (this.check(p, (c) => c.suit === 'H', 'Barrel')) pend.got++;
+          return this.askCheck(pi, 'Barrel', pend);
         } else if (a.type === 'respond') {
           const c = p.hand.find((x) => x.id === a.cardId);
           const ok = c && (c.name === 'Missed' || (c.name === 'Bang' && p.char === 'Calamity Janet'));
@@ -608,6 +678,8 @@ class Game {
           if (this.hasEq(t, 'Jail')) fail('Người này đã ở trong tù.');
         });
         use(); t.eq.push(card);
+        this.jailSeq = (this.jailSeq || 0) + 1;
+        t.jailed = this.jailSeq; // hiện song sắt từ lúc bị đặt Jail đến khi rút kiểm tra
         this.addLog(`⛓️ ${p.name} bỏ tù ${t.name}.`);
         return;
       }
@@ -645,6 +717,10 @@ class Game {
       if (pend.type === 'store') pending.cards = pend.cards;
       if (pend.type === 'draw') pending.options = pend.options;
       if (pend.type === 'kit') pending.cards = pend.player === me ? pend.cards : pend.cards.map(() => null);
+      if (pend.type === 'check') {
+        pending.kind = pend.kind;
+        if (pend.resume) Object.assign(pending, { source: pend.resume.source, need: pend.resume.need, got: pend.resume.got });
+      }
     }
     return {
       players: this.players.map((p, i) => ({
@@ -653,12 +729,20 @@ class Game {
         role: (p.role === 'Sheriff' || !p.alive || i === me || this.winner) ? p.role : null,
         distance: meAlive && p.alive ? this.distance(me, i) : null,
         winner: this.isWinner(p),
-        jailed: p.alive && !this.winner ? (p.jailed || 0) : 0,
+        // Jail có thể bị gỡ bằng Panic!/Cat Balou → chỉ hiện khi lá Jail còn trên bàn
+        jailed: p.alive && !this.winner && this.hasEq(p, 'Jail') ? (p.jailed || 1) : 0,
+        picked: this.phase === 'choose' ? !!p.picked : true, // nhân vật chỉ lộ ra khi tất cả đã chọn
       })),
-      me: me >= 0 ? { index: me, hand: this.players[me].hand, range: this.range(this.players[me]), unlimitedBang: this.unlimitedBang(this.players[me]) } : null,
+      me: me >= 0 ? {
+        index: me, hand: this.players[me].hand, range: this.range(this.players[me]), unlimitedBang: this.unlimitedBang(this.players[me]),
+        choices: this.players[me].choices || null, picked: this.players[me].picked || null,
+      } : null,
+      charChoices: this.charChoices || 1,
       turn: this.turn, phase: this.phase, bangsPlayed: this.bangsPlayed,
       deckCount: this.deck.length, discardTop: this.discard[this.discard.length - 1] || null,
+      discardRecent: this.discard.slice(-3), // [cũ nhất, ..., trên cùng]
       pending, log: this.log.slice(-60), winner: this.winner,
+      lastCheck: this.lastCheck || null, // lá rút kiểm tra gần nhất (đã công khai ở chồng bài bỏ)
     };
   }
 }

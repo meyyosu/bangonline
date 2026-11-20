@@ -67,6 +67,31 @@ test('all pending choices can time out without losing cards', () => {
   }
 });
 
+test('character choice: X distinct characters each, game starts once everyone picks', () => {
+  const g = new Game(names, { rng: () => 0.4, charChoices: 3 });
+  assert.equal(g.phase, 'choose');
+  const all = g.players.flatMap((p) => p.choices);
+  assert.equal(all.length, 12);
+  assert.equal(new Set(all).size, 12);
+  assert.equal(count(g), 80);
+  assert.throws(() => g.act(g.players[0].name, { type: 'endTurn' }));
+  assert.throws(() => g.act(g.players[0].name, { type: 'chooseChar', char: g.players[1].choices[0] }));
+  const want = g.players.map((p) => p.choices[2]);
+  g.players.slice(0, 3).forEach((p, i) => g.act(p.name, { type: 'chooseChar', char: want[i] }));
+  assert.equal(g.phase, 'choose');
+  assert.equal(g.viewFor(names[0]).players.find((p) => p.name === g.players[0].name).picked, true);
+  g.act(g.players[3].name, { type: 'chooseChar', char: want[3] });
+  assert.notEqual(g.phase, 'choose');
+  g.players.forEach((p, i) => { assert.equal(p.char, want[i]); assert.equal(p.hand.length >= p.maxHp, true); });
+  assert.equal(count(g), 80);
+  // 7 người: 16 nhân vật chỉ đủ 2 lá mỗi người; hết giờ thì tự chọn lá đầu
+  const g7 = new Game(['a1', 'b2', 'c3', 'd4', 'e5', 'f6', 'g7'], { charChoices: 3 });
+  assert.equal(g7.players[0].choices.length, 2);
+  const first = g7.players.map((p) => p.choices[0]);
+  g7.timeout();
+  assert.deepEqual(g7.players.map((p) => p.char), first);
+});
+
 test('room API protects settings and passwords, supports reconnect and games', async () => {
   // Isolate generated accounts and sessions from the user's server data.
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'bang-settings-'));
@@ -113,6 +138,8 @@ test('room API protects settings and passwords, supports reconnect and games', a
     assert.equal((await request(1, url + '/join', { password: 'room-secret' })).status, 200);
     assert.equal((await request(1, url + '/settings', { password: '' })).status, 403);
     assert.equal((await request(0, url + '/settings', { turnSeconds: 601, password: '' })).status, 400);
+    assert.equal((await request(0, url + '/settings', { charChoices: 6 })).status, 400);
+    assert.equal((await request(0, url + '/settings', { charChoices: 2 })).status, 200);
     let room = await view(0, code);
     assert.equal(room.hasPassword, true);
     assert.equal(room.turnSeconds, 10);
@@ -133,6 +160,10 @@ test('room API protects settings and passwords, supports reconnect and games', a
     assert.ok(room.timer.deadline > room.serverNow);
     assert.equal(room.chat.at(-2).text, 'hello');
     assert.ok(room.game.me.hand);
+    assert.equal(room.charChoices, 2);
+    assert.equal(room.game.phase, 'choose');
+    assert.equal(room.game.me.choices.length, 2);
+    assert.equal(room.game.players.filter((p) => p.char).length, 0, 'nhân vật chưa lộ khi đang chọn');
     assert.equal((await request(1, url + '/join', {})).status, 200);
   } finally {
     child.kill();

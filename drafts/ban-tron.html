@@ -1,0 +1,314 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Nháp bàn tròn</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Rye&family=Be+Vietnam+Pro:wght@400;600;700&display=swap" rel="stylesheet">
+<style>
+:root {
+  --wood: #2b1a10; --wood2: #3d2616; --paper: #f4e4c1; --paper2: #e9d3a3; --ink: #2a1a0e;
+  --muted: #7a5b3a; --red: #b5332a; --gold: #d9a441; --blue: #2f5d8a; --green: #3f7d3a; --radius: 10px;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; }
+body { font-family: 'Be Vietnam Pro', system-ui, sans-serif; color: var(--ink);
+  background: radial-gradient(ellipse at top, #5a3820 0%, var(--wood) 60%) fixed; min-height: 100vh; }
+button { font: inherit; }
+
+/* ---------- thanh chọn phương án ---------- */
+.picker { position: sticky; top: 0; z-index: 20; display: flex; flex-wrap: wrap; gap: 8px; align-items: center;
+  padding: 10px 16px; background: rgba(0,0,0,.55); border-bottom: 2px solid var(--gold); color: var(--paper); }
+.picker .brand { font-family: 'Rye', serif; color: var(--gold); font-size: 22px; margin-right: 10px; }
+.picker button { background: transparent; color: var(--paper); border: 1px solid rgba(244,228,193,.5);
+  border-radius: 99px; padding: 5px 12px; cursor: pointer; font-size: 14px; }
+.picker button.on { background: var(--gold); color: var(--ink); border-color: var(--gold); font-weight: 700; }
+.picker .sep { width: 1px; height: 24px; background: rgba(244,228,193,.3); margin: 0 6px; }
+.note { max-width: 1200px; margin: 12px auto 0; padding: 0 16px; color: var(--paper2); font-size: 14px; }
+.note b { color: var(--gold); }
+
+main { max-width: 1200px; margin: 0 auto; padding: 12px 16px 40px; display: grid; grid-template-columns: 1fr 280px; gap: 16px; align-items: start; }
+.side { display: flex; flex-direction: column; gap: 12px; }
+.panel { background: var(--paper); border-radius: var(--radius); padding: 12px 14px; border: 2px solid #c9a46a; }
+.panel h3 { font-family: 'Rye', serif; font-weight: normal; color: var(--red); margin: 0 0 8px; font-size: 18px; }
+.log { font-size: 13px; line-height: 1.5; height: 260px; overflow: auto; background: #fffaf0; border-radius: 8px; padding: 6px 10px; border: 1px solid #d8bd8a; }
+.log .t { color: var(--blue); font-weight: 700; }
+
+/* ---------- BÀN ---------- */
+.arena { position: relative; width: 100%; aspect-ratio: 16 / 10; margin-top: 28px; }
+.table-shape { position: absolute; inset: 9% 11%; border-radius: 50% / 50%; }
+.center { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); display: flex; gap: 14px;
+  align-items: center; width: 56%; justify-content: center; }
+.piles { display: flex; gap: 10px; }
+.pile { text-align: center; font-size: 11px; color: var(--paper); }
+.card-back { width: 58px; height: 82px; border-radius: 7px; border: 3px solid var(--gold);
+  background: repeating-linear-gradient(45deg, #7a2a1f, #7a2a1f 6px, #8e352a 6px, #8e352a 12px);
+  display: flex; align-items: center; justify-content: center; font-family: 'Rye', serif; color: var(--gold); font-size: 13px;
+  box-shadow: 2px 2px 0 #5a1d15, 4px 4px 0 #3d130e, 0 8px 14px rgba(0,0,0,.4); }
+.prompt { background: var(--paper); border-radius: 10px; padding: 8px 12px; font-size: 13px; max-width: 260px;
+  border: 3px solid var(--red); animation: glow 1.5s infinite; }
+.prompt h4 { margin: 0 0 4px; font-size: 14px; }
+.prompt .row { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 6px; }
+@keyframes glow { 0%,100% { box-shadow: 0 0 6px rgba(181,51,42,.4); } 50% { box-shadow: 0 0 18px rgba(181,51,42,.9); } }
+
+.btn { background: var(--red); color: #fff; border: none; border-radius: 7px; padding: 6px 11px; cursor: pointer; font-weight: 600; font-size: 13px; box-shadow: 0 3px 0 #6e1d17; }
+.btn.blue { background: var(--blue); box-shadow: 0 3px 0 #1c3a57; }
+.btn.secondary { background: var(--muted); box-shadow: 0 3px 0 #4a3520; }
+.btn.green { background: var(--green); box-shadow: 0 3px 0 #23481f; }
+
+.seat { position: absolute; transform: translate(-50%, -50%); z-index: 2; transition: transform .15s; }
+.seat.target { cursor: pointer; }
+.seat.target:hover { transform: translate(-50%, -50%) translateY(-4px); }
+.seat.dead { filter: grayscale(.9); opacity: .55; }
+.role { font-size: 10px; font-weight: 700; padding: 1px 6px; border-radius: 99px; color: #fff; white-space: nowrap; }
+.role.Sheriff { background: #c48a12; } .role.Deputy { background: var(--blue); }
+.role.Outlaw { background: #6b2b1d; } .role.Renegade { background: #5a4a7a; } .role.unknown { background: #999; }
+.chip { font-size: 11px; padding: 1px 6px; border-radius: 5px; background: var(--blue); color: #fff; white-space: nowrap; }
+.chip.gun { background: #5c3d1e; }
+.dist { position: absolute; font-size: 11px; font-weight: 700; padding: 1px 7px; border-radius: 99px; background: rgba(0,0,0,.65); color: var(--paper); white-space: nowrap; }
+.dist.in { background: var(--red); color: #fff; }
+.dot { width: 8px; height: 8px; border-radius: 50%; background: #3fbf3f; box-shadow: 0 0 5px #3fbf3f; display: inline-block; flex-shrink: 0; }
+.dot.off { background: #999; box-shadow: none; }
+.jailtag { font-size: 10px; background: #2c3035; color: #f3e3c3; padding: 1px 6px; border-radius: 5px; font-weight: 700; }
+
+/* ---------- tay bài ---------- */
+.mebar { margin-top: 6px; background: var(--paper); border-radius: var(--radius); padding: 12px 14px; border: 3px solid var(--gold); box-shadow: 0 0 18px rgba(217,164,65,.45); }
+.mebar .head { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; font-size: 13px; }
+.mebar .head b { font-size: 15px; }
+.hand { display: flex; gap: 8px; margin-top: 10px; flex-wrap: wrap; }
+.card { width: 78px; height: 106px; border-radius: 8px; background: #fffaf0; border: 3px solid #8b5a2b; position: relative; display: flex; flex-direction: column;
+  align-items: center; justify-content: center; text-align: center; box-shadow: 0 3px 6px rgba(0,0,0,.25); cursor: pointer; transition: transform .12s; }
+.card:hover { transform: translateY(-6px); }
+.card.sel { transform: translateY(-10px); box-shadow: 0 0 0 3px var(--red), 0 8px 14px rgba(0,0,0,.35); }
+.card.blue { border-color: var(--blue); background: #eef4fa; }
+.card .corner { position: absolute; top: 3px; left: 5px; font-size: 11px; font-weight: 700; }
+.card .corner.red { color: var(--red); }
+.card .icon { font-size: 26px; } .card .cname { font-size: 11px; font-weight: 700; margin-top: 4px; }
+.actions { display: flex; gap: 8px; margin-top: 10px; flex-wrap: wrap; align-items: center; }
+
+/* ================= A. NỈ XANH POKER ================= */
+.vA .table-shape {
+  background: radial-gradient(ellipse at 50% 40%, #2f8a4c 0%, #1d6136 55%, #123f23 100%);
+  border: 18px solid #5a3218;
+  box-shadow: inset 0 0 0 3px #c9a46a, inset 0 0 50px rgba(0,0,0,.55), 0 0 0 3px #2a160a, 0 18px 40px rgba(0,0,0,.6);
+}
+.vA .table-shape::after { content: ''; position: absolute; inset: 14%; border-radius: 50%; border: 2px dashed rgba(244,228,193,.22); }
+.vA .seat .box { background: var(--paper); border: 3px solid #c9a46a; border-radius: 10px; padding: 6px 9px; width: 168px; box-shadow: 0 6px 14px rgba(0,0,0,.45); }
+.vA .seat.turn .box { border-color: var(--gold); box-shadow: 0 0 0 3px rgba(217,164,65,.55), 0 0 22px rgba(217,164,65,.7); }
+.vA .seat.target .box { border-color: var(--red); box-shadow: 0 0 0 3px rgba(181,51,42,.45), 0 6px 14px rgba(0,0,0,.45); }
+.vA .seat.jailed .box { border-color: #4a4f55; background-image: repeating-linear-gradient(90deg, transparent 0 22px, rgba(44,48,53,.35) 22px 26px); }
+.vA .nm { font-weight: 700; font-size: 13px; display: flex; gap: 5px; align-items: center; }
+.vA .nm .role { margin-left: auto; }
+.vA .ch { font-size: 11px; color: var(--muted); }
+.vA .hp { font-size: 12px; letter-spacing: .5px; }
+.vA .hp .l { filter: grayscale(1); opacity: .3; }
+.vA .st { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; font-size: 11px; color: var(--muted); margin-top: 2px; }
+.vA .dist { left: 50%; transform: translateX(-50%); top: -12px; }
+
+/* ================= B. BÀN GỖ SALOON + AVATAR TRÒN ================= */
+.vB .table-shape {
+  background:
+    radial-gradient(ellipse at 50% 45%, rgba(255,220,160,.18), transparent 60%),
+    repeating-radial-gradient(ellipse at 50% 50%, #6b4021 0 6px, #5e3819 6px 11px, #734623 11px 15px);
+  border: 14px solid #2a160a;
+  box-shadow: inset 0 0 0 4px #8b5a2b, inset 0 0 60px rgba(0,0,0,.6), 0 0 0 4px var(--gold), 0 20px 40px rgba(0,0,0,.65);
+}
+.vB .table-shape::after { content: ''; position: absolute; inset: 22% 26%; border-radius: 50%; background: radial-gradient(ellipse, #7a2a1f 0%, #5b1f17 70%); border: 3px solid var(--gold); opacity: .85; }
+.vB .center { z-index: 1; }
+.vB .seat { display: flex; flex-direction: column; align-items: center; gap: 3px; width: 150px; }
+.vB .av { position: relative; width: 70px; height: 70px; border-radius: 50%; display: grid; place-items: center; font-size: 32px;
+  background: radial-gradient(circle at 35% 30%, #fff4d8, #d9b97f); border: 3px solid #2a160a;
+  box-shadow: 0 0 0 4px var(--hpc, #3f7d3a), 0 6px 14px rgba(0,0,0,.5); }
+.vB .av .role { position: absolute; bottom: -8px; left: 50%; transform: translateX(-50%); }
+.vB .av .hand-n { position: absolute; top: -6px; right: -14px; background: #fffaf0; border: 2px solid #8b5a2b; border-radius: 5px; font-size: 11px; font-weight: 700; padding: 0 5px; }
+.vB .seat.turn .av { box-shadow: 0 0 0 4px var(--hpc), 0 0 0 8px var(--gold), 0 0 26px rgba(217,164,65,.9); }
+.vB .seat.target .av { box-shadow: 0 0 0 4px var(--hpc), 0 0 0 8px var(--red), 0 0 20px rgba(181,51,42,.8); }
+.vB .seat.jailed .av::after { content: ''; position: absolute; inset: -3px; border-radius: 50%; background: repeating-linear-gradient(90deg, transparent 0 9px, #3b4046 9px 13px); }
+.vB .plate { margin-top: 6px; background: #2a160a; color: var(--paper); border: 1px solid var(--gold); border-radius: 6px; padding: 2px 8px; font-size: 12px; font-weight: 700; display: flex; gap: 5px; align-items: center; }
+.vB .sub { font-size: 11px; color: var(--paper2); text-shadow: 0 1px 2px #000; }
+.vB .hpbar { display: flex; gap: 2px; }
+.vB .hpbar i { width: 10px; height: 6px; border-radius: 2px; background: #c23b2e; box-shadow: 0 0 3px rgba(0,0,0,.6); }
+.vB .hpbar i.l { background: rgba(0,0,0,.45); }
+.vB .eqrow { display: flex; gap: 3px; flex-wrap: wrap; justify-content: center; }
+.vB .dist { top: -4px; left: 4px; }
+
+/* ================= C. NỈ ĐỎ SÒNG BÀI + THẺ "WANTED" ================= */
+.vC .table-shape {
+  background: radial-gradient(ellipse at 50% 40%, #9b2b23 0%, #6e1b16 60%, #430e0b 100%);
+  border: 16px solid #1b120c;
+  box-shadow: inset 0 0 0 2px var(--gold), inset 0 0 0 8px #1b120c, inset 0 0 0 10px rgba(217,164,65,.5), inset 0 0 60px rgba(0,0,0,.6), 0 18px 40px rgba(0,0,0,.7);
+}
+.vC .table-shape::before { content: 'BANG!'; position: absolute; left: 50%; top: 18%; transform: translateX(-50%); font-family: 'Rye', serif; font-size: 34px; color: rgba(217,164,65,.22); letter-spacing: 6px; }
+.vC .seat .box { width: 128px; background: linear-gradient(#f4e4c1, #e3c98f); border: 2px solid #8b5a2b; border-radius: 3px; padding: 4px 7px 6px; text-align: center;
+  box-shadow: 0 6px 14px rgba(0,0,0,.55); clip-path: polygon(0 3%, 4% 0, 96% 1%, 100% 4%, 99% 97%, 95% 100%, 5% 99%, 1% 96%); }
+.vC .wanted { font-family: 'Rye', serif; font-size: 10px; letter-spacing: 2px; color: var(--red); }
+.vC .nm { font-family: 'Rye', serif; font-size: 15px; line-height: 1.1; }
+.vC .ch { font-size: 10px; color: var(--muted); font-style: italic; }
+.vC .hp { font-size: 11px; } .vC .hp .l { filter: grayscale(1); opacity: .3; }
+.vC .st { display: flex; gap: 4px; justify-content: center; flex-wrap: wrap; font-size: 10px; margin-top: 2px; align-items: center; }
+.vC .seat.turn .box { background: linear-gradient(#fff3d1, #f0d28f); outline: 3px solid var(--gold); outline-offset: 2px; }
+.vC .seat.target .box { outline: 3px dashed var(--red); outline-offset: 2px; }
+.vC .seat.jailed .box { background-image: repeating-linear-gradient(90deg, transparent 0 18px, rgba(44,48,53,.45) 18px 22px), linear-gradient(#f4e4c1, #e3c98f); }
+.vC .dist { left: 50%; transform: translateX(-50%); bottom: -12px; }
+.vC .seat.turn::before { content: '⭐'; position: absolute; top: -16px; left: 50%; transform: translateX(-50%); font-size: 20px; filter: drop-shadow(0 2px 2px #000); }
+
+.prompt.mob { display: none; }
+@media (max-width: 900px) {
+  main { grid-template-columns: 1fr; }
+  .prompt.desk { display: none; }
+  .prompt.mob { display: block; max-width: none; margin-top: 8px; }
+  .arena { aspect-ratio: 1 / 1.05; }
+  .table-shape { inset: 12% 14%; }
+  .center { flex-direction: column; width: 60%; gap: 6px; }
+  .vA .seat .box { width: 112px; padding: 4px 6px; }
+  .vA .ch, .vA .st .chip { display: none; }
+  .vB .seat { width: 96px; } .vB .av { width: 50px; height: 50px; font-size: 22px; } .vB .eqrow, .vB .sub { display: none; }
+  .vC .seat .box { width: 96px; } .vC .ch, .vC .wanted { display: none; } .vC .nm { font-size: 12px; }
+  .prompt { max-width: 100%; }
+  .card-back { width: 42px; height: 60px; font-size: 10px; }
+}
+</style>
+</head>
+<body>
+<div class="picker">
+  <span class="brand">BANG!</span>
+  <span>Phương án:</span>
+  <button data-v="A" class="on">A · Nỉ xanh poker</button>
+  <button data-v="B">B · Bàn gỗ + avatar tròn</button>
+  <button data-v="C">C · Nỉ đỏ + thẻ Wanted</button>
+  <span class="sep"></span>
+  <span>Số người:</span>
+  <span id="nbtns"></span>
+</div>
+<p class="note" id="note"></p>
+
+<main>
+  <div>
+    <div class="arena vA" id="arena">
+      <div class="table-shape"></div>
+      <div class="center">
+        <div class="piles">
+          <div class="pile"><div class="card-back">BANG!</div>Chồng: 47</div>
+          <div class="pile"><div class="card" style="width:58px;height:82px;cursor:default"><div class="corner red">K♥</div><div class="icon">🍺</div><div class="cname">Beer</div></div>Bài bỏ</div>
+        </div>
+        <div class="prompt desk">
+          <h4>💥 Bart Cassidy bắn bạn!</h4>
+          <div>Bỏ <b>Missed!</b> để né, hoặc dùng Barrel.</div>
+          <div class="row"><button class="btn blue">🛢️ Barrel</button><button class="btn secondary">Chịu mất 1 máu</button></div>
+        </div>
+      </div>
+      <div id="seats"></div>
+    </div>
+    <!-- Trên điện thoại, ô thông báo nằm dưới bàn để không che ghế -->
+    <div class="prompt mob">
+      <h4>💥 Bart Cassidy bắn bạn!</h4>
+      <div>Bỏ <b>Missed!</b> để né, hoặc dùng Barrel.</div>
+      <div class="row"><button class="btn blue">🛢️ Barrel</button><button class="btn secondary">Chịu mất 1 máu</button></div>
+    </div>
+
+    <div class="mebar">
+      <div class="head">
+        <span class="role Sheriff">Cảnh sát trưởng</span>
+        <b>Bạn · Willy the Kid</b>
+        <span>❤️❤️❤️❤️<span style="filter:grayscale(1);opacity:.3">❤️</span></span>
+        <span class="chip gun">🔫 Volcanic</span><span class="chip">🛢️ Barrel</span>
+        <span style="color:var(--muted)">Tầm bắn 1 · Bang! không giới hạn</span>
+      </div>
+      <div class="hand">
+        <div class="card"><div class="corner red">A♦</div><div class="icon">💥</div><div class="cname">Bang!</div></div>
+        <div class="card sel"><div class="corner">8♣</div><div class="icon">🙅</div><div class="cname">Missed!</div></div>
+        <div class="card"><div class="corner red">6♥</div><div class="icon">🍺</div><div class="cname">Beer</div></div>
+        <div class="card blue"><div class="corner">Q♠</div><div class="icon">🐎</div><div class="cname">Mustang</div></div>
+        <div class="card"><div class="corner red">J♥</div><div class="icon">🃏</div><div class="cname">Panic!</div></div>
+      </div>
+      <div class="actions"><button class="btn green">✅ Kết thúc lượt</button><span style="color:var(--muted);font-size:13px">Máu 4/5 · 5 lá trên tay</span></div>
+    </div>
+  </div>
+
+  <div class="side">
+    <div class="panel"><h3>Diễn biến</h3>
+      <div class="log"><div class="t">— Lượt của Bart Cassidy —</div><div>Bart rút 2 lá.</div><div>Bart trang bị Schofield.</div><div>Bart dùng Bang! lên Bạn.</div></div>
+    </div>
+    <div class="panel"><h3>Trò chuyện</h3><div class="log" style="height:120px"><div><b style="color:var(--red)">Lan:</b> né đi ông ơi 😂</div></div></div>
+  </div>
+</main>
+
+<script>
+const PLAYERS = [
+  { name: 'Bạn', char: 'Willy the Kid', icon: '🤠', hp: 4, max: 5, hand: 5, role: 'Sheriff', eq: [['🔫','Volcanic','gun'],['🛢️','Barrel']], me: true },
+  { name: 'Bart Cassidy', char: 'Bart Cassidy', icon: '🧔', hp: 3, max: 4, hand: 2, role: null, eq: [['🔫','Schofield','gun']], turn: true },
+  { name: 'Lan', char: 'Rose Doolan', icon: '👩', hp: 4, max: 4, hand: 4, role: null, eq: [['🔭','Scope']], target: true },
+  { name: 'Minh', char: 'Jesse Jones', icon: '🧑', hp: 1, max: 4, hand: 1, role: null, eq: [['⛓️','Jail']], jailed: true, off: true },
+  { name: 'Hùng', char: 'Paul Regret', icon: '👨', hp: 0, max: 3, hand: 0, role: 'Outlaw', eq: [], dead: true },
+  { name: 'Tú', char: 'Calamity Janet', icon: '👱', hp: 2, max: 4, hand: 3, role: null, eq: [['🧨','Dynamite']], target: true },
+  { name: 'Phong', char: 'Kit Carlson', icon: '🧓', hp: 4, max: 4, hand: 6, role: null, eq: [['🐎','Mustang'],['🔫','Winchester','gun']] },
+];
+const ROLE_VI = { Sheriff: 'Cảnh sát trưởng', Deputy: 'Phó', Outlaw: 'Tội phạm', Renegade: 'Kẻ phản bội' };
+const NOTES = {
+  A: '<b>A · Nỉ xanh poker</b> — giữ nguyên thẻ người chơi giấy như hiện tại, chỉ xếp quanh bàn nỉ viền gỗ. Ít thay đổi code nhất, thông tin đầy đủ.',
+  B: '<b>B · Bàn gỗ + avatar tròn</b> — kiểu game poker online: mỗi ghế là avatar tròn, vòng màu = máu còn nhiều/ít, số lá bài trên tay ở góc. Gọn, nhìn "game" nhất.',
+  C: '<b>C · Nỉ đỏ + thẻ Wanted</b> — mỗi người là một tờ truy nã nhỏ, đậm chất miền Tây. Ngôi sao ⭐ đánh dấu người đang tới lượt.',
+};
+let V = 'A', N = 7;
+
+function hpHearts(p) { let s = ''; for (let i = 0; i < p.max; i++) s += i < p.hp ? '❤️' : '<span class="l">❤️</span>'; return s; }
+function roleTag(p) { return p.role ? `<span class="role ${p.role}">${ROLE_VI[p.role]}</span>` : '<span class="role unknown">?</span>'; }
+function chips(p) { return p.eq.map(([i, n, c]) => `<span class="chip ${c || ''}">${i} ${n}</span>`).join(''); }
+function hpColor(p) { const r = p.hp / p.max; return r > .6 ? '#3f9d4a' : r > .3 ? '#d9a441' : '#c23b2e'; }
+
+function seatHTML(p, d) {
+  const cls = ['seat', p.turn && 'turn', p.target && 'target', p.jailed && 'jailed', p.dead && 'dead'].filter(Boolean).join(' ');
+  const dist = p.me ? '' : `<span class="dist ${p.target ? 'in' : ''}">${p.dead ? '☠️' : 'cách ' + d}</span>`;
+  const dot = `<span class="dot ${p.off ? 'off' : ''}"></span>`;
+  if (V === 'A') return `<div class="${cls}"><div class="box" style="position:relative">${dist}
+      <div class="nm">${dot}${p.name}${roleTag(p)}</div>
+      <div class="ch">${p.char}</div>
+      <div class="hp">${p.dead ? '☠️ Đã chết' : hpHearts(p)}</div>
+      <div class="st"><span>🂠 ${p.hand}</span>${chips(p)}${p.jailed ? '<span class="jailtag">⛓️ Bị giam</span>' : ''}</div></div></div>`;
+  if (V === 'B') {
+    let bar = ''; for (let i = 0; i < p.max; i++) bar += `<i class="${i < p.hp ? '' : 'l'}"></i>`;
+    return `<div class="${cls}" style="--hpc:${p.dead ? '#555' : hpColor(p)}">${dist}
+      <div class="av">${p.dead ? '💀' : p.icon}<span class="hand-n">🂠${p.hand}</span>${roleTag(p)}</div>
+      <div class="plate">${dot}${p.name}</div>
+      <div class="hpbar">${bar}</div>
+      <div class="sub">${p.char}</div>
+      <div class="eqrow">${chips(p)}${p.jailed ? '<span class="jailtag">⛓️</span>' : ''}</div></div>`;
+  }
+  return `<div class="${cls}"><div class="box">
+      <div class="wanted">WANTED</div>
+      <div class="nm">${p.name}</div>
+      <div class="ch">${p.char}</div>
+      <div class="hp">${p.dead ? '☠️' : hpHearts(p)}</div>
+      <div class="st">${dot}${roleTag(p)}<span>🂠${p.hand}</span>${chips(p)}${p.jailed ? '<span class="jailtag">⛓️</span>' : ''}</div></div>${dist}</div>`;
+}
+
+function render() {
+  const arena = document.getElementById('arena');
+  arena.className = 'arena v' + V;
+  const ps = PLAYERS.slice(0, N);
+  const alive = ps.filter((p) => !p.dead);
+  const mobile = innerWidth < 900;
+  const rx = mobile ? 40 : 41, ry = mobile ? 42 : 41;
+  document.getElementById('seats').innerHTML = ps.map((p, i) => {
+    // Người chơi là ghế 0 ở đáy bàn, các ghế khác xếp theo chiều kim đồng hồ.
+    const a = Math.PI / 2 + (i * 2 * Math.PI) / N;
+    const x = 50 + rx * Math.cos(a), y = 50 + ry * Math.sin(a);
+    const ai = alive.indexOf(p), d = ai < 0 ? 0 : Math.min(ai, alive.length - ai);
+    return `<div style="position:absolute;left:${x}%;top:${y}%">${seatHTML(p, d).replace('class="seat', 'style="left:0;top:0" class="seat')}</div>`;
+  }).join('');
+  document.getElementById('note').innerHTML = NOTES[V] + ' Ghế viền đỏ = có thể chọn làm mục tiêu; "cách N" = khoảng cách từ bạn.';
+  document.querySelectorAll('[data-v]').forEach((b) => b.classList.toggle('on', b.dataset.v === V));
+  document.querySelectorAll('[data-n]').forEach((b) => b.classList.toggle('on', +b.dataset.n === N));
+}
+
+document.getElementById('nbtns').innerHTML = [4, 5, 6, 7].map((n) => `<button data-n="${n}">${n}</button>`).join(' ');
+document.querySelector('.picker').addEventListener('click', (e) => {
+  const b = e.target.closest('button'); if (!b) return;
+  if (b.dataset.v) V = b.dataset.v; if (b.dataset.n) N = +b.dataset.n; render();
+});
+addEventListener('resize', render);
+render();
+</script>
+</body>
+</html>

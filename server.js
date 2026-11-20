@@ -35,7 +35,7 @@ function newCode() {
 }
 
 function roomSummary(r) {
-  return { code: r.code, name: r.name, host: r.host, players: r.players, status: r.status, max: 7, hasPassword: !!r.passwordHash, turnSeconds: r.turnSeconds };
+  return { code: r.code, name: r.name, host: r.host, players: r.players, status: r.status, max: 7, hasPassword: !!r.passwordHash, turnSeconds: r.turnSeconds, charChoices: r.charChoices ?? 3 };
 }
 
 function roomView(r, user) {
@@ -67,6 +67,9 @@ function updateSettings(r, body) {
       throw new GameError('Thời gian mỗi lượt phải là 0 (tắt) hoặc từ 10 đến 600 giây.');
     }
   }
+  if (body.charChoices !== undefined && (!Number.isInteger(body.charChoices) || body.charChoices < 1 || body.charChoices > 5)) {
+    throw new GameError('Số lá nhân vật để chọn phải từ 1 đến 5.');
+  }
   if (body.password !== undefined && (typeof body.password !== 'string' || body.password.length > 64)) {
     throw new GameError('Mật khẩu phòng tối đa 64 ký tự.');
   }
@@ -75,6 +78,7 @@ function updateSettings(r, body) {
     r.passwordHash = body.password ? hashPw(body.password, r.passwordSalt) : null;
   }
   if (body.turnSeconds !== undefined) r.turnSeconds = body.turnSeconds;
+  if (body.charChoices !== undefined) r.charChoices = body.charChoices;
 }
 
 function leaveRoom(r, user) {
@@ -180,6 +184,7 @@ const server = http.createServer(async (req, res) => {
       const code = newCode();
       const r = { code, name: String(name || `Phòng của ${user}`).slice(0, 40), host: user, players: [user], status: 'waiting', game: null, chat: [] };
       r.turnSeconds = 0;
+      r.charChoices = 3;
       updateSettings(r, body);
       rooms.set(code, r);
       broadcastLobby();
@@ -233,7 +238,7 @@ const server = http.createServer(async (req, res) => {
         if (r.host !== user) return err(res, 'Chỉ chủ phòng mới bắt đầu được.');
         if (r.status === 'playing') return err(res, 'Ván đã bắt đầu.');
         if (r.players.length < 4) return err(res, 'Cần ít nhất 4 người để chơi Bang!.');
-        r.game = new Game(r.players);
+        r.game = new Game(r.players, { charChoices: r.charChoices ?? 3 });
         r.status = 'playing';
         r.chat.push({ system: true, text: 'Ván đấu bắt đầu!' });
       } else if (sub === 'reset') {
