@@ -118,8 +118,42 @@ class Game {
     this.winner = null;
     this.bangsPlayed = 0;
     this.phase = 'start';
-    for (const p of this.players) p.hand.push(...this.draw(p.hp));
     this.turn = this.players.findIndex((p) => p.role === 'Sheriff');
+    const choices = opts.characterChoices ?? 1;
+    if (!Number.isInteger(choices) || choices < 1 || choices > 4) fail('Số nhân vật để chọn phải từ 1 đến 4.');
+    if (choices > 1) {
+      this.characterChoices = choices;
+      this.characterPool = chars;
+      for (const p of this.players) { p.char = null; p.hp = 0; p.maxHp = 0; }
+      this.phase = 'character';
+      this.offerCharacters(0);
+    } else this.beginGame();
+  }
+
+  offerCharacters(player) {
+    this.pending = { type: 'character', player, options: shuffle([...this.characterPool], this.rng).slice(0, this.characterChoices) };
+  }
+
+  chooseCharacter(pi, character) {
+    const pend = this.pending;
+    if (pend.player !== pi || !pend.options.includes(character)) fail('Lựa chọn nhân vật không hợp lệ.');
+    const p = this.players[pi];
+    p.char = character;
+    p.maxHp = CHAR_INFO[character].hp + (p.role === 'Sheriff' ? 1 : 0);
+    p.hp = p.maxHp;
+    this.characterPool = this.characterPool.filter((c) => c !== character);
+    this.addLog(`${p.name} đã chọn ${character}.`);
+    if (pi + 1 < this.players.length) this.offerCharacters(pi + 1);
+    else {
+      this.pending = null;
+      this.characterPool = null;
+      this.beginGame();
+    }
+  }
+
+  beginGame() {
+    this.phase = 'start';
+    for (const p of this.players) p.hand.push(...this.draw(p.hp));
     this.addLog(`Ván đấu bắt đầu! Sheriff là ${this.players[this.turn].name}.`);
     this.startTurn();
   }
@@ -292,6 +326,35 @@ class Game {
     }
   }
 
+  forfeit(name) {
+    const pi = this.idx(name);
+    if (pi < 0 || !this.players[pi].alive || this.winner) return;
+    if (this.phase === 'character') fail('Chưa bắt đầu ván đấu.');
+    this.addLog(`${name} đã rời phòng và bỏ cuộc.`);
+    const cancel = (q) => q && ((q.type === 'duel' && q.other === pi) || (q.player === pi && q.type !== 'store'));
+    this.queue = this.queue.filter((q) => {
+      if (!cancel(q)) return true;
+      this.toDiscard(...(q.cards || []));
+      return false;
+    });
+    const pend = this.pending;
+    if (pend?.type === 'store') {
+      pend.order = pend.order.filter((i) => i !== pi);
+      if (!pend.order.length) {
+        this.toDiscard(...pend.cards);
+        this.nextPending();
+      } else pend.player = pend.order[0];
+    } else if (cancel(pend)) {
+      this.toDiscard(...(pend.cards || []));
+      this.nextPending();
+    }
+    const inFlight = [this.pending, ...this.queue];
+    this.kill(pi, null);
+    // Victory clears pending choices; keep any revealed cards in the deck count.
+    if (this.winner) for (const q of inFlight) this.toDiscard(...(q?.cards || []));
+    else this.afterAction();
+  }
+
   kill(ti, src) {
     const t = this.players[ti];
     t.alive = false;
@@ -366,6 +429,12 @@ class Game {
     const p = this.players[pi];
     if (!p.alive) fail('Bạn đã chết.');
 
+    if (this.phase === 'character') {
+      if (a.type !== 'chooseCharacter') fail('Đang chờ chọn nhân vật.');
+      this.chooseCharacter(pi, a.character);
+      return;
+    }
+
     if (a.type === 'sid') {
       if (p.char !== 'Sid Ketchum') fail('Chỉ Sid Ketchum mới dùng được.');
       if (p.hp >= p.maxHp) fail('Bạn đang đầy máu.');
@@ -409,6 +478,11 @@ class Game {
     if (this.winner) return;
     const pend = this.pending;
     const p = this.players[pend ? pend.player : this.turn];
+    if (this.phase === 'character') {
+      this.addLog(`⏱ ${p.name} hết giờ chọn nhân vật, tự động chọn ngẫu nhiên.`);
+      this.chooseCharacter(pend.player, pend.options[Math.floor(this.rng() * pend.options.length)]);
+      return;
+    }
     this.addLog(`⏱ ${p.name} đã hết thời gian${pend ? ' phản hồi' : ' lượt chơi'}.`);
     if (pend) {
       let action = { type: 'take' };
@@ -639,6 +713,7 @@ class Game {
     let pending = null;
     if (pend) {
       pending = { type: pend.type, player: pend.player };
+      if (pend.type === 'character' && pend.player === me) pending.options = [...pend.options];
       if (pend.type === 'bang') Object.assign(pending, { source: pend.source, need: pend.need, got: pend.got, barrels: pend.barrels });
       if (pend.type === 'indians') pending.source = pend.source;
       if (pend.type === 'duel') pending.other = pend.other;

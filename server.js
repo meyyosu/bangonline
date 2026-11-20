@@ -35,10 +35,11 @@ function newCode() {
 }
 
 function roomSummary(r) {
-  return { code: r.code, name: r.name, host: r.host, players: r.players, status: r.status, max: 7, hasPassword: !!r.passwordHash, turnSeconds: r.turnSeconds };
+  return { code: r.code, name: r.name, host: r.host, players: r.players, status: r.status, max: 7, hasPassword: !!r.passwordHash, turnSeconds: r.turnSeconds, characterChoices: r.characterChoices, characterSeconds: r.characterSeconds };
 }
 
 function roomView(r, user) {
+  syncTimer(r);
   const online = [...(roomClients.get(r.code) || [])].map((c) => c.user);
   return {
     ...roomSummary(r),
@@ -46,7 +47,7 @@ function roomView(r, user) {
     chat: r.chat.slice(-60),
     game: r.game ? r.game.viewFor(user) : null,
     serverNow: Date.now(),
-    timer: r.clock ? { deadline: r.clock.deadline, player: r.clock.player, response: !!r.clock.pending } : null,
+    timer: r.clock ? { deadline: r.clock.deadline, player: r.clock.player, response: !!r.clock.pending, character: !!r.clock.character } : null,
   };
 }
 
@@ -62,6 +63,12 @@ function broadcastLobby() {
 function findRoomOf(user) { return [...rooms.values()].find((r) => r.players.includes(user)); }
 
 function updateSettings(r, body) {
+  if (body.characterChoices !== undefined && (!Number.isInteger(body.characterChoices) || body.characterChoices < 1 || body.characterChoices > 4)) {
+    throw new GameError('Số nhân vật để chọn phải từ 1 đến 4.');
+  }
+  if (body.characterSeconds !== undefined && (!Number.isInteger(body.characterSeconds) || (body.characterSeconds !== 0 && (body.characterSeconds < 10 || body.characterSeconds > 600)))) {
+    throw new GameError('Thời gian chọn nhân vật phải là 0 (tắt) hoặc từ 10 đến 600 giây.');
+  }
   if (body.turnSeconds !== undefined) {
     if (!Number.isInteger(body.turnSeconds) || (body.turnSeconds !== 0 && (body.turnSeconds < 10 || body.turnSeconds > 600))) {
       throw new GameError('Thời gian mỗi lượt phải là 0 (tắt) hoặc từ 10 đến 600 giây.');
@@ -75,6 +82,8 @@ function updateSettings(r, body) {
     r.passwordHash = body.password ? hashPw(body.password, r.passwordSalt) : null;
   }
   if (body.turnSeconds !== undefined) r.turnSeconds = body.turnSeconds;
+  if (body.characterChoices !== undefined) r.characterChoices = body.characterChoices;
+  if (body.characterSeconds !== undefined) r.characterSeconds = body.characterSeconds;
 }
 
 function leaveRoom(r, user) {
@@ -180,6 +189,8 @@ const server = http.createServer(async (req, res) => {
       const code = newCode();
       const r = { code, name: String(name || `Phòng của ${user}`).slice(0, 40), host: user, players: [user], status: 'waiting', game: null, chat: [] };
       r.turnSeconds = 0;
+      r.characterChoices = 1;
+      r.characterSeconds = 30;
       updateSettings(r, body);
       rooms.set(code, r);
       broadcastLobby();
@@ -224,7 +235,15 @@ const server = http.createServer(async (req, res) => {
         updateSettings(r, body);
         r.chat.push({ system: true, text: 'Chủ phòng đã cập nhật cài đặt phòng.' });
       } else if (sub === 'leave') {
-        if (r.status === 'playing' && r.game?.players[r.game.idx(user)]?.alive) return err(res, 'Không thể rời phòng khi đang chơi.');
+        if (r.status === 'playing' && r.game) {
+          if (r.game.phase === 'character') {
+            r.game = null; r.status = 'waiting';
+            r.chat.push({ system: true, text: 'Có người rời khi chọn nhân vật. Phòng trở về trạng thái chờ.' });
+          } else {
+            r.game.forfeit(user);
+            if (r.game.winner) r.status = 'ended';
+          }
+        }
         leaveRoom(r, user);
       } else if (sub === 'kick') {
         if (r.host !== user || r.status === 'playing') return err(res, 'Chỉ chủ phòng mới mời ra được (khi chưa chơi).');
@@ -233,7 +252,8 @@ const server = http.createServer(async (req, res) => {
         if (r.host !== user) return err(res, 'Chỉ chủ phòng mới bắt đầu được.');
         if (r.status === 'playing') return err(res, 'Ván đã bắt đầu.');
         if (r.players.length < 4) return err(res, 'Cần ít nhất 4 người để chơi Bang!.');
-        r.game = new Game(r.players);
+        updateSettings(r, body);
+        r.game = new Game(r.players, { characterChoices: r.characterChoices });
         r.status = 'playing';
         r.chat.push({ system: true, text: 'Ván đấu bắt đầu!' });
       } else if (sub === 'reset') {

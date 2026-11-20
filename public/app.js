@@ -185,6 +185,13 @@ function timerField(value = 0) {
     <input id="turnSeconds" type="number" name="turnSeconds" min="0" max="600" step="1" value="${esc(value)}" required>
     <p class="muted">0 = tắt; từ 10–600 giây. Tạm dừng lượt khi chờ phản hồi; mỗi phản hồi có timer riêng cùng thời lượng.</p>`;
 }
+function characterFields(choices = 1, seconds = 30) {
+  return `<label for="characterChoices">Số nhân vật để chọn đầu game</label>
+    <select id="characterChoices" name="characterChoices">${[1, 2, 3, 4].map((n) => `<option value="${n}" ${Number(choices) === n ? 'selected' : ''}>${n}${n === 1 ? ' (chia ngẫu nhiên)' : ''}</option>`).join('')}</select>
+    <label for="characterSeconds">Thời gian chọn nhân vật mỗi người (giây)</label>
+    <input id="characterSeconds" type="number" name="characterSeconds" min="0" max="600" step="1" value="${esc(seconds)}" required>
+    <p class="muted">0 = tắt; từ 10–600 giây, riêng với timer lượt. Chọn lần lượt, không trùng nhân vật; hết giờ tự chọn ngẫu nhiên. Khi đặt 1 nhân vật, game tự chia và bỏ qua bước chọn.</p>`;
+}
 
 // ---------- sảnh ----------
 function showLobby() {
@@ -199,6 +206,7 @@ function showLobby() {
           <label>Tên phòng</label><input type="text" name="name" placeholder="Phòng của ${esc(ME)}" maxlength="40">
           <label for="createPassword">Mật khẩu phòng (không bắt buộc)</label><input id="createPassword" type="password" name="password" maxlength="64" autocomplete="new-password">
           ${timerField()}
+          ${characterFields()}
           <button class="btn" style="width:100%;margin-top:10px">🎲 Tạo phòng mới</button>
         </form>
         <h2 style="margin-top:22px">Vào bằng mã</h2>
@@ -216,7 +224,7 @@ function showLobby() {
   $('#createForm').onsubmit = run(async (e) => {
     e.preventDefault();
     const f = new FormData(e.target);
-    const r = await api('/api/rooms', { name: f.get('name'), password: f.get('password'), turnSeconds: Number(f.get('turnSeconds')) });
+    const r = await api('/api/rooms', { name: f.get('name'), password: f.get('password'), turnSeconds: Number(f.get('turnSeconds')), characterChoices: Number(f.get('characterChoices')), characterSeconds: Number(f.get('characterSeconds')) });
     enterRoom(r.code);
   });
   $('#joinForm').onsubmit = run(async (e) => {
@@ -254,23 +262,37 @@ function enterRoom(code) {
   closeStreams();
   ui.mode = null; ui.selected = []; ui.lastLogLen = 0;
   ui.settingsDraft = null;
+  ui.lastCheckSeq = null;
   history.replaceState(null, '', '#' + code);
   app.innerHTML = `
     <div class="room">
       <div class="room-head">
         <div class="row"><h2 id="roomName"></h2><span class="code">${code}</span>
-          <button class="btn ghost small" id="copyLink">📋 Copy link mời</button></div>
+          <button class="btn ghost small" id="copyLink">📋 Copy link mời</button>${settingsMenuHTML()}</div>
         <div class="row" id="roomBtns"></div>
-        <div id="turnClock" role="timer"></div>
+        <div id="turnClock" class="room-clock" data-room-clock role="timer" hidden></div>
       </div>
       <div id="mainArea"></div>
       <div class="side">
         <div class="panel" id="logPanel" style="display:none"><h3>Diễn biến</h3><div class="log-box" id="logBox"></div></div>
-        <div class="panel"><h3>Trò chuyện</h3><div class="chat-box" id="chatBox"></div>
-          <form class="chat-form" id="chatForm"><input type="text" name="text" placeholder="Nhắn gì đó…" autocomplete="off" maxlength="300"><button class="btn small">Gửi</button></form>
+        <div class="panel chat-panel ${chatCollapsed() ? 'collapsed' : ''}" id="chatPanel">
+          <h3><button type="button" class="chat-toggle" id="chatToggle" aria-expanded="${!chatCollapsed()}">
+            <span>Trò chuyện</span><span class="unread" id="chatUnread" hidden></span><span class="chev" aria-hidden="true">▾</span></button></h3>
+          <div class="chat-body"><div class="chat-box" id="chatBox"></div>
+            <form class="chat-form" id="chatForm"><input type="text" name="text" placeholder="Nhắn gì đó…" autocomplete="off" maxlength="300"><button class="btn small">Gửi</button></form></div>
         </div>
       </div>
     </div>`;
+  bindSettingsMenu();
+  ui.chatSeenT = null;
+  $('#chatToggle').onclick = () => {
+    const collapsed = !$('#chatPanel').classList.contains('collapsed');
+    $('#chatPanel').classList.toggle('collapsed', collapsed);
+    $('#chatToggle').setAttribute('aria-expanded', String(!collapsed));
+    try { localStorage.setItem('bang.chatCollapsed', collapsed ? '1' : '0'); } catch {}
+    if (ROOM) updateChatUnread(ROOM.chat);
+    if (!collapsed) { const cb = $('#chatBox'); cb.scrollTop = cb.scrollHeight; $('#chatForm').text.focus(); }
+  };
   $('#copyLink').onclick = () => {
     const link = `${location.origin}/#${code}`;
     navigator.clipboard?.writeText(link).then(() => toast('Đã copy link mời!', true), () => toast(link, true));
@@ -296,6 +318,19 @@ function enterRoom(code) {
   roomES.onerror = () => { if (roomES && roomES.readyState === EventSource.CLOSED) showLobby(); };
 }
 
+// Ô trò chuyện thu gọn được (nhớ trên máy); khi thu gọn thì đếm tin mới của người khác
+function chatCollapsed() { try { return localStorage.getItem('bang.chatCollapsed') === '1'; } catch { return false; } }
+function updateChatUnread(chat) {
+  const latest = chat.reduce((t, m) => Math.max(t, m.t || 0), 0);
+  const collapsed = $('#chatPanel')?.classList.contains('collapsed');
+  if (ui.chatSeenT == null || !collapsed) ui.chatSeenT = latest;
+  const n = chat.filter((m) => !m.system && m.user !== ME && (m.t || 0) > ui.chatSeenT).length;
+  const badge = $('#chatUnread');
+  if (!badge) return;
+  badge.hidden = !n;
+  badge.textContent = n > 9 ? '9+' : String(n);
+}
+
 function renderRoom() {
   const r = ROOM;
   $('#roomName').textContent = r.name;
@@ -303,10 +338,9 @@ function renderRoom() {
   const btns = $('#roomBtns');
   const isHost = r.host === ME;
   const g = r.game;
-  const meAlive = g ? g.players.find((p) => p.name === ME)?.alive : true;
   btns.innerHTML = `
     ${isHost && g?.winner ? '<button class="btn green" id="resetBtn">🔁 Về phòng chờ</button>' : ''}
-    ${!g || g.winner || !meAlive ? '<button class="btn secondary" id="leaveBtn">Rời phòng</button>' : ''}`;
+    <button class="btn secondary" id="leaveBtn">Rời phòng${g && !g.winner ? ' giữa ván' : ''}</button>`;
   $('#leaveBtn') && ($('#leaveBtn').onclick = run(async () => { await api(`/api/rooms/${r.code}/leave`, {}); showLobby(); }));
   $('#resetBtn') && ($('#resetBtn').onclick = run(() => api(`/api/rooms/${r.code}/reset`, {})));
 
@@ -315,10 +349,20 @@ function renderRoom() {
   const atBottom = cb.scrollTop + cb.clientHeight >= cb.scrollHeight - 10;
   cb.innerHTML = r.chat.map((m) => m.system ? `<div class="sys">${esc(m.text)}</div>` : `<div><b>${esc(m.user)}:</b> ${esc(m.text)}</div>`).join('') || '<div class="sys">Chưa có tin nhắn.</div>';
   if (atBottom) cb.scrollTop = cb.scrollHeight;
+  updateChatUnread(r.chat);
 
   $('#logPanel').style.display = g ? '' : 'none';
   if (!g) return renderWaiting();
   renderGame();
+  updateClock();
+}
+
+function roomSettingsBody(form) {
+  const f = new FormData(form);
+  const body = { turnSeconds: Number(f.get('turnSeconds')), characterChoices: Number(f.get('characterChoices')), characterSeconds: Number(f.get('characterSeconds')) };
+  if (f.has('removePassword')) body.password = '';
+  else if (f.get('password')) body.password = f.get('password');
+  return body;
 }
 
 function renderWaiting() {
@@ -336,8 +380,10 @@ function renderWaiting() {
       <div class="room-settings">
         <h3>Cài đặt phòng</h3>
         <p>${r.hasPassword ? '🔒 Có mật khẩu' : '🔓 Không có mật khẩu'} · ${r.turnSeconds ? r.turnSeconds + ' giây/lượt' : 'Không giới hạn thời gian'}</p>
+        <p>Chọn 1 trong ${r.characterChoices} nhân vật · ${r.characterSeconds ? r.characterSeconds + ' giây/người để chọn' : 'Không giới hạn giờ chọn nhân vật'}</p>
         ${isHost ? `<form id="settingsForm">
           ${timerField(ui.settingsDraft?.turnSeconds ?? r.turnSeconds)}
+          ${characterFields(ui.settingsDraft?.characterChoices ?? r.characterChoices, ui.settingsDraft?.characterSeconds ?? r.characterSeconds)}
           <label for="roomPassword">Mật khẩu mới (để trống để giữ nguyên)</label>
           <input id="roomPassword" type="password" name="password" maxlength="64" autocomplete="new-password" value="${esc(ui.settingsDraft?.password || '')}">
           <label><input type="checkbox" name="removePassword" ${ui.settingsDraft?.removePassword ? 'checked' : ''}> Xóa mật khẩu phòng</label>
@@ -358,19 +404,23 @@ function renderWaiting() {
         </ul>
       </div>
     </div>`;
-  $('#startBtn') && ($('#startBtn').onclick = run(() => api(`/api/rooms/${r.code}/start`, {})));
+  $('#startBtn') && ($('#startBtn').onclick = run(async () => {
+    const form = $('#settingsForm');
+    if (form && !form.reportValidity()) return;
+    // Save the visible settings even when the host starts without pressing Save.
+    const settings = form ? roomSettingsBody(form) : {};
+    await api(`/api/rooms/${r.code}/start`, settings);
+    ui.settingsDraft = null;
+  }));
   const settings = $('#settingsForm');
   if (settings) {
     settings.oninput = () => {
       const f = new FormData(settings);
-      ui.settingsDraft = { turnSeconds: f.get('turnSeconds'), password: f.get('password'), removePassword: f.has('removePassword') };
+      ui.settingsDraft = { turnSeconds: f.get('turnSeconds'), characterChoices: f.get('characterChoices'), characterSeconds: f.get('characterSeconds'), password: f.get('password'), removePassword: f.has('removePassword') };
     };
     settings.onsubmit = run(async (e) => {
       e.preventDefault();
-      const f = new FormData(settings);
-      const body = { turnSeconds: Number(f.get('turnSeconds')) };
-      if (f.has('removePassword')) body.password = '';
-      else if (f.get('password')) body.password = f.get('password');
+      const body = roomSettingsBody(settings);
       await api(`/api/rooms/${r.code}/settings`, body);
       ui.settingsDraft = null;
       if (ROOM && !ROOM.game) renderWaiting();
@@ -381,15 +431,17 @@ function renderWaiting() {
 }
 
 function updateClock() {
-  const el = $('#turnClock');
-  if (!el) return;
   const t = ROOM?.timer;
-  el.hidden = !t;
-  if (!t) return;
-  const seconds = Math.max(0, Math.ceil((t.deadline - Date.now() - (ui.serverOffset || 0)) / 1000));
-  const name = ROOM.game.players[t.player].name;
-  el.textContent = `⏱ ${name} · ${t.response ? 'Phản hồi' : 'Lượt chơi'}: ${seconds}s`;
-  el.classList.toggle('urgent', seconds <= 10);
+  const g = ROOM?.game;
+  const seconds = t ? Math.max(0, Math.ceil((t.deadline - Date.now() - (ui.serverOffset || 0)) / 1000)) : 0;
+  const name = g?.players[t?.player]?.name || '';
+  const text = t ? `⏱ ${name} · ${t.character ? 'Chọn nhân vật' : t.response ? 'Phản hồi' : 'Lượt chơi'}: ${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`
+    : `⏱ ${g?.phase === 'character' ? 'Chọn nhân vật' : 'Lượt chơi'}: không giới hạn`;
+  document.querySelectorAll('[data-room-clock]').forEach((el) => {
+    el.hidden = !g || !!g.winner;
+    el.textContent = text;
+    el.classList.toggle('urgent', !!t && seconds <= 10);
+  });
 }
 setInterval(updateClock, 250);
 
@@ -403,27 +455,105 @@ function cardHTML(c, cls = '') {
     <div class="icon">${info.icon}</div><div class="cname">${esc(c.name)}</div>
     ${info.range ? `<div class="range">tầm ${info.range}</div>` : ''}</div>`;
 }
-function chipHTML(c, cls = '') {
+// Chồng bài bỏ: 3 lá gần nhất, lá sau đè một phần lên lá trước
+function discardStackHTML(g) {
+  const cards = g.discardRecent || (g.discardTop ? [g.discardTop] : []);
+  if (!cards.length) return '<div class="card-back" style="opacity:.3"></div>';
+  const n = cards.length;
+  return `<div class="discard-stack" style="--n:${n}">${cards.map((c, i) =>
+    `<div class="ds-slot" style="--i:${n - 1 - i}">${cardHTML(c, 'small')}</div>`).join('')}</div>`;
+}
+// Thẻ trang bị vuông: màu theo loại, huy hiệu góc = tầm bắn (súng) hoặc ±khoảng cách (ngựa/ống ngắm)
+const EQ_KIND = { Mustang: ['horse', '+1'], Scope: ['horse', '−1'], Jail: ['jail', ''], Dynamite: ['dyn', ''] };
+function eqTileHTML(c, extra = '') {
   const info = cardInfo(c);
-  return `<span class="chip ${info.type === 'gun' ? 'gun' : ''} ${cls}" data-eq="${c.id}" ${tooltipAttrs(c.name, info.desc)}>${info.icon} ${esc(c.name)}</span>`;
+  const [kind, badge] = info.type === 'gun' ? ['gun', String(info.range)] : (EQ_KIND[c.name] || ['', '']);
+  return `<div class="eqt ${kind} ${extra}" data-eq="${c.id}" ${tooltipAttrs(c.name, info.desc)}>
+    <span class="ic">${info.icon}</span><span class="nm">${esc(c.name)}</span>${badge ? `<span class="bd">${badge}</span>` : ''}</div>`;
 }
-function hpHTML(p) {
+// Thanh máu bằng viên đạn: đạn đồng = máu còn, vỏ đạn xám = máu đã mất
+function bulletSVG(full, h) {
+  return `<svg width="${Math.round(h * .45)}" height="${h}" viewBox="0 0 10 24" aria-hidden="true">${full
+    ? `<path d="M5 0C8 2.5 8.6 5.5 8.6 9H1.4C1.4 5.5 2 2.5 5 0z" fill="#c8682c" stroke="#6b3412" stroke-width=".8"/>
+       <rect x="1.4" y="9" width="7.2" height="12" fill="#e2b04a" stroke="#7a5512" stroke-width=".8"/>
+       <rect x=".6" y="20.6" width="8.8" height="3" rx=".6" fill="#c9962f" stroke="#7a5512" stroke-width=".8"/>
+       <rect x="2.6" y="10" width="1.3" height="10" fill="#fbe39a" opacity=".8"/>`
+    : `<rect x="1.4" y="9" width="7.2" height="12" fill="#5d5a55" stroke="#2c2a27" stroke-width=".8" opacity=".75"/>
+       <ellipse cx="5" cy="9" rx="3.6" ry="1" fill="#1d1c1a"/>
+       <rect x=".6" y="20.6" width="8.8" height="3" rx=".6" fill="#4a4743" stroke="#2c2a27" stroke-width=".8"/>`}</svg>`;
+}
+function hpBarHTML(p, h = 22) {
+  if (!p.alive) return '<div class="hpbar dead">☠️ Đã chết</div>';
   let s = '';
-  for (let i = 0; i < p.maxHp; i++) s += i < p.hp ? '❤️' : '<span class="lost">❤️</span>';
-  return s;
+  for (let i = 0; i < p.maxHp; i++) s += bulletSVG(i < p.hp, h);
+  return `<div class="hpbar ${p.hp === 1 ? 'low' : ''}" title="Máu ${p.hp}/${p.maxHp}">${s}</div>`;
 }
+// Số bài trên tay: quạt lưng bài đỏ, lá trước trắng ghi số. Vẽ min(n, 3) lá; hết bài thì 1 lá viền nét đứt.
+function handFanHTML(n) {
+  if (!n) return `<span class="hand-fan zero" ${tooltipAttrs('Bài trên tay', 'Không còn bài trên tay.')}><span class="c front">0</span></span>`;
+  const k = Math.min(n, 3), spread = k > 1 ? 14 : 0;
+  let s = '';
+  for (let j = 0; j < k; j++) {
+    const front = j === k - 1;
+    s += `<span class="c ${front ? 'front' : ''}" style="left:${j * 6}px;transform:rotate(${(j - (k - 1) / 2) * spread}deg)">${front ? n : ''}</span>`;
+  }
+  return `<span class="hand-fan" ${tooltipAttrs('Bài trên tay', 'Số lá bài người chơi đang giữ trên tay: ' + n)} style="width:${17 + (k - 1) * 6}px">${s}</span>`;
+}
+const CHAR_ICON = {
+  // Chỉ dùng emoji đơn (không ghép ZWJ) để hiển thị được trên Windows cũ
+  'Bart Cassidy': '🧔', 'Black Jack': '🎩', 'Calamity Janet': '👩', 'El Gringo': '🌵', 'Jesse Jones': '🧑',
+  'Jourdonnais': '👴', 'Kit Carlson': '🧓', 'Lucky Duke': '🍀', 'Paul Regret': '👨', 'Pedro Ramirez': '👱',
+  'Rose Doolan': '🌹', 'Sid Ketchum': '👦', 'Slab the Killer': '😠', 'Suzy Lafayette': '🎀', 'Vulture Sam': '🦅', 'Willy the Kid': '🤠',
+};
+
+// ---------- cài đặt hiển thị (lưu trên máy từng người) ----------
+const EQ_SIZES = { sm: 'Nhỏ', md: 'Vừa', lg: 'To' };
+function applyEqSize(sz) {
+  if (!EQ_SIZES[sz]) sz = 'md';
+  document.body.classList.remove('eq-sm', 'eq-md', 'eq-lg');
+  document.body.classList.add('eq-' + sz);
+  try { localStorage.setItem('bang.eqSize', sz); } catch {}
+  document.querySelectorAll('[data-eqsize]').forEach((b) => b.classList.toggle('on', b.dataset.eqsize === sz));
+}
+function currentEqSize() { try { return localStorage.getItem('bang.eqSize') || 'md'; } catch { return 'md'; } }
+applyEqSize(currentEqSize());
+function settingsMenuHTML() {
+  return `<div class="gear"><button class="btn ghost small" id="gearBtn" aria-expanded="false">⚙️ Cài đặt</button>
+    <div class="settings-pop" id="settingsPop" hidden>
+      <h4>Cài đặt hiển thị</h4>
+      <div class="lbl">Cỡ thẻ trang bị</div>
+      <div class="seg">${Object.entries(EQ_SIZES).map(([k, v], i) =>
+        `<button type="button" data-eqsize="${k}"><i style="width:${12 + i * 4}px;height:${12 + i * 4}px"></i>${v}</button>`).join('')}</div>
+      <div class="muted" style="margin-top:8px">Chỉ áp dụng trên máy của bạn. Cỡ nhỏ ẩn tên thẻ, rê chuột để xem.</div>
+    </div></div>`;
+}
+function bindSettingsMenu() {
+  const btn = $('#gearBtn'), pop = $('#settingsPop');
+  if (!btn) return;
+  btn.onclick = (e) => { e.stopPropagation(); pop.hidden = !pop.hidden; btn.setAttribute('aria-expanded', String(!pop.hidden)); };
+  pop.onclick = (e) => { e.stopPropagation(); const b = e.target.closest('[data-eqsize]'); if (b) applyEqSize(b.dataset.eqsize); };
+  applyEqSize(currentEqSize());
+}
+// Bàn đổi bán kính ghế khi qua mốc màn hình hẹp
+window.matchMedia('(max-width: 900px)').addEventListener('change', () => { if (ROOM?.game && $('#mainArea')) renderGame(); });
+// Bấm ra ngoài hoặc nhấn Esc thì đóng bảng cài đặt
+function closeSettingsMenu() {
+  const pop = $('#settingsPop');
+  if (pop && !pop.hidden) { pop.hidden = true; $('#gearBtn')?.setAttribute('aria-expanded', 'false'); }
+}
+document.addEventListener('click', closeSettingsMenu);
+document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeSettingsMenu(); });
 function roleBadge(p) {
   return p.role ? `<span class="role ${p.role}" ${tooltipAttrs(ROLE_VI[p.role], META.roles[p.role].goal)}>${ROLE_VI[p.role]}</span>` : `<span class="role unknown" ${tooltipAttrs('Vai trò bí mật', 'Vai trò của người chơi này chưa được tiết lộ.')}>?</span>`;
 }
-// Song sắt phủ lên người vừa rút Jail thất bại; hiệu ứng sập xuống chỉ chạy lần đầu thấy
+// Song sắt phủ lên người đang có Jail trước mặt (đến khi rút kiểm tra); hiệu ứng sập xuống chỉ chạy lần đầu thấy
 const jailSeen = new Set();
 function jailBarsHTML(p) {
   if (!p.jailed) return '';
   const key = `${p.name}:${p.jailed}`;
   const slam = !jailSeen.has(key);
   jailSeen.add(key);
-  return `<div class="jail-bars ${slam ? 'slam' : ''}" aria-hidden="true"></div>
-    <div class="jail-tag" ${tooltipAttrs('Bị giam', 'Rút Jail không ra ♥ nên mất lượt; song sắt mở khi tới lượt kế tiếp.')}>⛓️ Bị giam · mất lượt</div>`;
+  return `<div class="jail-bars ${slam ? 'slam' : ''}" aria-hidden="true"></div>`;
 }
 
 function effectiveName(c, me) {
@@ -445,8 +575,30 @@ function targetFilter(card, g, meP) {
   }
 }
 
+// ---------- chọn nhân vật (trước khi vào trận) ----------
+const ROLE_ICON = { Sheriff: '⭐', Deputy: '🛡️', Outlaw: '💀', Renegade: '🎭' };
+function renderCharacterSelection() {
+  const g = ROOM.game;
+  const mine = g.pending.player === g.me.index;
+  $('#mainArea').innerHTML = `<div class="panel">
+    <h2>Chọn nhân vật đầu game</h2>
+    <div class="room-clock" data-room-clock role="timer"></div>
+    <p>${mine ? 'Chọn nhân vật của bạn:' : `Đang chờ ${esc(g.players[g.pending.player].name)} chọn nhân vật…`}</p>
+    <p>Vai trò của bạn: <b>${ROLE_VI[g.players[g.me.index].role]}</b></p>
+    <div class="character-options">${(g.pending.options || []).map((name) => `<button class="character-option" data-character="${esc(name)}">
+      <b>${esc(name)}</b><span>❤️ ${META.chars[name].hp} máu${g.players[g.me.index].role === 'Sheriff' ? ' (+1 Sheriff)' : ''}</span><span>${esc(META.chars[name].desc)}</span>
+    </button>`).join('')}</div>
+    <ul class="seat-list">${g.players.map((p, i) => `<li><b>${esc(p.name)}</b> · ${p.char ? esc(p.char) : i === g.pending.player ? 'Đang chọn…' : 'Chờ chọn'}</li>`).join('')}</ul>
+    <p class="muted">Ván đấu và timer lượt bắt đầu khi mọi người đã chọn xong.</p>
+  </div>`;
+  document.querySelectorAll('[data-character]').forEach((b) => b.onclick = run(() => api(`/api/rooms/${ROOM.code}/action`, { action: { type: 'chooseCharacter', character: b.dataset.character } })));
+  $('#logBox').textContent = '';
+}
+
 function renderGame() {
   const g = ROOM.game;
+  if (g.phase === 'character') return renderCharacterSelection();
+  ui.choosePick = null;
   const meIdx = g.me?.index ?? -1;
   const meP = g.players[meIdx];
   const pend = g.pending;
@@ -473,15 +625,20 @@ function renderGame() {
     if (!tfilter) ui.mode = null;
   }
 
-  // thứ tự chỗ ngồi bắt đầu từ người sau mình
+  // Ghế quanh bàn tròn: mình ở đáy bàn, người sau mình ngồi bên trái, cứ thế theo chiều kim đồng hồ
   const n = g.players.length;
-  const order = [];
-  for (let k = 1; k < n; k++) order.push((Math.max(meIdx, 0) + k) % n);
-  if (meIdx < 0) order.unshift(0);
+  const start = Math.max(meIdx, 0);
+  const narrow = window.matchMedia('(max-width: 900px)').matches;
+  const rx = narrow ? 41 : 43, ry = 44;
 
-  const oppHTML = order.map((i) => {
+  const seatsHTML = Array.from({ length: n }, (_, k) => {
+    const i = (start + k) % n;
     const p = g.players[i];
+    const a = Math.PI / 2 + (k * 2 * Math.PI) / n;
+    const x = 50 + rx * Math.cos(a), y = 50 + ry * Math.sin(a);
+    const isMe = i === meIdx;
     const cls = [
+      isMe ? 'mine' : '',
       g.turn === i && !g.winner ? 'turn' : '',
       pend && pend.player === i ? 'acting' : '',
       !p.alive ? 'dead' : '',
@@ -490,25 +647,33 @@ function renderGame() {
       p.jailed ? 'jailed' : '',
     ].join(' ');
     const ch = META.chars[p.char];
-    return `<div class="player ${cls}" data-player="${esc(p.name)}">${jailBarsHTML(p)}
-      <div class="pname"><span class="dot ${ROOM.online.includes(p.name) ? 'on' : ''}"></span>${esc(p.name)} ${roleBadge(p)}</div>
+    const inRange = !isMe && p.alive && p.distance != null && meP?.alive && p.distance <= g.me.range;
+    const dist = isMe || p.distance == null ? ''
+      : `<span class="dist ${inRange ? 'in' : ''}" ${tooltipAttrs('Khoảng cách từ bạn', 'Khoảng cách để kiểm tra mục tiêu có nằm trong tầm của thẻ bài hay không.' + (inRange ? ' Trong tầm bắn.' : ''))}>${p.alive ? 'cách ' + p.distance : '☠️'}</span>`;
+    const checking = pend?.type === 'check' && pend.player === i ? pend.kind : null;
+    const frame = p.eq.length ? `<div class="eqframe">${p.eq.map((c) => eqTileHTML(c, c.name === checking ? 'checking' : '')).join('')}</div>` : '';
+    return `<div class="player ${cls}" data-player="${esc(p.name)}" style="left:${x.toFixed(2)}%;top:${y.toFixed(2)}%">
+      ${frame}${dist}
+      <div class="av">${p.alive ? (CHAR_ICON[p.char] || '🤠') : '💀'}${jailBarsHTML(p)}
+        ${handFanHTML(p.handCount)}${roleBadge(p)}</div>
+      <div class="plate"><span class="dot ${ROOM.online.includes(p.name) ? 'on' : ''}"></span>${g.turn === i && !g.winner ? '⭐ ' : ''}${esc(p.name)}${isMe ? ' (bạn)' : ''}</div>
+      ${hpBarHTML(p)}
       <span class="pchar" ${tooltipAttrs(p.char, ch.desc)}>${esc(p.char)}</span>
-      <div class="hp">${p.alive ? hpHTML(p) : '☠️ Đã chết'}</div>
-      <div class="pstats"><span ${tooltipAttrs('Bài trên tay', 'Số lá bài người chơi đang giữ trên tay.')}>🂠 ${p.handCount}</span>
-        ${p.distance != null ? `<span ${tooltipAttrs('Khoảng cách từ bạn', 'Khoảng cách để kiểm tra mục tiêu có nằm trong tầm của thẻ bài hay không.')}>📏 ${p.distance}</span>` : ''}
-        ${g.turn === i && !g.winner ? '<b style="color:#b5332a">⭐ Đang chơi</b>' : ''}</div>
-      <div class="eq">${p.eq.map((c) => chipHTML(c)).join('')}</div>
     </div>`;
   }).join('');
 
   const tableHTML = `
-    <div class="table">
+    <div class="arena">
+      <div class="felt"></div>
       <div class="piles">
-        <div class="pile"><div class="card-back">BANG!</div>Chồng bài: ${g.deckCount}</div>
-        <div class="pile">${g.discardTop ? cardHTML(g.discardTop, 'small') : '<div class="card-back" style="opacity:.3"></div>'}<div>Bài bỏ</div></div>
+        <div class="pile"><div class="deck ${pend?.type === 'check' ? (myPrompt ? 'ready' : 'waiting') : ''}" id="deck"><div class="card-back">BANG!</div>
+          ${pend?.type === 'check' ? (myPrompt ? '<div class="tap">👆 Bấm để rút!</div>' : `<div class="tap other">⏳ ${esc(g.players[pend.player].name)} đang rút…</div>`) : ''}</div>
+          Chồng: ${g.deckCount}</div>
+        <div class="pile">${discardStackHTML(g)}<div>Bài bỏ</div></div>
       </div>
-      <div class="prompt ${myPrompt || (canPlay && !ui.mode) ? 'mine' : ''}" id="prompt">${promptHTML(g, meIdx, meP)}</div>
+      ${seatsHTML}
     </div>`;
+  const promptBoxHTML = `<div class="prompt ${myPrompt || (canPlay && !ui.mode) ? 'mine' : ''}" id="prompt">${promptHTML(g, meIdx, meP)}</div>`;
 
   let meHTML = '';
   if (meP) {
@@ -516,15 +681,16 @@ function renderGame() {
     const role = META.roles[meP.role];
     const playableIds = new Set(g.me.hand.filter((c) => isClickable(c, g, meP)).map((c) => c.id));
     meHTML = `
-      <div class="me ${myTurn ? 'turn' : ''} ${!meP.alive ? 'dead' : ''} ${meP.jailed ? 'jailed' : ''}">
-        <div class="me-head">${jailBarsHTML(meP)}
+      <div class="me ${myTurn ? 'turn' : ''} ${!meP.alive ? 'dead' : ''}">
+        <div class="me-head">
           <div class="idcard" ${tooltipAttrs(ROLE_VI[meP.role], role.goal)}><span class="role ${meP.role}" style="margin:0">${ROLE_VI[meP.role]}</span> <b>Vai trò của bạn (bí mật)</b>
             <div style="margin-top:4px">${esc(role.goal)}</div></div>
           <div class="idcard" ${tooltipAttrs(meP.char, ch.desc)}><b>${esc(meP.char)}</b> — ${esc(ch.desc)}</div>
-          <div class="idcard"><div class="hp" style="margin:0">${meP.alive ? hpHTML(meP) : '☠️ Bạn đã chết'}</div>
-            <div class="muted">Tầm bắn: ${g.me.range}${g.me.unlimitedBang ? ' · Bang! không giới hạn' : ''}</div></div>
+          <div class="idcard"><div class="mehp">${hpBarHTML(meP, 26)}</div>
+            <div class="muted">Tầm bắn: ${g.me.range}${g.me.unlimitedBang ? ' · Bang! không giới hạn' : ''}${meP.jailed ? ' · ⛓️ Đang bị giam' : ''}</div></div>
+          <div class="idcard myeq"><b>Trang bị</b>
+            <div class="eqs">${meP.eq.length ? meP.eq.map((c) => eqTileHTML(c)).join('') : '<span class="muted">Chưa có trang bị</span>'}</div></div>
         </div>
-        <div class="eq" style="margin-top:10px">${meP.eq.length ? meP.eq.map((c) => chipHTML(c)).join('') : '<span class="muted">Chưa có trang bị</span>'}</div>
         <div class="hand" id="hand">${g.me.hand.map((c) => {
           const sel = ui.selected.includes(c.id) || ui.mode?.cardId === c.id;
           return cardHTML(c, (sel ? 'selected ' : '') + (playableIds.has(c.id) ? 'playable' : (canPlay || myPrompt ? 'dim' : '')));
@@ -533,7 +699,9 @@ function renderGame() {
       </div>`;
   }
 
-  $('#mainArea').innerHTML = `<div class="board">${g.winner ? winnerHTML(g) : ''}<div class="opponents">${oppHTML}</div>${tableHTML}${meHTML}</div>`;
+  // Bàn ở giữa; ô thông báo + bài của mình ở cột bên phải
+  $('#mainArea').innerHTML = `<div class="board playing">${g.winner ? winnerHTML(g) : ''}
+    <div class="table-col">${tableHTML}</div><div class="right-col"><div class="room-clock" data-room-clock role="timer"></div>${promptBoxHTML}${meHTML}</div></div>`;
 
   // log
   const lb = $('#logBox');
@@ -541,6 +709,68 @@ function renderGame() {
   lb.scrollTop = lb.scrollHeight;
 
   bindGame(g, meIdx, meP, canPlay, myPrompt);
+  showCheckReveal(g);
+  updateClock();
+}
+
+// ---------- rút kiểm tra: lá bay ra giữa bàn, lật mặt, báo thành công/thất bại ----------
+const CHECK_INFO = {
+  Barrel: { icon: '🛢️', need: 'Cần <b>♥ Cơ</b> để Barrel đỡ đạn', win: ['NÉ ĐƯỢC!', 'Barrel đỡ đạn'], lose: ['BARREL TRƯỢT', 'Vẫn có thể bỏ Missed!'] },
+  Jail: { icon: '⛓️', need: 'Cần <b>♥ Cơ</b> để thoát tù', win: ['VƯỢT NGỤC!', 'Được chơi lượt này'], lose: ['Ở LẠI TÙ', 'Mất lượt'] },
+  Dynamite: { icon: '🧨', need: 'Nổ nếu ra <b>♠ Bích từ 2 đến 9</b>', win: ['AN TOÀN', 'Dynamite chuyền sang người kế'], lose: ['BÙM! −3 MÁU', 'Dynamite phát nổ'] },
+};
+function showCheckReveal(g) {
+  const lc = g.lastCheck;
+  if (ui.lastCheckSeq == null) { ui.lastCheckSeq = lc ? lc.seq : 0; return; } // mới vào phòng: không phát lại lần rút cũ
+  if (!lc || lc.seq <= ui.lastCheckSeq) return;
+  ui.lastCheckSeq = lc.seq;
+  const deck = $('#deck'), arena = $('.arena');
+  if (!deck || !arena) return;
+  const info = CHECK_INFO[lc.kind] || CHECK_INFO.Barrel;
+  const sx = window.scrollX, sy = window.scrollY;
+  const ar = arena.getBoundingClientRect(), dr = deck.getBoundingClientRect();
+  // Lớp hiệu ứng nằm ngoài #mainArea để không bị xoá khi bàn chơi vẽ lại
+  const layer = document.createElement('div');
+  layer.className = 'check-layer';
+  Object.assign(layer.style, { left: ar.left + sx + 'px', top: ar.top + sy + 'px', width: ar.width + 'px', height: ar.height + 'px' });
+  const n = lc.cards.length;
+  const flyers = lc.cards.map((c, j) => {
+    const f = document.createElement('div');
+    f.className = 'flyer' + (n > 1 && c.id !== lc.chosen ? ' other' : '');
+    Object.assign(f.style, { left: dr.left - ar.left + 'px', top: dr.top - ar.top + 'px', width: dr.width + 'px', height: dr.height + 'px' });
+    f.innerHTML = `<div class="inner"><div class="face"><div class="card-back">BANG!</div></div><div class="face front">${cardHTML(c, 'small')}</div></div>`;
+    layer.appendChild(f);
+    return { f, dx: ar.width / 2 - dr.width / 2 - (dr.left - ar.left) + (j - (n - 1) / 2) * dr.width * 1.9, dy: ar.height * .5 - dr.height / 2 - (dr.top - ar.top) - dr.height * .35 };
+  });
+  // Bàn đang khuất (đã cuộn xuống xem tay bài) thì cuộn chồng bài vào giữa màn hình để ai cũng thấy lá rút
+  if (ar.top + ar.height * .15 < 0 || dr.bottom + 20 > window.innerHeight) deck.scrollIntoView({ block: 'center', behavior: 'smooth' });
+  const v = document.createElement('div');
+  const [big, small] = lc.ok ? info.win : info.lose;
+  const who = g.players[lc.player]?.name || '';
+  v.className = 'verdict ' + (lc.ok ? 'win' : 'lose');
+  v.innerHTML = `${lc.ok ? '✔' : '✘'} ${esc(big)}<small>${esc(who)} · ${info.icon} ${esc(lc.kind)} · ${esc(small)}</small>`;
+  layer.appendChild(v);
+  document.body.appendChild(layer);
+  const T = (ms, fn) => setTimeout(fn, ms);
+  requestAnimationFrame(() => requestAnimationFrame(() => flyers.forEach(({ f, dx, dy }) => { f.style.transform = `translate(${dx}px, ${dy}px) scale(1.6)`; })));
+  T(550, () => flyers.forEach(({ f }) => f.classList.add('flipped')));
+  T(1100, () => {
+    flyers.forEach(({ f }) => { if (!f.classList.contains('other')) f.classList.add(lc.ok ? 'win' : 'lose'); });
+    if (!lc.ok && lc.kind === 'Dynamite') flyers.forEach(({ f }) => f.classList.add('boom'));
+    v.classList.add('show');
+  });
+  T(3000, () => {
+    v.classList.remove('show');
+    const disc = $('.discard-stack') || $('.arena .pile:last-child');
+    const r = (disc || deck).getBoundingClientRect();
+    // toạ độ trang: đích (lá trên cùng của bài bỏ) trừ vị trí xuất phát của lá bay
+    const dx = r.right + window.scrollX - dr.width - (dr.left + sx), dy = r.top + window.scrollY - (dr.top + sy);
+    flyers.forEach(({ f }) => {
+      f.style.transform = `translate(${dx}px, ${dy}px) scale(1)`;
+      f.style.opacity = '0';
+    });
+  });
+  T(3600, () => layer.remove());
 }
 
 function isClickable(c, g, meP) {
@@ -612,6 +842,13 @@ function promptHTML(g, meIdx, meP) {
     case 'store':
       return `<h4>🏪 General Store — ${mine ? 'chọn 1 lá:' : `đang chờ ${P(pend.player)} chọn…`}</h4>
         <div class="row" id="storeCards">${pend.cards.map((c) => cardHTML(c, 'small ' + (mine ? 'playable' : ''))).join('')}</div>`;
+    case 'check': {
+      const ci = CHECK_INFO[pend.kind] || CHECK_INFO.Barrel;
+      const luck = g.players[pend.player].char === 'Lucky Duke' ? ' (Lucky Duke lật 2 lá, lấy lá có lợi)' : '';
+      if (!mine) return `<h4>${ci.icon} ${P(pend.player)} đang rút kiểm tra ${esc(pend.kind)}…</h4><div class="muted">${ci.need}${luck}.</div>`;
+      return `<h4>${ci.icon} Rút kiểm tra ${esc(pend.kind)}</h4><div>${ci.need}${luck}. Bấm vào <b>chồng bài đang sáng</b> để rút.</div>
+        <div class="row"><button class="btn" data-act="checkDraw">🃏 Rút bài</button></div>`;
+    }
     case 'kit':
       if (!mine) return `<h4>Kit Carlson ${P(pend.player)} đang chọn bài…</h4>`;
       return `<h4>Kit Carlson: chọn 2 lá để giữ</h4>
@@ -703,6 +940,9 @@ function bindGame(g, meIdx, meP, canPlay, myPrompt) {
     await sendAction({ type: 'play', cardId: card.id, target: p.name });
   }));
 
+  const deckEl = main.querySelector('#deck.ready');
+  if (deckEl) deckEl.onclick = run(async () => { deckEl.classList.remove('ready'); await sendAction({ type: 'checkDraw' }); });
+
   main.querySelectorAll('#storeCards .card').forEach((el) => el.onclick = run(async () => {
     if (!myPrompt) return;
     await sendAction({ type: 'pick', cardId: Number(el.dataset.card) });
@@ -731,6 +971,7 @@ function bindGame(g, meIdx, meP, canPlay, myPrompt) {
     if (act === 'endTurn') return sendAction({ type: 'endTurn' });
     if (act === 'take') return sendAction({ type: 'take' });
     if (act === 'barrel') return sendAction({ type: 'barrel' });
+    if (act === 'checkDraw') return sendAction({ type: 'checkDraw' });
     if (act === 'draw') return sendAction({ type: 'drawChoice', from: el.dataset.from, target: $('#drawTarget')?.value });
   }));
 }

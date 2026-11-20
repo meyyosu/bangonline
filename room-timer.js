@@ -3,10 +3,18 @@
 // Preserve the turn's remaining time while a separate response clock runs.
 function syncTimer(room, now = Date.now()) {
   const g = room.game;
+  if (g?.phase === 'character') {
+    const duration = (room.characterSeconds || 0) * 1000;
+    if (!duration) { room.clock = null; return; }
+    if (room.clock?.pending !== g.pending) {
+      room.clock = { character: true, deadline: now + duration, pending: g.pending, player: g.pending.player };
+    }
+    return;
+  }
   const duration = room.turnSeconds * 1000;
   if (!g || g.winner || !duration) { room.clock = null; return; }
   let c = room.clock;
-  if (!c || c.turn !== g.turnNumber) {
+  if (!c || c.character || c.turn !== g.turnNumber) {
     c = room.clock = { turn: g.turnNumber, remaining: duration, deadline: now + duration, pending: null, player: g.turn };
   }
   const pending = g.pending;
