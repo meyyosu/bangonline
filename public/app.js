@@ -579,20 +579,50 @@ function targetFilter(card, g, meP) {
 const ROLE_ICON = { Sheriff: '⭐', Deputy: '🛡️', Outlaw: '💀', Renegade: '🎭' };
 function renderCharacterSelection() {
   const g = ROOM.game;
+  const meP = g.players[g.me.index];
   const mine = g.pending.player === g.me.index;
-  $('#mainArea').innerHTML = `<div class="panel">
-    <h2>Chọn nhân vật đầu game</h2>
+  const options = mine ? g.pending.options : meP.char ? [meP.char] : [];
+  const choiceKey = `${ROOM.code}:${g.pending.player}`;
+  if (ui.chooseFor !== choiceKey) { ui.chooseFor = choiceKey; ui.choosePick = null; }
+  if (!options.includes(ui.choosePick)) ui.choosePick = null;
+  const selected = meP.char || ui.choosePick;
+  const done = g.players.filter((p) => p.char).length;
+  const role = META.roles[meP.role];
+  const cards = options.map((name) => {
+    const ch = META.chars[name];
+    const max = ch.hp + (meP.role === 'Sheriff' ? 1 : 0);
+    return `<div class="ccard ${selected === name ? 'sel' : ''}" ${mine ? `data-character="${esc(name)}" role="button" tabindex="0" aria-pressed="${selected === name}"` : ''}>
+      <div class="por">${CHAR_ICON[name] || '🤠'}</div><div class="nm">${esc(name)}</div>
+      <div class="chp" title="${max} máu">${Array.from({ length: max }, () => bulletSVG(true, 22)).join('')}${meP.role === 'Sheriff' ? '<span class="plus">+1 Sheriff</span>' : ''}</div>
+      <div class="ab">${esc(ch.desc)}</div></div>`;
+  }).join('');
+  $('#mainArea').innerHTML = `<div class="panel choose">
+    <div class="rolecard ${meP.role}"><div class="rstar">${ROLE_ICON[meP.role]}</div>
+      <div><h3>Bạn là ${esc(ROLE_VI[meP.role])} · ${esc(role.vi)}</h3><p>${esc(role.goal)}${meP.role === 'Sheriff' ? ' Bạn được +1 máu.' : ''}</p></div>
+      <span class="secret">${meP.role === 'Sheriff' ? '👁️ Mọi người đều biết' : '🔒 Chỉ bạn thấy'}</span></div>
+    <div class="choose-head"><h2>Chọn nhân vật</h2><span class="muted">${mine ? `Bạn được chia ${options.length} lá — bấm vào 1 lá rồi xác nhận.` : `Đang chờ ${esc(g.players[g.pending.player].name)} chọn nhân vật…`}</span></div>
     <div class="room-clock" data-room-clock role="timer"></div>
-    <p>${mine ? 'Chọn nhân vật của bạn:' : `Đang chờ ${esc(g.players[g.pending.player].name)} chọn nhân vật…`}</p>
-    <p>Vai trò của bạn: <b>${ROLE_VI[g.players[g.me.index].role]}</b></p>
-    <div class="character-options">${(g.pending.options || []).map((name) => `<button class="character-option" data-character="${esc(name)}">
-      <b>${esc(name)}</b><span>❤️ ${META.chars[name].hp} máu${g.players[g.me.index].role === 'Sheriff' ? ' (+1 Sheriff)' : ''}</span><span>${esc(META.chars[name].desc)}</span>
-    </button>`).join('')}</div>
-    <ul class="seat-list">${g.players.map((p, i) => `<li><b>${esc(p.name)}</b> · ${p.char ? esc(p.char) : i === g.pending.player ? 'Đang chọn…' : 'Chờ chọn'}</li>`).join('')}</ul>
+    <div class="chars ${selected ? 'has-sel' : ''} ${mine ? '' : 'locked'}">${cards}</div>
+    <div class="actions" style="justify-content:center">${mine ? `<button class="btn" id="confirmCharacter" ${selected ? '' : 'disabled'}>✔ Chọn ${esc(selected || 'nhân vật')}</button>` : meP.char ? `<span class="muted">✔ Bạn chơi <b>${esc(meP.char)}</b>. Đang chờ những người khác…</span>` : '<span class="muted">Chờ tới lượt của bạn.</span>'}
+      ${mine && ROOM.characterSeconds ? '<span class="muted">Hết giờ sẽ tự chọn ngẫu nhiên.</span>' : ''}</div>
+    <h3 style="margin-top:18px">Người chơi (${done}/${g.players.length} đã chọn)</h3>
+    <div class="cprogress"><i style="width:${done / g.players.length * 100}%"></i></div>
+    <ul class="plist">${g.players.map((p, i) => `<li>${roleBadge(p)} <b>${esc(p.name)}</b>${i === g.me.index ? ' (bạn)' : ''}<span class="st ${p.char ? 'done' : 'wait'}">${p.char ? '✔ Đã chọn' : i === g.pending.player ? 'Đang chọn' : 'Chờ tới lượt'}</span></li>`).join('')}</ul>
     <p class="muted">Ván đấu và timer lượt bắt đầu khi mọi người đã chọn xong.</p>
   </div>`;
-  document.querySelectorAll('[data-character]').forEach((b) => b.onclick = run(() => api(`/api/rooms/${ROOM.code}/action`, { action: { type: 'chooseCharacter', character: b.dataset.character } })));
-  $('#logBox').textContent = '';
+  document.querySelectorAll('[data-character]').forEach((el) => {
+    const select = () => { ui.choosePick = el.dataset.character; renderCharacterSelection(); };
+    el.onclick = select;
+    el.onkeydown = (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); select(); } };
+  });
+  const confirm = $('#confirmCharacter');
+  if (confirm) confirm.onclick = run(async () => {
+    confirm.disabled = true;
+    try { await sendAction({ type: 'chooseCharacter', character: ui.choosePick }); }
+    finally { if (confirm.isConnected) confirm.disabled = false; }
+  });
+  $('#logBox').innerHTML = g.log.map((l) => `<div>${esc(l)}</div>`).join('');
+  updateClock();
 }
 
 function renderGame() {

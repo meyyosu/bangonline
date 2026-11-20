@@ -406,8 +406,3 @@ body.eq-lg .eqt .nm { font-size: 10px; }
   .plate { font-size: 11px; max-width: 92px; }
   .verdict { font-size: 18px; padding: 4px 10px; }
 }
-
-/* Chọn nhân vật đầu game */
-.character-options { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px; margin: 16px 0; }
-.character-option { display: flex; flex-direction: column; gap: 10px; padding: 18px; text-align: left; font: inherit; color: inherit; background: #fff8e9; border: 2px solid #c9a46a; border-radius: 8px; cursor: pointer; }
-.character-option:hover, .character-option:focus-visible { border-color: #b5332a; background: #ffeac4; }
