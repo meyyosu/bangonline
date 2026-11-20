@@ -6,6 +6,12 @@
       "runtimeExecutable": "node\\node.exe",
       "runtimeArgs": ["server.js"],
       "port": 3000
+    },
+    {
+      "name": "bang-preview-draft",
+      "runtimeExecutable": "C:\\Users\\Administrator\\Downloads\\bangonline-main\\bangonline-main\\node\\node.exe",
+      "runtimeArgs": ["C:\\Users\\Administrator\\AppData\\Local\\Temp\\claude\\041864f2716a8acb\\ddcd5e56-c281-48f2-a12a-e43df87bd923\\scratchpad\\game\\server.js"],
+      "port": 3007
     }
   ]
 }
