@@ -24,8 +24,9 @@ input[type=number] { width: 100%; padding: 10px 12px; border-radius: 8px; border
 .room-settings { margin-top: 18px; padding: 14px; border: 1px solid #c9a46a; border-radius: 8px; }
 .password-dialog { width: min(420px, 90vw); color: var(--ink); }
 .password-dialog::backdrop { background: rgba(0,0,0,.65); }
-#turnClock { padding: 8px 12px; border: 1px solid var(--gold); border-radius: 8px; font-weight: 700; }
-#turnClock.urgent { background: var(--red); color: white; }
+.room-clock { padding: 10px 14px; border: 2px solid var(--gold); border-radius: 8px; font-weight: 700; font-variant-numeric: tabular-nums; background: var(--wood); color: var(--paper); }
+.room-clock.urgent { background: var(--red); color: white; }
+.room-clock[hidden] { display: none; }
 .hidden { display: none !important; }
 
 /* ---------- topbar ---------- */
@@ -405,3 +406,8 @@ body.eq-lg .eqt .nm { font-size: 10px; }
   .plate { font-size: 11px; max-width: 92px; }
   .verdict { font-size: 18px; padding: 4px 10px; }
 }
+
+/* Chọn nhân vật đầu game */
+.character-options { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px; margin: 16px 0; }
+.character-option { display: flex; flex-direction: column; gap: 10px; padding: 18px; text-align: left; font: inherit; color: inherit; background: #fff8e9; border: 2px solid #c9a46a; border-radius: 8px; cursor: pointer; }
+.character-option:hover, .character-option:focus-visible { border-color: #b5332a; background: #ffeac4; }

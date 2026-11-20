@@ -185,12 +185,12 @@ function timerField(value = 0) {
     <input id="turnSeconds" type="number" name="turnSeconds" min="0" max="600" step="1" value="${esc(value)}" required>
     <p class="muted">0 = tắt; từ 10–600 giây. Tạm dừng lượt khi chờ phản hồi; mỗi phản hồi có timer riêng cùng thời lượng.</p>`;
 }
-function charField(value = 3) {
-  const v = Number(value) || 3;
-  return `<label for="charChoices">Số lá nhân vật mỗi người rút để chọn</label>
-    <select id="charChoices" name="charChoices">${[1, 2, 3, 4, 5].map((n) =>
-      `<option value="${n}" ${n === v ? 'selected' : ''}>${n}${n === 1 ? ' (chia ngẫu nhiên, không chọn)' : ' lá'}</option>`).join('')}</select>
-    <p class="muted">Mặc định 3. Bang! chỉ có 16 nhân vật nên phòng 6–7 người tối đa 2 lá mỗi người.</p>`;
+function characterFields(choices = 1, seconds = 30) {
+  return `<label for="characterChoices">Số nhân vật để chọn đầu game</label>
+    <select id="characterChoices" name="characterChoices">${[1, 2, 3, 4].map((n) => `<option value="${n}" ${Number(choices) === n ? 'selected' : ''}>${n}${n === 1 ? ' (chia ngẫu nhiên)' : ''}</option>`).join('')}</select>
+    <label for="characterSeconds">Thời gian chọn nhân vật mỗi người (giây)</label>
+    <input id="characterSeconds" type="number" name="characterSeconds" min="0" max="600" step="1" value="${esc(seconds)}" required>
+    <p class="muted">0 = tắt; từ 10–600 giây, riêng với timer lượt. Chọn lần lượt, không trùng nhân vật; hết giờ tự chọn ngẫu nhiên. Khi đặt 1 nhân vật, game tự chia và bỏ qua bước chọn.</p>`;
 }
 
 // ---------- sảnh ----------
@@ -206,7 +206,7 @@ function showLobby() {
           <label>Tên phòng</label><input type="text" name="name" placeholder="Phòng của ${esc(ME)}" maxlength="40">
           <label for="createPassword">Mật khẩu phòng (không bắt buộc)</label><input id="createPassword" type="password" name="password" maxlength="64" autocomplete="new-password">
           ${timerField()}
-          ${charField()}
+          ${characterFields()}
           <button class="btn" style="width:100%;margin-top:10px">🎲 Tạo phòng mới</button>
         </form>
         <h2 style="margin-top:22px">Vào bằng mã</h2>
@@ -224,7 +224,7 @@ function showLobby() {
   $('#createForm').onsubmit = run(async (e) => {
     e.preventDefault();
     const f = new FormData(e.target);
-    const r = await api('/api/rooms', { name: f.get('name'), password: f.get('password'), turnSeconds: Number(f.get('turnSeconds')), charChoices: Number(f.get('charChoices')) });
+    const r = await api('/api/rooms', { name: f.get('name'), password: f.get('password'), turnSeconds: Number(f.get('turnSeconds')), characterChoices: Number(f.get('characterChoices')), characterSeconds: Number(f.get('characterSeconds')) });
     enterRoom(r.code);
   });
   $('#joinForm').onsubmit = run(async (e) => {
@@ -270,7 +270,7 @@ function enterRoom(code) {
         <div class="row"><h2 id="roomName"></h2><span class="code">${code}</span>
           <button class="btn ghost small" id="copyLink">📋 Copy link mời</button>${settingsMenuHTML()}</div>
         <div class="row" id="roomBtns"></div>
-        <div id="turnClock" role="timer"></div>
+        <div id="turnClock" class="room-clock" data-room-clock role="timer" hidden></div>
       </div>
       <div id="mainArea"></div>
       <div class="side">
@@ -338,10 +338,9 @@ function renderRoom() {
   const btns = $('#roomBtns');
   const isHost = r.host === ME;
   const g = r.game;
-  const meAlive = g ? g.players.find((p) => p.name === ME)?.alive : true;
   btns.innerHTML = `
     ${isHost && g?.winner ? '<button class="btn green" id="resetBtn">🔁 Về phòng chờ</button>' : ''}
-    ${!g || g.winner || !meAlive ? '<button class="btn secondary" id="leaveBtn">Rời phòng</button>' : ''}`;
+    <button class="btn secondary" id="leaveBtn">Rời phòng${g && !g.winner ? ' giữa ván' : ''}</button>`;
   $('#leaveBtn') && ($('#leaveBtn').onclick = run(async () => { await api(`/api/rooms/${r.code}/leave`, {}); showLobby(); }));
   $('#resetBtn') && ($('#resetBtn').onclick = run(() => api(`/api/rooms/${r.code}/reset`, {})));
 
@@ -355,6 +354,15 @@ function renderRoom() {
   $('#logPanel').style.display = g ? '' : 'none';
   if (!g) return renderWaiting();
   renderGame();
+  updateClock();
+}
+
+function roomSettingsBody(form) {
+  const f = new FormData(form);
+  const body = { turnSeconds: Number(f.get('turnSeconds')), characterChoices: Number(f.get('characterChoices')), characterSeconds: Number(f.get('characterSeconds')) };
+  if (f.has('removePassword')) body.password = '';
+  else if (f.get('password')) body.password = f.get('password');
+  return body;
 }
 
 function renderWaiting() {
@@ -371,11 +379,11 @@ function renderWaiting() {
       </ul>
       <div class="room-settings">
         <h3>Cài đặt phòng</h3>
-        <p>${r.hasPassword ? '🔒 Có mật khẩu' : '🔓 Không có mật khẩu'} · ${r.turnSeconds ? r.turnSeconds + ' giây/lượt' : 'Không giới hạn thời gian'}
-          · ${r.charChoices > 1 ? `Mỗi người rút ${r.charChoices} nhân vật để chọn` : 'Nhân vật chia ngẫu nhiên'}</p>
+        <p>${r.hasPassword ? '🔒 Có mật khẩu' : '🔓 Không có mật khẩu'} · ${r.turnSeconds ? r.turnSeconds + ' giây/lượt' : 'Không giới hạn thời gian'}</p>
+        <p>Chọn 1 trong ${r.characterChoices} nhân vật · ${r.characterSeconds ? r.characterSeconds + ' giây/người để chọn' : 'Không giới hạn giờ chọn nhân vật'}</p>
         ${isHost ? `<form id="settingsForm">
           ${timerField(ui.settingsDraft?.turnSeconds ?? r.turnSeconds)}
-          ${charField(ui.settingsDraft?.charChoices ?? r.charChoices)}
+          ${characterFields(ui.settingsDraft?.characterChoices ?? r.characterChoices, ui.settingsDraft?.characterSeconds ?? r.characterSeconds)}
           <label for="roomPassword">Mật khẩu mới (để trống để giữ nguyên)</label>
           <input id="roomPassword" type="password" name="password" maxlength="64" autocomplete="new-password" value="${esc(ui.settingsDraft?.password || '')}">
           <label><input type="checkbox" name="removePassword" ${ui.settingsDraft?.removePassword ? 'checked' : ''}> Xóa mật khẩu phòng</label>
@@ -396,19 +404,23 @@ function renderWaiting() {
         </ul>
       </div>
     </div>`;
-  $('#startBtn') && ($('#startBtn').onclick = run(() => api(`/api/rooms/${r.code}/start`, {})));
+  $('#startBtn') && ($('#startBtn').onclick = run(async () => {
+    const form = $('#settingsForm');
+    if (form && !form.reportValidity()) return;
+    // Save the visible settings even when the host starts without pressing Save.
+    const settings = form ? roomSettingsBody(form) : {};
+    await api(`/api/rooms/${r.code}/start`, settings);
+    ui.settingsDraft = null;
+  }));
   const settings = $('#settingsForm');
   if (settings) {
     settings.oninput = () => {
       const f = new FormData(settings);
-      ui.settingsDraft = { turnSeconds: f.get('turnSeconds'), charChoices: f.get('charChoices'), password: f.get('password'), removePassword: f.has('removePassword') };
+      ui.settingsDraft = { turnSeconds: f.get('turnSeconds'), characterChoices: f.get('characterChoices'), characterSeconds: f.get('characterSeconds'), password: f.get('password'), removePassword: f.has('removePassword') };
     };
     settings.onsubmit = run(async (e) => {
       e.preventDefault();
-      const f = new FormData(settings);
-      const body = { turnSeconds: Number(f.get('turnSeconds')), charChoices: Number(f.get('charChoices')) };
-      if (f.has('removePassword')) body.password = '';
-      else if (f.get('password')) body.password = f.get('password');
+      const body = roomSettingsBody(settings);
       await api(`/api/rooms/${r.code}/settings`, body);
       ui.settingsDraft = null;
       if (ROOM && !ROOM.game) renderWaiting();
@@ -419,15 +431,17 @@ function renderWaiting() {
 }
 
 function updateClock() {
-  const el = $('#turnClock');
-  if (!el) return;
   const t = ROOM?.timer;
-  el.hidden = !t;
-  if (!t) return;
-  const seconds = Math.max(0, Math.ceil((t.deadline - Date.now() - (ui.serverOffset || 0)) / 1000));
-  const name = ROOM.game.players[t.player].name;
-  el.textContent = ROOM.game.phase === 'choose' ? `⏱ Chọn nhân vật: ${seconds}s` : `⏱ ${name} · ${t.response ? 'Phản hồi' : 'Lượt chơi'}: ${seconds}s`;
-  el.classList.toggle('urgent', seconds <= 10);
+  const g = ROOM?.game;
+  const seconds = t ? Math.max(0, Math.ceil((t.deadline - Date.now() - (ui.serverOffset || 0)) / 1000)) : 0;
+  const name = g?.players[t?.player]?.name || '';
+  const text = t ? `⏱ ${name} · ${t.character ? 'Chọn nhân vật' : t.response ? 'Phản hồi' : 'Lượt chơi'}: ${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`
+    : `⏱ ${g?.phase === 'character' ? 'Chọn nhân vật' : 'Lượt chơi'}: không giới hạn`;
+  document.querySelectorAll('[data-room-clock]').forEach((el) => {
+    el.hidden = !g || !!g.winner;
+    el.textContent = text;
+    el.classList.toggle('urgent', !!t && seconds <= 10);
+  });
 }
 setInterval(updateClock, 250);
 
@@ -563,61 +577,27 @@ function targetFilter(card, g, meP) {
 
 // ---------- chọn nhân vật (trước khi vào trận) ----------
 const ROLE_ICON = { Sheriff: '⭐', Deputy: '🛡️', Outlaw: '💀', Renegade: '🎭' };
-function renderChoose(g) {
-  const me = g.me;
-  const meP = me ? g.players[me.index] : null;
-  const locked = !me || !!me.picked;
-  if (locked) ui.choosePick = null;
-  const sel = me?.picked || ui.choosePick;
-  const done = g.players.filter((p) => p.picked).length;
-  let roleHTML = '';
-  if (meP) {
-    const role = META.roles[meP.role];
-    roleHTML = `<div class="rolecard ${meP.role}"><div class="rstar">${ROLE_ICON[meP.role]}</div>
-      <div><h3>Bạn là ${esc(ROLE_VI[meP.role])} · ${esc(role.vi)}</h3><p>${esc(role.goal)}${meP.role === 'Sheriff' ? ' Bạn được +1 máu.' : ''}</p></div>
-      <span class="secret">${meP.role === 'Sheriff' ? '👁️ Mọi người đều biết' : '🔒 Chỉ bạn thấy'}</span></div>`;
-  }
-  const cards = (me?.choices || []).map((name) => {
-    const ch = META.chars[name];
-    const max = ch.hp + (meP?.role === 'Sheriff' ? 1 : 0);
-    let hp = '';
-    for (let i = 0; i < max; i++) hp += bulletSVG(true, 22);
-    return `<div class="ccard ${sel === name ? 'sel' : ''}" data-char="${esc(name)}" role="button" tabindex="0">
-      <div class="por">${CHAR_ICON[name] || '🤠'}</div><div class="nm">${esc(name)}</div>
-      <div class="chp" title="${max} máu">${hp}${meP?.role === 'Sheriff' ? '<span class="plus">+1 Sheriff</span>' : ''}</div>
-      <div class="ab">${esc(ch.desc)}</div></div>`;
-  }).join('');
-  const list = g.players.map((p, i) => `<li>${roleBadge(p)} <b>${esc(p.name)}</b>${i === me?.index ? ' <span class="muted">(bạn)</span>' : ''}
-    <span class="st ${p.picked ? 'done' : 'wait'}">${p.picked ? '✔ Đã chọn' : 'Đang chọn'}</span></li>`).join('');
-  $('#mainArea').innerHTML = `<div class="panel choose">
-    ${roleHTML}
-    <div class="choose-head"><h2>Chọn nhân vật</h2><span class="muted">${!me ? 'Đang chờ người chơi chọn nhân vật…'
-      : locked ? 'Bạn đã chốt nhân vật. Đang chờ những người khác…' : `Bạn được chia ${me.choices.length} lá — bấm vào 1 lá rồi xác nhận.`}</span></div>
-    <div class="chars ${sel ? 'has-sel' : ''} ${locked ? 'locked' : ''}" id="chars">${cards}</div>
-    <div class="actions" style="justify-content:center">${!me ? '' : locked
-      ? `<span class="muted">✔ Bạn chơi <b>${esc(me.picked)}</b>. Ván đấu bắt đầu khi tất cả đã chọn.</span>`
-      : `<button class="btn" data-act="confirmChar" ${sel ? '' : 'disabled'}>✔ Chọn ${esc(sel || 'nhân vật')}</button>
-         ${ROOM.turnSeconds ? '<span class="muted">Hết giờ sẽ tự chọn lá đầu tiên.</span>' : ''}`}</div>
-    <h3 style="margin-top:18px">Người chơi (${done}/${g.players.length} đã chọn)</h3>
-    <div class="cprogress"><i style="width:${(done / g.players.length) * 100}%"></i></div>
-    <ul class="plist">${list}</ul>
-    <p class="muted">Nhân vật của mọi người chỉ lộ ra khi ván đấu bắt đầu.</p>
+function renderCharacterSelection() {
+  const g = ROOM.game;
+  const mine = g.pending.player === g.me.index;
+  $('#mainArea').innerHTML = `<div class="panel">
+    <h2>Chọn nhân vật đầu game</h2>
+    <div class="room-clock" data-room-clock role="timer"></div>
+    <p>${mine ? 'Chọn nhân vật của bạn:' : `Đang chờ ${esc(g.players[g.pending.player].name)} chọn nhân vật…`}</p>
+    <p>Vai trò của bạn: <b>${ROLE_VI[g.players[g.me.index].role]}</b></p>
+    <div class="character-options">${(g.pending.options || []).map((name) => `<button class="character-option" data-character="${esc(name)}">
+      <b>${esc(name)}</b><span>❤️ ${META.chars[name].hp} máu${g.players[g.me.index].role === 'Sheriff' ? ' (+1 Sheriff)' : ''}</span><span>${esc(META.chars[name].desc)}</span>
+    </button>`).join('')}</div>
+    <ul class="seat-list">${g.players.map((p, i) => `<li><b>${esc(p.name)}</b> · ${p.char ? esc(p.char) : i === g.pending.player ? 'Đang chọn…' : 'Chờ chọn'}</li>`).join('')}</ul>
+    <p class="muted">Ván đấu và timer lượt bắt đầu khi mọi người đã chọn xong.</p>
   </div>`;
-  const lb = $('#logBox');
-  lb.innerHTML = g.log.map((l) => `<div>${esc(l)}</div>`).join('');
-  if (locked) return;
-  $('#mainArea').querySelectorAll('[data-char]').forEach((el) => {
-    const pickIt = () => { ui.choosePick = el.dataset.char; renderChoose(g); };
-    el.onclick = pickIt;
-    el.onkeydown = (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); pickIt(); } };
-  });
-  const btn = $('#mainArea [data-act="confirmChar"]');
-  if (btn) btn.onclick = run(async () => { btn.disabled = true; await sendAction({ type: 'chooseChar', char: ui.choosePick }); });
+  document.querySelectorAll('[data-character]').forEach((b) => b.onclick = run(() => api(`/api/rooms/${ROOM.code}/action`, { action: { type: 'chooseCharacter', character: b.dataset.character } })));
+  $('#logBox').textContent = '';
 }
 
 function renderGame() {
   const g = ROOM.game;
-  if (g.phase === 'choose') return renderChoose(g);
+  if (g.phase === 'character') return renderCharacterSelection();
   ui.choosePick = null;
   const meIdx = g.me?.index ?? -1;
   const meP = g.players[meIdx];
@@ -721,7 +701,7 @@ function renderGame() {
 
   // Bàn ở giữa; ô thông báo + bài của mình ở cột bên phải
   $('#mainArea').innerHTML = `<div class="board playing">${g.winner ? winnerHTML(g) : ''}
-    <div class="table-col">${tableHTML}</div><div class="right-col">${promptBoxHTML}${meHTML}</div></div>`;
+    <div class="table-col">${tableHTML}</div><div class="right-col"><div class="room-clock" data-room-clock role="timer"></div>${promptBoxHTML}${meHTML}</div></div>`;
 
   // log
   const lb = $('#logBox');
@@ -730,6 +710,7 @@ function renderGame() {
 
   bindGame(g, meIdx, meP, canPlay, myPrompt);
   showCheckReveal(g);
+  updateClock();
 }
 
 // ---------- rút kiểm tra: lá bay ra giữa bàn, lật mặt, báo thành công/thất bại ----------
