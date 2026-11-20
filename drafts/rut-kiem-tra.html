@@ -1,0 +1,243 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Nháp rút kiểm tra</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Rye&family=Be+Vietnam+Pro:wght@400;600;700&display=swap" rel="stylesheet">
+<style>
+:root { --wood: #2b1a10; --paper: #f4e4c1; --paper2: #e9d3a3; --ink: #2a1a0e; --muted: #7a5b3a; --red: #b5332a; --gold: #d9a441; --blue: #2f5d8a; --green: #3f7d3a; }
+* { box-sizing: border-box; }
+body { margin: 0; font-family: 'Be Vietnam Pro', system-ui, sans-serif; color: var(--ink);
+  background: radial-gradient(ellipse at top, #5a3820 0%, var(--wood) 60%) fixed; min-height: 100vh; }
+button { font: inherit; }
+.picker { position: sticky; top: 0; z-index: 30; display: flex; flex-wrap: wrap; gap: 8px; align-items: center;
+  padding: 10px 16px; background: rgba(0,0,0,.6); border-bottom: 2px solid var(--gold); color: var(--paper); }
+.picker .brand { font-family: 'Rye', serif; color: var(--gold); font-size: 22px; margin-right: 10px; }
+.picker button { background: transparent; color: var(--paper); border: 1px solid rgba(244,228,193,.5); border-radius: 99px; padding: 5px 12px; cursor: pointer; font-size: 14px; }
+.picker button.on { background: var(--gold); color: var(--ink); border-color: var(--gold); font-weight: 700; }
+.picker .sep { width: 1px; height: 24px; background: rgba(244,228,193,.3); margin: 0 6px; }
+.note { max-width: 900px; margin: 12px auto 0; padding: 0 16px; color: var(--paper2); font-size: 14px; }
+.note b { color: var(--gold); }
+.wrap { max-width: 900px; margin: 0 auto; padding: 0 16px 40px; }
+
+/* bàn gỗ (rút gọn từ game) */
+.arena { position: relative; width: 100%; aspect-ratio: 16 / 10; margin-top: 16px; }
+.felt { position: absolute; inset: 4% 6%; border-radius: 50%;
+  background: radial-gradient(ellipse at 50% 45%, rgba(255,220,160,.18), transparent 60%),
+    repeating-radial-gradient(ellipse at 50% 50%, #6b4021 0 6px, #5e3819 6px 11px, #734623 11px 15px);
+  border: 14px solid #2a160a; box-shadow: inset 0 0 0 4px #8b5a2b, inset 0 0 60px rgba(0,0,0,.6), 0 0 0 4px var(--gold), 0 20px 40px rgba(0,0,0,.65); }
+.felt::after { content: ''; position: absolute; inset: 24% 26%; border-radius: 50%; background: radial-gradient(ellipse, #7a2a1f 0%, #5b1f17 70%); border: 3px solid var(--gold); opacity: .85; }
+.piles { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); z-index: 2; display: flex; gap: 22px; align-items: flex-end; }
+.pile { text-align: center; font-size: 12px; color: var(--paper); position: relative; }
+.pile .lbl { margin-top: 6px; }
+
+/* lá bài */
+.cb, .cf { width: 64px; height: 90px; border-radius: 8px; }
+.cb { border: 3px solid var(--gold); background: repeating-linear-gradient(45deg, #7a2a1f, #7a2a1f 6px, #8e352a 6px, #8e352a 12px);
+  display: flex; align-items: center; justify-content: center; font-family: 'Rye', serif; color: var(--gold); font-size: 14px; }
+.deck { position: relative; }
+.deck .cb { box-shadow: 2px 2px 0 #5a1d15, 4px 4px 0 #3d130e, 0 8px 14px rgba(0,0,0,.4); }
+.cf { background: #fffaf0; border: 3px solid #8b5a2b; position: relative; display: flex; flex-direction: column; align-items: center; justify-content: center; color: var(--ink); }
+.cf .corner { position: absolute; top: 4px; left: 6px; font-size: 13px; font-weight: 700; line-height: 1; text-align: center; }
+.cf .corner.br { top: auto; left: auto; bottom: 4px; right: 6px; transform: rotate(180deg); }
+.cf .red { color: var(--red); }
+.cf .icon { font-size: 26px; } .cf .nm { font-size: 11px; font-weight: 700; margin-top: 4px; }
+.empty-slot { width: 64px; height: 90px; border-radius: 8px; border: 2px dashed rgba(244,228,193,.35); }
+
+/* chồng bài đang chờ được rút: sáng nhấp nháy + nhãn "Bấm để rút" */
+.deck.ready { cursor: pointer; }
+.deck.ready .cb { animation: deckGlow 1s ease-in-out infinite; }
+@keyframes deckGlow {
+  0%,100% { box-shadow: 2px 2px 0 #5a1d15, 4px 4px 0 #3d130e, 0 0 0 3px rgba(255,214,102,.5), 0 0 12px 2px rgba(255,214,102,.5); transform: translateY(0); }
+  50% { box-shadow: 2px 2px 0 #5a1d15, 4px 4px 0 #3d130e, 0 0 0 4px #ffd666, 0 0 30px 10px rgba(255,214,102,.9); transform: translateY(-3px); }
+}
+.deck.ready:hover .cb { filter: brightness(1.15); }
+.deck.waiting .cb { animation: deckWait 1.6s ease-in-out infinite; }
+@keyframes deckWait { 50% { box-shadow: 2px 2px 0 #5a1d15, 4px 4px 0 #3d130e, 0 0 18px 4px rgba(255,214,102,.45); } }
+.tap { position: absolute; left: 50%; bottom: calc(100% + 10px); transform: translateX(-50%); white-space: nowrap; background: #ffd666; color: var(--ink);
+  font-weight: 700; font-size: 13px; padding: 4px 10px; border-radius: 99px; box-shadow: 0 4px 10px rgba(0,0,0,.5); animation: bob .8s ease-in-out infinite; pointer-events: none; }
+.tap::after { content: ''; position: absolute; left: 50%; top: 100%; transform: translateX(-50%); border: 6px solid transparent; border-top-color: #ffd666; }
+.tap.other { background: rgba(0,0,0,.75); color: var(--paper); animation: none; }
+.tap.other::after { border-top-color: rgba(0,0,0,.75); }
+@keyframes bob { 50% { transform: translateX(-50%) translateY(-4px); } }
+
+/* lá bay ra + lật */
+.flyer { position: absolute; z-index: 20; width: 64px; height: 90px; perspective: 700px; transition: transform .55s cubic-bezier(.2,.8,.3,1); pointer-events: none; }
+.flyer .inner { position: relative; width: 100%; height: 100%; transform-style: preserve-3d; transition: transform .5s ease; }
+.flyer.flipped .inner { transform: rotateY(180deg); }
+.flyer .face { position: absolute; inset: 0; backface-visibility: hidden; }
+.flyer .face.front { transform: rotateY(180deg); }
+.flyer.win .cf { box-shadow: 0 0 0 4px #4caf50, 0 0 26px 6px rgba(76,175,80,.8); }
+.flyer.lose .cf { box-shadow: 0 0 0 4px #e0402f, 0 0 26px 6px rgba(224,64,47,.8); }
+.flyer.lose.boom .cf { animation: shake .4s 2; }
+@keyframes shake { 25% { transform: translateX(-4px) rotate(-3deg); } 75% { transform: translateX(4px) rotate(3deg); } }
+
+/* dấu kết quả */
+.verdict { position: absolute; z-index: 25; left: 50%; top: 12%; transform: translateX(-50%) scale(.3); opacity: 0; transition: transform .3s cubic-bezier(.3,1.6,.5,1), opacity .2s;
+  font-family: 'Rye', serif; font-size: 28px; padding: 6px 18px; border-radius: 10px; border: 4px solid; white-space: nowrap; text-shadow: 0 2px 0 rgba(0,0,0,.25); pointer-events: none; }
+.verdict.show { transform: translateX(-50%) scale(1) rotate(-4deg); opacity: 1; }
+.verdict.win { background: #e8f5e3; color: #2e6b29; border-color: #3f7d3a; }
+.verdict.lose { background: #fbe3d6; color: #9b2218; border-color: var(--red); }
+.verdict small { display: block; font-family: 'Be Vietnam Pro', sans-serif; font-size: 13px; font-weight: 700; text-align: center; text-shadow: none; }
+
+/* người chơi đang kiểm tra */
+.me-seat { position: absolute; left: 50%; bottom: -2%; transform: translateX(-50%); z-index: 3; display: flex; flex-direction: column; align-items: center; gap: 4px; }
+.av { width: 68px; height: 68px; border-radius: 50%; display: grid; place-items: center; font-size: 32px; position: relative;
+  background: radial-gradient(circle at 35% 30%, #fff4d8, #d9b97f); border: 3px solid #2a160a; box-shadow: 0 0 0 4px var(--gold), 0 0 26px rgba(217,164,65,.9); }
+.plate { background: #2a160a; color: var(--paper); border: 1px solid var(--gold); border-radius: 6px; padding: 2px 8px; font-size: 12px; font-weight: 700; }
+.chk-tile { position: absolute; top: -16px; left: -30px; width: 40px; height: 40px; border-radius: 7px; display: grid; place-items: center; font-size: 20px;
+  background: #eef4fa; border: 2px solid var(--blue); box-shadow: 0 0 0 3px #ffd666, 0 0 14px rgba(255,214,102,.9); }
+.chk-tile.jail { background: repeating-linear-gradient(90deg, #4a4f55 0 6px, #2c3035 6px 9px); border-color: #1b1d20; }
+.chk-tile.dyn { background: #fbe3d6; border-color: var(--red); }
+
+/* ô thông báo */
+.prompt { margin-top: 16px; background: var(--paper); border-radius: 10px; padding: 10px 14px; border: 3px solid var(--red); animation: glow 1.5s infinite; }
+.prompt.calm { border-color: #c9a46a; animation: none; }
+.prompt h4 { margin: 0 0 4px; font-size: 16px; }
+.prompt .need { display: inline-flex; gap: 6px; align-items: center; margin-top: 4px; font-size: 13px; }
+.prompt .need b { background: #fffaf0; border: 1px solid #c9a46a; border-radius: 6px; padding: 1px 8px; }
+@keyframes glow { 0%,100% { box-shadow: 0 0 6px rgba(181,51,42,.4); } 50% { box-shadow: 0 0 18px rgba(181,51,42,.9); } }
+.btn { background: var(--red); color: #fff; border: none; border-radius: 7px; padding: 6px 12px; cursor: pointer; font-weight: 600; font-size: 13px; box-shadow: 0 3px 0 #6e1d17; margin-top: 8px; }
+.log { margin-top: 12px; background: var(--paper); border: 2px solid #c9a46a; border-radius: 10px; padding: 8px 12px; font-size: 13px; min-height: 40px; }
+@media (prefers-reduced-motion: reduce) { .deck.ready .cb, .tap, .flyer.lose.boom .cf { animation: none; } }
+@media (max-width: 700px) { .arena { aspect-ratio: 1 / 1; } .verdict { font-size: 20px; } }
+</style>
+</head>
+<body>
+<div class="picker">
+  <span class="brand">BANG!</span>
+  <span>Tình huống:</span>
+  <button data-s="barrel" class="on">🛢️ Barrel</button>
+  <button data-s="jail">⛓️ Jail</button>
+  <button data-s="dyn">🧨 Dynamite</button>
+  <span class="sep"></span>
+  <span>Kết quả:</span>
+  <button data-r="rand" class="on">Ngẫu nhiên</button>
+  <button data-r="win">Thành công</button>
+  <button data-r="lose">Thất bại</button>
+  <span class="sep"></span>
+  <span>Góc nhìn:</span>
+  <button data-v="me" class="on">Bạn rút</button>
+  <button data-v="other">Người khác rút</button>
+</div>
+<p class="note">Khi phải rút kiểm tra, <b>chồng bài sáng nhấp nháy</b> và chờ người chơi bấm. Bấm vào → lá bài bay ra giữa bàn, lật mặt, sáng <b>xanh</b> nếu thành công hoặc <b>đỏ</b> nếu thất bại, kèm dấu kết quả, rồi rơi vào chồng bài bỏ. Người khác thấy chồng bài sáng nhẹ và dòng "Đang chờ … rút". Bấm <b>Làm lại</b> để xem lần nữa.</p>
+
+<div class="wrap">
+  <div class="arena" id="arena">
+    <div class="felt"></div>
+    <div class="piles">
+      <div class="pile"><div class="deck" id="deck"><div class="cb">BANG!</div></div><div class="lbl">Chồng: <span id="deckN">47</span></div></div>
+      <div class="pile"><div id="discard"><div class="empty-slot"></div></div><div class="lbl">Bài bỏ</div></div>
+    </div>
+    <div class="verdict" id="verdict"></div>
+    <div class="me-seat"><div class="av" id="avatar">🤠<div class="chk-tile" id="chkTile">🛢️</div></div><div class="plate" id="plate">Bạn</div></div>
+  </div>
+  <div class="prompt" id="prompt"></div>
+  <div class="log" id="log"></div>
+</div>
+
+<script>
+const SUIT = { H: '♥', D: '♦', C: '♣', S: '♠' };
+const NAMES = [['Bang!', '💥'], ['Missed!', '🙅'], ['Beer', '🍺'], ['Panic!', '😱'], ['Stagecoach', '🐎'], ['Cat Balou', '💃'], ['Mustang', '🐴'], ['Indians', '🪶']];
+const RANKS = ['A', '2', '3', '4', '5', '6', '7', '8', '9', '10', 'J', 'Q', 'K'];
+const S = {
+  barrel: { icon: '🛢️', tile: '', title: 'Rút kiểm tra Barrel', need: 'Cần <b>♥ Cơ</b> để né phát Bang!',
+    ok: (c) => c.suit === 'H', win: ['NÉ ĐƯỢC!', 'Ra ♥ — Barrel đỡ đạn'], lose: ['TRÚNG ĐẠN', 'Không ra ♥ — vẫn có thể bỏ Missed!'] },
+  jail: { icon: '⛓️', tile: 'jail', title: 'Rút kiểm tra Jail', need: 'Cần <b>♥ Cơ</b> để thoát tù',
+    ok: (c) => c.suit === 'H', win: ['VƯỢT NGỤC!', 'Ra ♥ — được chơi lượt này'], lose: ['Ở LẠI TÙ', 'Không ra ♥ — mất lượt'] },
+  dyn: { icon: '🧨', tile: 'dyn', title: 'Rút kiểm tra Dynamite', need: 'Nổ nếu ra <b>♠ Bích từ 2 đến 9</b>',
+    ok: (c) => !(c.suit === 'S' && RANKS.indexOf(c.rank) >= 1 && RANKS.indexOf(c.rank) <= 8), win: ['AN TOÀN', 'Dynamite chuyền sang người kế'], lose: ['BÙM! −3 MÁU', 'Ra ♠2–9 — Dynamite nổ'] },
+};
+let SC = 'barrel', RES = 'rand', VIEW = 'me', busy = false, deckN = 47, timers = [];
+const pick = (a) => a[Math.floor(Math.random() * a.length)];
+
+function makeCard() {
+  const sc = S[SC];
+  const want = RES === 'rand' ? null : RES === 'win';
+  for (let i = 0; i < 500; i++) {
+    const [name, icon] = pick(NAMES);
+    const c = { name, icon, suit: pick(Object.keys(SUIT)), rank: pick(RANKS) };
+    if (want === null || sc.ok(c) === want) return c;
+  }
+}
+function faceHTML(c) {
+  const red = c.suit === 'H' || c.suit === 'D' ? 'red' : '';
+  return `<div class="cf"><div class="corner ${red}">${c.rank}<br>${SUIT[c.suit]}</div><div class="icon">${c.icon}</div><div class="nm">${c.name}</div><div class="corner br ${red}">${c.rank}<br>${SUIT[c.suit]}</div></div>`;
+}
+const who = () => VIEW === 'me' ? 'Bạn' : 'Lan';
+
+function reset() {
+  timers.forEach(clearTimeout); timers = []; busy = false;
+  document.querySelectorAll('.flyer').forEach((f) => f.remove());
+  const sc = S[SC], deck = document.getElementById('deck');
+  document.getElementById('verdict').className = 'verdict';
+  document.getElementById('avatar').firstChild.textContent = VIEW === 'me' ? '🤠' : '👩';
+  document.getElementById('plate').textContent = VIEW === 'me' ? '⭐ Bạn' : '⭐ Lan';
+  const tile = document.getElementById('chkTile'); tile.className = 'chk-tile ' + sc.tile; tile.textContent = sc.icon;
+  deck.className = 'deck ' + (VIEW === 'me' ? 'ready' : 'waiting');
+  deck.querySelector('.tap')?.remove();
+  deck.insertAdjacentHTML('beforeend', VIEW === 'me' ? '<div class="tap">👆 Bấm để rút!</div>' : '<div class="tap other">⏳ Lan đang rút…</div>');
+  document.getElementById('prompt').className = 'prompt' + (VIEW === 'me' ? '' : ' calm');
+  document.getElementById('prompt').innerHTML = VIEW === 'me'
+    ? `<h4>${sc.icon} ${sc.title}</h4><div class="need">${sc.need}. Bấm vào <b>chồng bài đang sáng</b> để rút.</div>`
+    : `<h4>${sc.icon} Lan đang ${sc.title.toLowerCase()}</h4><div class="need">${sc.need}. Đang chờ Lan bấm rút… <button class="btn" id="simOther" style="margin:0 0 0 6px">Giả lập Lan bấm rút</button></div>`;
+  document.getElementById('simOther')?.addEventListener('click', draw);
+}
+
+function draw() {
+  if (busy) return; busy = true;
+  const sc = S[SC], c = makeCard(), ok = sc.ok(c);
+  const arena = document.getElementById('arena'), deck = document.getElementById('deck');
+  deck.className = 'deck'; deck.querySelector('.tap')?.remove();
+  deckN--; document.getElementById('deckN').textContent = deckN;
+
+  // Lá bài bay từ chồng bài lên giữa (phía trên các chồng), phóng to rồi lật mặt
+  const ar = arena.getBoundingClientRect(), dr = deck.getBoundingClientRect();
+  const x0 = dr.left - ar.left, y0 = dr.top - ar.top;
+  const f = document.createElement('div');
+  f.className = 'flyer';
+  f.style.left = x0 + 'px'; f.style.top = y0 + 'px';
+  f.innerHTML = `<div class="inner"><div class="face"><div class="cb">BANG!</div></div><div class="face front">${faceHTML(c)}</div></div>`;
+  arena.appendChild(f);
+  const cx = ar.width / 2 - 32, cy = ar.height * .5 - 45;
+  requestAnimationFrame(() => requestAnimationFrame(() => {
+    f.style.transform = `translate(${cx - x0}px, ${cy - y0 - 70}px) scale(1.7)`;
+  }));
+  const T = (ms, fn) => timers.push(setTimeout(fn, ms));
+  T(600, () => f.classList.add('flipped'));
+  T(1150, () => {
+    f.classList.add(ok ? 'win' : 'lose'); if (!ok && SC === 'dyn') f.classList.add('boom');
+    const [big, small] = ok ? sc.win : sc.lose;
+    const v = document.getElementById('verdict');
+    v.innerHTML = `${ok ? '✔' : '✘'} ${big}<small>${small}</small>`;
+    v.className = 'verdict show ' + (ok ? 'win' : 'lose');
+    document.getElementById('log').innerHTML = `${who()} rút kiểm tra ${sc.icon} ${SC === 'barrel' ? 'Barrel' : SC === 'jail' ? 'Jail' : 'Dynamite'}: <b>${c.rank}${SUIT[c.suit]} ${c.name}</b> → ${ok ? 'thành công' : 'thất bại'}.`;
+  });
+  // Rơi vào chồng bài bỏ
+  T(3000, () => {
+    const disc = document.getElementById('discard'), r = disc.getBoundingClientRect();
+    f.style.transform = `translate(${r.left - ar.left - x0}px, ${r.top - ar.top - y0}px) scale(1)`;
+    document.getElementById('verdict').classList.remove('show');
+  });
+  T(3600, () => {
+    document.getElementById('discard').innerHTML = faceHTML(c); f.remove();
+    document.getElementById('prompt').className = 'prompt calm';
+    document.getElementById('prompt').innerHTML = `<h4>${ok ? '✔' : '✘'} ${ok ? sc.win[1] : sc.lose[1]}</h4><button class="btn" id="again">↺ Làm lại</button>`;
+    document.getElementById('again').onclick = reset;
+    busy = false;
+  });
+}
+
+document.getElementById('deck').addEventListener('click', () => { if (VIEW === 'me' && document.getElementById('deck').classList.contains('ready')) draw(); });
+document.querySelector('.picker').addEventListener('click', (e) => {
+  const b = e.target.closest('button'); if (!b) return;
+  if (b.dataset.s) SC = b.dataset.s; if (b.dataset.r) RES = b.dataset.r; if (b.dataset.v) VIEW = b.dataset.v;
+  for (const k of ['s', 'r', 'v']) document.querySelectorAll(`[data-${k}]`).forEach((x) => x.classList.toggle('on', x.dataset[k] === ({ s: SC, r: RES, v: VIEW })[k]));
+  reset();
+});
+reset();
+</script>
+</body>
+</html>

@@ -1,0 +1,232 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Nháp chọn nhân vật</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Rye&family=Be+Vietnam+Pro:wght@400;600;700&display=swap" rel="stylesheet">
+<style>
+:root { --wood: #2b1a10; --paper: #f4e4c1; --paper2: #e9d3a3; --ink: #2a1a0e; --muted: #7a5b3a; --red: #b5332a; --gold: #d9a441; --blue: #2f5d8a; --green: #3f7d3a; }
+* { box-sizing: border-box; }
+body { margin: 0; font-family: 'Be Vietnam Pro', system-ui, sans-serif; color: var(--ink);
+  background: radial-gradient(ellipse at top, #5a3820 0%, var(--wood) 60%) fixed; min-height: 100vh; }
+button, input { font: inherit; }
+.picker { position: sticky; top: 0; z-index: 30; display: flex; flex-wrap: wrap; gap: 8px; align-items: center;
+  padding: 10px 16px; background: rgba(0,0,0,.6); border-bottom: 2px solid var(--gold); color: var(--paper); }
+.picker .brand { font-family: 'Rye', serif; color: var(--gold); font-size: 22px; margin-right: 10px; }
+.picker button { background: transparent; color: var(--paper); border: 1px solid rgba(244,228,193,.5); border-radius: 99px; padding: 5px 12px; cursor: pointer; font-size: 14px; }
+.picker button.on { background: var(--gold); color: var(--ink); border-color: var(--gold); font-weight: 700; }
+.picker .sep { width: 1px; height: 24px; background: rgba(244,228,193,.3); margin: 0 6px; }
+.note { max-width: 1100px; margin: 12px auto 0; padding: 0 16px; color: var(--paper2); font-size: 14px; }
+.note b { color: var(--gold); }
+main { max-width: 1100px; margin: 0 auto; padding: 14px 16px 40px; display: grid; grid-template-columns: 1fr 280px; gap: 16px; align-items: start; }
+.panel { background: var(--paper); border-radius: 10px; padding: 16px 18px; border: 2px solid #c9a46a; box-shadow: 0 6px 20px rgba(0,0,0,.4); }
+.panel h2, .panel h3 { font-family: 'Rye', serif; font-weight: normal; color: var(--red); margin: 0 0 10px; }
+.muted { color: var(--muted); font-size: 13px; }
+.btn { background: var(--red); color: #fff; border: none; border-radius: 8px; padding: 9px 16px; cursor: pointer; font-weight: 600; box-shadow: 0 3px 0 #6e1d17; }
+.btn:disabled { opacity: .5; cursor: not-allowed; }
+.btn.blue { background: var(--blue); box-shadow: 0 3px 0 #1c3a57; }
+.btn.small { padding: 5px 10px; font-size: 13px; }
+label { font-weight: 600; font-size: 14px; display: block; margin: 12px 0 4px; }
+.role { font-size: 12px; font-weight: 700; padding: 2px 9px; border-radius: 99px; color: #fff; white-space: nowrap; }
+.role.Sheriff { background: #c48a12; } .role.Deputy { background: var(--blue); } .role.Outlaw { background: #6b2b1d; } .role.Renegade { background: #5a4a7a; } .role.unknown { background: #999; }
+
+/* ----- phòng chờ: ô chọn X ----- */
+.stepper { display: inline-flex; align-items: center; border: 2px solid #c9a46a; border-radius: 8px; overflow: hidden; background: #fffaf0; }
+.stepper button { border: 0; background: #f0dfb8; width: 34px; height: 36px; font-size: 18px; font-weight: 700; cursor: pointer; color: var(--ink); }
+.stepper span { min-width: 44px; text-align: center; font-weight: 700; font-size: 18px; }
+.hint { margin-top: 6px; font-size: 13px; color: var(--muted); }
+.hint b { color: var(--red); }
+.preview-cards { display: flex; gap: 6px; margin-top: 10px; }
+.preview-cards i { width: 26px; height: 36px; border-radius: 4px; border: 2px solid var(--gold); background: repeating-linear-gradient(45deg, #7a2a1f 0 4px, #8e352a 4px 8px); }
+
+/* ----- màn chọn nhân vật ----- */
+.rolecard { display: flex; gap: 14px; align-items: center; background: linear-gradient(#3d2616, #2a160a); color: var(--paper); border: 2px solid var(--gold); border-radius: 12px; padding: 12px 16px; margin-bottom: 16px; }
+.rolecard .star { width: 56px; height: 56px; border-radius: 50%; display: grid; place-items: center; font-size: 30px; background: radial-gradient(circle at 35% 30%, #ffe9a8, #c48a12); border: 3px solid #2a160a; box-shadow: 0 0 0 3px var(--gold); flex-shrink: 0; }
+.rolecard.Outlaw .star { background: radial-gradient(circle at 35% 30%, #e8a08c, #6b2b1d); }
+.rolecard.Deputy .star { background: radial-gradient(circle at 35% 30%, #a9c6e6, #2f5d8a); }
+.rolecard.Renegade .star { background: radial-gradient(circle at 35% 30%, #c9b8e8, #5a4a7a); }
+.rolecard h3 { font-family: 'Rye', serif; font-weight: normal; color: var(--gold); margin: 0; font-size: 20px; }
+.rolecard p { margin: 2px 0 0; font-size: 13px; color: var(--paper2); }
+.rolecard .secret { margin-left: auto; font-size: 12px; background: rgba(0,0,0,.4); padding: 3px 8px; border-radius: 6px; white-space: nowrap; }
+
+.choose-head { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; margin-bottom: 4px; }
+.choose-head h2 { margin: 0; }
+.clock { margin-left: auto; font-weight: 700; padding: 4px 10px; border: 1px solid var(--gold); border-radius: 8px; background: #fffaf0; }
+.chars { display: flex; gap: 16px; flex-wrap: wrap; justify-content: center; margin: 18px 0 8px; perspective: 900px; }
+.ccard { position: relative; width: 190px; min-height: 270px; border-radius: 12px; background: linear-gradient(#fffaf0, #f3e6c6); border: 3px solid #8b5a2b;
+  box-shadow: 0 6px 14px rgba(0,0,0,.3); padding: 12px 12px 14px; display: flex; flex-direction: column; align-items: center; text-align: center; cursor: pointer;
+  transition: transform .18s, box-shadow .18s, opacity .18s; animation: deal .5s cubic-bezier(.2,.8,.3,1) both; }
+.ccard:nth-child(2) { animation-delay: .12s; } .ccard:nth-child(3) { animation-delay: .24s; } .ccard:nth-child(4) { animation-delay: .36s; } .ccard:nth-child(5) { animation-delay: .48s; }
+@keyframes deal { from { transform: translateY(-60px) rotateY(90deg); opacity: 0; } to { transform: none; opacity: 1; } }
+.ccard:hover { transform: translateY(-6px); box-shadow: 0 12px 22px rgba(0,0,0,.35); }
+.ccard.sel { transform: translateY(-10px); border-color: var(--red); box-shadow: 0 0 0 4px rgba(181,51,42,.45), 0 14px 26px rgba(0,0,0,.4); }
+.ccard.sel::after { content: '✔ Đã chọn'; position: absolute; top: -12px; left: 50%; transform: translateX(-50%); background: var(--red); color: #fff; font-size: 12px; font-weight: 700; padding: 2px 10px; border-radius: 99px; }
+.chars.has-sel .ccard:not(.sel) { opacity: .6; }
+.chars.locked .ccard { cursor: default; }
+.chars.locked .ccard:not(.sel) { opacity: .35; filter: grayscale(.6); }
+.ccard .por { width: 92px; height: 92px; border-radius: 50%; display: grid; place-items: center; font-size: 46px; margin: 4px 0 8px;
+  background: radial-gradient(circle at 35% 30%, #fff4d8, #d9b97f); border: 3px solid #2a160a; box-shadow: 0 0 0 3px var(--gold); }
+.ccard .nm { font-family: 'Rye', serif; font-size: 18px; color: var(--ink); line-height: 1.1; }
+.ccard .hp { display: flex; gap: 2px; align-items: flex-end; margin: 8px 0; padding: 2px 8px; border-radius: 99px; background: #2a160a; }
+.ccard .hp .plus { color: var(--gold); font-size: 11px; font-weight: 700; margin-left: 4px; align-self: center; }
+.ccard .ab { font-size: 13px; line-height: 1.4; color: #3d2616; background: rgba(255,255,255,.55); border: 1px dashed #c9a46a; border-radius: 8px; padding: 6px 8px; flex: 1; display: flex; align-items: center; }
+.actions { display: flex; gap: 10px; align-items: center; justify-content: center; flex-wrap: wrap; margin-top: 10px; }
+
+/* danh sách người chơi bên phải */
+.plist { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+.plist li { display: flex; align-items: center; gap: 8px; padding: 8px 10px; background: #fffaf0; border: 1px solid #d8bd8a; border-radius: 8px; font-size: 14px; }
+.plist .st { margin-left: auto; font-size: 12px; font-weight: 700; }
+.plist .st.done { color: var(--green); }
+.plist .st.wait { color: var(--muted); }
+.plist .st.wait::after { content: ''; display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: var(--gold); margin-left: 6px; animation: blink 1s infinite; }
+@keyframes blink { 50% { opacity: .2; } }
+.progress { height: 8px; border-radius: 99px; background: #e2cfa3; overflow: hidden; margin: 10px 0 4px; }
+.progress i { display: block; height: 100%; background: var(--green); transition: width .3s; }
+@media (max-width: 860px) { main { grid-template-columns: 1fr; } .ccard { width: 46%; min-width: 150px; } }
+@media (prefers-reduced-motion: reduce) { .ccard { animation: none; } }
+</style>
+</head>
+<body>
+<div class="picker">
+  <span class="brand">BANG!</span>
+  <span>Màn hình:</span>
+  <button data-v="lobby">1 · Phòng chờ (chỉnh X)</button>
+  <button data-v="pick" class="on">2 · Chọn nhân vật</button>
+  <button data-v="done">3 · Đã chọn, chờ người khác</button>
+  <span class="sep"></span>
+  <span>Vai trò của bạn:</span>
+  <button data-r="Sheriff">Sheriff</button>
+  <button data-r="Outlaw" class="on">Outlaw</button>
+  <button data-r="Deputy">Deputy</button>
+  <button data-r="Renegade">Renegade</button>
+</div>
+<p class="note" id="note"></p>
+
+<main>
+  <div id="mainArea"></div>
+  <aside class="panel">
+    <h3>Người chơi</h3>
+    <ul class="plist" id="plist"></ul>
+    <div class="progress"><i id="prog"></i></div>
+    <div class="muted" id="progTxt"></div>
+  </aside>
+</main>
+
+<script>
+const CHARS = {
+  'Bart Cassidy': [4, '🧔', 'Mỗi khi mất 1 máu, rút 1 lá.'], 'Black Jack': [4, '🎩', 'Khi rút bài đầu lượt, nếu lá thứ 2 là ♥/♦ thì rút thêm 1 lá.'],
+  'Calamity Janet': [4, '👩', 'Dùng Bang! như Missed! và ngược lại.'], 'El Gringo': [3, '🌵', 'Mỗi khi bị người khác làm mất 1 máu, lấy ngẫu nhiên 1 lá trên tay người đó.'],
+  'Jesse Jones': [4, '🧑', 'Lá đầu tiên khi rút bài có thể lấy ngẫu nhiên từ tay một người.'], 'Jourdonnais': [4, '👴', 'Luôn có sẵn một Barrel.'],
+  'Kit Carlson': [4, '🧓', 'Khi rút bài: xem 3 lá trên cùng, giữ 2, trả lại 1.'], 'Lucky Duke': [4, '🍀', 'Khi rút kiểm tra, lật 2 lá và lấy lá có lợi.'],
+  'Paul Regret': [3, '👨', 'Luôn có Mustang: người khác nhìn bạn xa thêm 1.'], 'Pedro Ramirez': [4, '👱', 'Lá đầu tiên khi rút bài có thể lấy từ đỉnh chồng bài bỏ.'],
+  'Rose Doolan': [4, '🌹', 'Luôn có Scope: bạn nhìn người khác gần hơn 1.'], 'Sid Ketchum': [4, '👦', 'Bỏ 2 lá bất kỳ để hồi 1 máu (bất cứ lúc nào).'],
+  'Slab the Killer': [4, '😠', 'Người bị bạn Bang! cần 2 Missed! để né.'], 'Suzy Lafayette': [4, '🎀', 'Khi hết bài trên tay, rút ngay 1 lá.'],
+  'Vulture Sam': [4, '🦅', 'Khi có người chết, lấy toàn bộ bài của họ.'], 'Willy the Kid': [4, '🤠', 'Được dùng Bang! không giới hạn.'],
+};
+const ROLE = {
+  Sheriff: ['⭐', 'Cảnh sát trưởng', 'Tiêu diệt tất cả Outlaw và Renegade. Bạn lộ diện và được +1 máu.'],
+  Deputy: ['🛡️', 'Phó cảnh sát', 'Bảo vệ Sheriff, tiêu diệt Outlaw và Renegade.'],
+  Outlaw: ['💀', 'Kẻ ngoài vòng pháp luật', 'Hạ gục Sheriff.'],
+  Renegade: ['🎭', 'Kẻ phản bội', 'Là người cuối cùng sống sót.'],
+};
+const PLAYERS = [['Bạn', null], ['Lan', 'Sheriff'], ['Minh', null], ['Hùng', null], ['Tú', null]];
+let V = 'pick', R = 'Outlaw', X = 3, SEL = null, DEALT = ['Lucky Duke', 'Calamity Janet', 'El Gringo'];
+
+function bullet(full) {
+  return `<svg width="10" height="22" viewBox="0 0 10 24">${full
+    ? '<path d="M5 0C8 2.5 8.6 5.5 8.6 9H1.4C1.4 5.5 2 2.5 5 0z" fill="#c8682c" stroke="#6b3412" stroke-width=".8"/><rect x="1.4" y="9" width="7.2" height="12" fill="#e2b04a" stroke="#7a5512" stroke-width=".8"/><rect x=".6" y="20.6" width="8.8" height="3" rx=".6" fill="#c9962f" stroke="#7a5512" stroke-width=".8"/>'
+    : ''}</svg>`;
+}
+const maxX = (n) => Math.floor(16 / n);
+function deal() {
+  const pool = Object.keys(CHARS).sort(() => Math.random() - .5);
+  DEALT = pool.slice(0, Math.min(X, maxX(PLAYERS.length)));
+  SEL = null;
+}
+
+function lobbyHTML() {
+  const rows = [4, 5, 6, 7].map((n) => {
+    const eff = Math.min(X, maxX(n));
+    return `<tr><td>${n} người</td><td><b>${eff}</b> lá${eff < X ? ' <span class="muted">(tự giảm vì chỉ có 16 nhân vật)</span>' : ''}</td></tr>`;
+  }).join('');
+  return `<div class="panel">
+    <h2>Phòng chờ (5/7)</h2>
+    <div class="muted">Danh sách người chơi, nút mời ra… giữ như hiện tại.</div>
+    <div style="margin-top:16px;padding:14px;border:1px solid #c9a46a;border-radius:8px">
+      <h3>Cài đặt phòng</h3>
+      <div class="muted">🔓 Không có mật khẩu · Không giới hạn thời gian · Mỗi người rút ${X} nhân vật</div>
+      <label>Số lá nhân vật mỗi người được rút để chọn</label>
+      <div class="stepper"><button data-x="-1">−</button><span>${X}</span><button data-x="1">+</button></div>
+      <div class="preview-cards">${'<i></i>'.repeat(X)}</div>
+      <div class="hint">Từ 1 đến 5. <b>1</b> = chia ngẫu nhiên như cũ, không cần chọn. Mặc định <b>3</b>.</div>
+      <table class="muted" style="margin-top:8px;font-size:13px;border-spacing:10px 2px">${rows}</table>
+      <label>Thời gian mỗi lượt (giây) · Mật khẩu…</label>
+      <div class="muted">(các ô cài đặt khác giữ nguyên)</div>
+      <button class="btn small blue" style="margin-top:12px">Lưu cài đặt</button>
+    </div>
+    <div style="margin-top:16px"><button class="btn">🔫 Bắt đầu ván</button></div>
+  </div>`;
+}
+
+function pickHTML(locked) {
+  const r = ROLE[R];
+  const cards = DEALT.map((name) => {
+    const [hp, icon, ab] = CHARS[name];
+    const max = hp + (R === 'Sheriff' ? 1 : 0);
+    return `<div class="ccard ${SEL === name ? 'sel' : ''}" data-c="${name}">
+      <div class="por">${icon}</div><div class="nm">${name}</div>
+      <div class="hp" title="${max} máu">${bullet(true).repeat(max)}${R === 'Sheriff' ? '<span class="plus">+1 Sheriff</span>' : ''}</div>
+      <div class="ab">${ab}</div></div>`;
+  }).join('');
+  return `<div class="panel">
+    <div class="rolecard ${R}"><div class="star">${r[0]}</div><div><h3>Bạn là ${R} · ${r[1]}</h3><p>${r[2]}</p></div>
+      <span class="secret">${R === 'Sheriff' ? '👁️ Mọi người đều biết' : '🔒 Chỉ bạn thấy'}</span></div>
+    <div class="choose-head"><h2>Chọn nhân vật</h2><span class="muted">${locked ? 'Bạn đã chốt nhân vật. Đang chờ những người khác…' : `Rút được ${DEALT.length} lá — bấm vào 1 lá rồi xác nhận.`}</span>
+      <span class="clock">⏱ ${locked ? '—' : '0:25'}</span></div>
+    <div class="chars ${SEL ? 'has-sel' : ''} ${locked ? 'locked' : ''}" id="chars">${cards}</div>
+    <div class="actions">${locked
+      ? `<span class="muted">✔ Bạn chơi <b>${SEL}</b>. Ván đấu bắt đầu khi tất cả đã chọn.</span>`
+      : `<button class="btn" id="confirm" ${SEL ? '' : 'disabled'}>✔ Chọn ${SEL || 'nhân vật'}</button><span class="muted">Hết giờ sẽ tự chọn lá đầu tiên.</span>`}</div>
+  </div>`;
+}
+
+function render() {
+  if (V === 'done' && !SEL) SEL = DEALT[0];
+  document.getElementById('mainArea').innerHTML = V === 'lobby' ? lobbyHTML() : pickHTML(V === 'done');
+  const done = V === 'done' ? 3 : 2;
+  document.getElementById('plist').innerHTML = PLAYERS.map(([n, role], i) => {
+    const isMe = i === 0, ok = isMe ? V === 'done' : i < done;
+    const rl = isMe ? `<span class="role ${R}">${R}</span>` : role ? `<span class="role ${role}">${role}</span>` : '<span class="role unknown">?</span>';
+    return `<li>${rl} <b>${n}</b>${V === 'lobby' ? '' : `<span class="st ${ok ? 'done' : 'wait'}">${ok ? '✔ Đã chọn' : 'Đang chọn'}</span>`}</li>`;
+  }).join('');
+  const total = PLAYERS.length, n = V === 'lobby' ? 0 : (V === 'done' ? 3 : 1) + 0;
+  document.getElementById('prog').style.width = (V === 'lobby' ? 0 : (n / total) * 100) + '%';
+  document.getElementById('progTxt').textContent = V === 'lobby' ? 'Chưa bắt đầu.' : `${n}/${total} người đã chọn nhân vật. Nhân vật chỉ lộ ra khi ván bắt đầu.`;
+  document.getElementById('note').innerHTML = {
+    lobby: '<b>Phòng chờ:</b> chủ phòng chỉnh số lá nhân vật X bằng nút −/+ (1–5, mặc định 3). Bang! chỉ có 16 nhân vật nên với 6–7 người X tự giảm còn 2.',
+    pick: '<b>Chọn nhân vật:</b> bấm "Bắt đầu ván" → mỗi người thấy vai trò của mình, rồi được chia X lá nhân vật lật ngửa. Bấm 1 lá → xác nhận. Máu hiện bằng viên đạn, Sheriff có thêm +1.',
+    done: '<b>Đã chọn:</b> các lá khác mờ đi, chờ những người còn lại. Khi tất cả xong, bàn chơi tròn hiện ra như bình thường.',
+  }[V];
+  document.querySelectorAll('[data-v]').forEach((b) => b.classList.toggle('on', b.dataset.v === V));
+  document.querySelectorAll('[data-r]').forEach((b) => b.classList.toggle('on', b.dataset.r === R));
+}
+
+document.getElementById('mainArea').addEventListener('click', (e) => {
+  const c = e.target.closest('[data-c]');
+  if (c && V === 'pick') { SEL = c.dataset.c; render(); document.querySelectorAll('.ccard').forEach((x) => x.style.animation = 'none'); return; }
+  const x = e.target.closest('[data-x]');
+  if (x) { X = Math.max(1, Math.min(5, X + Number(x.dataset.x))); deal(); render(); return; }
+  if (e.target.id === 'confirm') { V = 'done'; render(); }
+});
+document.querySelector('.picker').addEventListener('click', (e) => {
+  const b = e.target.closest('button'); if (!b) return;
+  if (b.dataset.v) { V = b.dataset.v; if (V === 'pick') SEL = null; }
+  if (b.dataset.r) R = b.dataset.r;
+  render();
+});
+render();
+</script>
+</body>
+</html>

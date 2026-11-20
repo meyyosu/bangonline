@@ -19,11 +19,13 @@ function candidates(g, pi, rng) {
   const others = g.players.filter((q, i) => q.alive && i !== pi).map((q) => q.name);
   const pick = (a) => a[Math.floor(rng() * a.length)];
   const out = [];
+  if (g.phase === 'character') return g.pending.options.map((character) => ({ type: 'chooseCharacter', character }));
   const pend = g.pending;
   if (pend) {
     if (pend.type === 'draw') for (const from of pend.options) out.push({ type: 'drawChoice', from, target: pick(others) });
     if (pend.type === 'kit') out.push({ type: 'kit', cardIds: pend.cards.slice(0, 2).map((c) => c.id) });
     if (pend.type === 'store') out.push({ type: 'pick', cardId: pick(pend.cards).id });
+    if (pend.type === 'check') { out.push({ type: 'checkDraw' }); out.push({ type: 'take' }); }
     if (['bang', 'indians', 'duel'].includes(pend.type)) {
       for (const c of p.hand) out.push({ type: 'respond', cardId: c.id });
       out.push({ type: 'barrel' });
@@ -45,13 +47,15 @@ function candidates(g, pi, rng) {
 
 const N = Number(process.argv[2] || 500);
 let wins = {}, totalActions = 0;
+const checks = {}; // số lần phải chờ rút kiểm tra theo loại
 for (let s = 1; s <= N; s++) {
   const rng = seeded(s);
   const names = Array.from({ length: 4 + (s % 4) }, (_, i) => `P${i + 1}`);
-  const g = new Game(names, { rng });
+  const g = new Game(names, { rng, characterChoices: 1 + (s % 4) }); // Exercise all room choice counts.
   let steps = 0;
   while (!g.winner) {
     if (++steps > 20000) throw new Error(`Ván ${s}: kẹt vòng lặp`);
+    if (g.pending?.type === 'check') checks[g.pending.kind] = (checks[g.pending.kind] || 0) + 1;
     const pi = g.pending ? g.pending.player : g.turn;
     const cands = candidates(g, pi, rng);
     // ưu tiên hành động "có ích" bằng cách thử ngẫu nhiên tới khi hợp lệ
@@ -63,7 +67,8 @@ for (let s = 1; s <= N; s++) {
     if (!done) {
       // không có hành động ngẫu nhiên nào hợp lệ: bỏ bài thừa / chịu đòn / kết thúc
       const p = g.players[pi];
-      const fallback = g.pending ? (g.pending.type === 'store' ? { type: 'pick', cardId: g.pending.cards[0].id } : { type: 'take' })
+      const fallback = g.pending ? (g.pending.type === 'store' ? { type: 'pick', cardId: g.pending.cards[0].id }
+        : g.pending.type === 'check' ? { type: 'checkDraw' } : { type: 'take' })
         : (p.hand.length > p.hp ? { type: 'discard', cardIds: p.hand.slice(0, p.hand.length - p.hp).map((c) => c.id) } : { type: 'endTurn' });
       g.act(p.name, fallback);
     }
@@ -73,4 +78,4 @@ for (let s = 1; s <= N; s++) {
   }
   wins[g.winner] = (wins[g.winner] || 0) + 1;
 }
-console.log(`OK: ${N} ván, ${totalActions} hành động. Kết quả:`, wins);
+console.log(`OK: ${N} ván, ${totalActions} hành động. Kết quả:`, wins, 'Rút kiểm tra:', checks);

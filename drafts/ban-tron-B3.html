@@ -1,0 +1,358 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Nháp bàn B3</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Rye&family=Be+Vietnam+Pro:wght@400;600;700&display=swap" rel="stylesheet">
+<style>
+:root {
+  --wood: #2b1a10; --paper: #f4e4c1; --paper2: #e9d3a3; --ink: #2a1a0e;
+  --muted: #7a5b3a; --red: #b5332a; --gold: #d9a441; --blue: #2f5d8a; --green: #3f7d3a; --radius: 10px;
+  --eq: 44px; /* cỡ thẻ trang bị — đổi trong ⚙️ Cài đặt */
+}
+body.eq-sm { --eq: 34px; } body.eq-md { --eq: 44px; } body.eq-lg { --eq: 56px; }
+* { box-sizing: border-box; }
+html, body { margin: 0; }
+body { font-family: 'Be Vietnam Pro', system-ui, sans-serif; color: var(--ink);
+  background: radial-gradient(ellipse at top, #5a3820 0%, var(--wood) 60%) fixed; min-height: 100vh; }
+button { font: inherit; }
+
+/* thanh chọn phương án (chỉ có trong bản nháp) */
+.picker { position: sticky; top: 0; z-index: 30; display: flex; flex-wrap: wrap; gap: 8px; align-items: center;
+  padding: 10px 16px; background: rgba(0,0,0,.6); border-bottom: 2px solid var(--gold); color: var(--paper); }
+.picker .brand { font-family: 'Rye', serif; color: var(--gold); font-size: 22px; margin-right: 10px; }
+.picker button { background: transparent; color: var(--paper); border: 1px solid rgba(244,228,193,.5);
+  border-radius: 99px; padding: 5px 12px; cursor: pointer; font-size: 14px; }
+.picker button.on { background: var(--gold); color: var(--ink); border-color: var(--gold); font-weight: 700; }
+.picker .sep { width: 1px; height: 24px; background: rgba(244,228,193,.3); margin: 0 6px; }
+.note { max-width: 1200px; margin: 12px auto 0; padding: 0 16px; color: var(--paper2); font-size: 14px; }
+.note b { color: var(--gold); }
+
+/* thanh phòng giả lập + nút cài đặt (phần sẽ đưa vào game) */
+.roomhead { max-width: 1200px; margin: 10px auto 0; padding: 0 16px; display: flex; align-items: center; gap: 10px; color: var(--paper); flex-wrap: wrap; }
+.roomhead h2 { font-family: 'Rye', serif; font-weight: normal; color: var(--gold); margin: 0; font-size: 22px; }
+.roomhead .code { font-family: monospace; background: var(--gold); color: var(--ink); padding: 2px 8px; border-radius: 6px; font-weight: 700; }
+.roomhead .sp { flex: 1; }
+.gear { position: relative; }
+.gear > button { background: transparent; color: var(--paper); border: 1px solid var(--paper); border-radius: 8px; padding: 5px 12px; cursor: pointer; font-weight: 600; }
+.gear > button[aria-expanded="true"] { background: var(--gold); color: var(--ink); border-color: var(--gold); }
+.settings { position: absolute; right: 0; top: calc(100% + 8px); z-index: 40; width: 270px; background: var(--paper); color: var(--ink);
+  border: 2px solid #c9a46a; border-radius: 10px; padding: 12px 14px; box-shadow: 0 10px 28px rgba(0,0,0,.55); }
+.settings h4 { font-family: 'Rye', serif; font-weight: normal; color: var(--red); margin: 0 0 10px; font-size: 17px; }
+.settings .lbl { font-size: 13px; font-weight: 700; margin-bottom: 6px; }
+.seg { display: flex; border: 2px solid #c9a46a; border-radius: 8px; overflow: hidden; }
+.seg button { flex: 1; border: 0; background: #fffaf0; padding: 6px 4px; cursor: pointer; font-weight: 600; font-size: 13px; color: var(--muted); display: flex; flex-direction: column; align-items: center; gap: 4px; }
+.seg button + button { border-left: 2px solid #c9a46a; }
+.seg button.on { background: var(--red); color: #fff; }
+.seg i { display: block; background: currentColor; border-radius: 3px; opacity: .8; }
+.settings .hint { font-size: 12px; color: var(--muted); margin-top: 8px; }
+
+main { max-width: 1200px; margin: 0 auto; padding: 12px 16px 40px; display: grid; grid-template-columns: 1fr 260px; gap: 16px; align-items: start; }
+.side { display: flex; flex-direction: column; gap: 12px; }
+.panel { background: var(--paper); border-radius: var(--radius); padding: 12px 14px; border: 2px solid #c9a46a; }
+.panel h3 { font-family: 'Rye', serif; font-weight: normal; color: var(--red); margin: 0 0 8px; font-size: 18px; }
+.log { font-size: 13px; line-height: 1.5; height: 200px; overflow: auto; background: #fffaf0; border-radius: 8px; padding: 6px 10px; border: 1px solid #d8bd8a; }
+.log .t { color: var(--blue); font-weight: 700; }
+
+/* ---------- bàn gỗ ---------- */
+.arena { position: relative; width: 100%; aspect-ratio: 16 / 11; margin: calc(var(--eq) + 56px) 0 36px; }
+.table-shape { position: absolute; inset: 9% 11%; border-radius: 50%;
+  background:
+    radial-gradient(ellipse at 50% 45%, rgba(255,220,160,.18), transparent 60%),
+    repeating-radial-gradient(ellipse at 50% 50%, #6b4021 0 6px, #5e3819 6px 11px, #734623 11px 15px);
+  border: 14px solid #2a160a;
+  box-shadow: inset 0 0 0 4px #8b5a2b, inset 0 0 60px rgba(0,0,0,.6), 0 0 0 4px var(--gold), 0 20px 40px rgba(0,0,0,.65); }
+.table-shape::after { content: ''; position: absolute; inset: 27% 31%; border-radius: 50%;
+  background: radial-gradient(ellipse, #7a2a1f 0%, #5b1f17 70%); border: 3px solid var(--gold); opacity: .85; }
+.center { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); z-index: 1; display: flex; gap: 10px; }
+.pile { text-align: center; font-size: 11px; color: var(--paper); }
+.card-back { width: 52px; height: 74px; border-radius: 7px; border: 3px solid var(--gold);
+  background: repeating-linear-gradient(45deg, #7a2a1f, #7a2a1f 6px, #8e352a 6px, #8e352a 12px);
+  display: flex; align-items: center; justify-content: center; font-family: 'Rye', serif; color: var(--gold); font-size: 12px;
+  box-shadow: 2px 2px 0 #5a1d15, 4px 4px 0 #3d130e, 0 8px 14px rgba(0,0,0,.4); }
+.mini { width: 52px; height: 74px; border-radius: 7px; background: #fffaf0; border: 3px solid #8b5a2b; position: relative;
+  display: flex; flex-direction: column; align-items: center; justify-content: center; font-size: 10px; font-weight: 700; }
+.mini .c { position: absolute; top: 2px; left: 4px; color: var(--red); }
+
+/* ---------- ghế ---------- */
+.seat { position: absolute; transform: translate(-50%, -50%); z-index: 3; display: flex; flex-direction: column; align-items: center; gap: 3px; width: 130px; }
+.seat.dead { filter: grayscale(.9); opacity: .55; }
+.seat.target { cursor: pointer; }
+.av { position: relative; width: 68px; height: 68px; border-radius: 50%; display: grid; place-items: center; font-size: 32px;
+  background: radial-gradient(circle at 35% 30%, #fff4d8, #d9b97f); border: 3px solid #2a160a;
+  box-shadow: 0 0 0 4px var(--ring, #2a160a), 0 6px 14px rgba(0,0,0,.5); }
+.av .role { position: absolute; bottom: -8px; left: 50%; transform: translateX(-50%); }
+.av .hand-n { position: absolute; top: -6px; right: -16px; background: #fffaf0; border: 2px solid #8b5a2b; border-radius: 5px; font-size: 11px; font-weight: 700; padding: 0 5px; }
+.seat.turn .av { --ring: var(--gold); box-shadow: 0 0 0 4px var(--gold), 0 0 26px rgba(217,164,65,.9); }
+.seat.target .av { --ring: var(--red); box-shadow: 0 0 0 4px var(--red), 0 0 20px rgba(181,51,42,.8); }
+.seat.jailed .av::after { content: ''; position: absolute; inset: -3px; border-radius: 50%; background: repeating-linear-gradient(90deg, transparent 0 9px, #3b4046 9px 13px); }
+.plate { margin-top: 6px; background: #2a160a; color: var(--paper); border: 1px solid var(--gold); border-radius: 6px; padding: 2px 8px; font-size: 12px; font-weight: 700; display: flex; gap: 5px; align-items: center; white-space: nowrap; }
+.sub { font-size: 11px; color: var(--paper2); text-shadow: 0 1px 2px #000; white-space: nowrap; }
+.role { font-size: 10px; font-weight: 700; padding: 1px 6px; border-radius: 99px; color: #fff; white-space: nowrap; }
+.role.Sheriff { background: #c48a12; } .role.Outlaw { background: #6b2b1d; } .role.unknown { background: #999; }
+.dot { width: 8px; height: 8px; border-radius: 50%; background: #3fbf3f; box-shadow: 0 0 5px #3fbf3f; display: inline-block; }
+.dot.off { background: #999; box-shadow: none; }
+.dist { position: absolute; top: -4px; left: -14px; font-size: 11px; font-weight: 700; padding: 1px 7px; border-radius: 99px; background: rgba(0,0,0,.65); color: var(--paper); white-space: nowrap; }
+.dist.in { background: var(--red); color: #fff; }
+
+/* ---------- THANH MÁU ---------- */
+.hp { display: flex; gap: 2px; align-items: center; padding: 2px 6px; border-radius: 99px; background: rgba(20,10,4,.72); }
+.hp svg { display: block; filter: drop-shadow(0 1px 1px rgba(0,0,0,.6)); }
+.hp.low { animation: lowhp 1s infinite; }
+@keyframes lowhp { 50% { box-shadow: 0 0 0 2px rgba(194,59,46,.9), 0 0 12px rgba(194,59,46,.9); } }
+/* Ổ xoay: thay vòng quanh avatar */
+.cyl { position: absolute; inset: -14px; pointer-events: none; }
+.hpnum { font-size: 11px; font-weight: 700; color: var(--paper); margin-left: 3px; }
+
+/* ---------- KHUNG TRANG BỊ TRÊN ĐẦU ---------- */
+.eqframe { position: absolute; bottom: calc(100% + 10px); left: 50%; transform: translateX(-50%); display: flex; gap: 6px; padding: 7px 7px 5px;
+  background: linear-gradient(#3d2616, #2a160a); border: 2px solid var(--gold); border-radius: 9px; box-shadow: 0 6px 14px rgba(0,0,0,.55); white-space: nowrap; }
+.eqframe::after { content: ''; position: absolute; left: 50%; bottom: -8px; transform: translateX(-50%) rotate(45deg); width: 12px; height: 12px;
+  background: #2a160a; border-right: 2px solid var(--gold); border-bottom: 2px solid var(--gold); }
+.eqt { position: relative; width: var(--eq); height: var(--eq); border-radius: 7px; display: flex; flex-direction: column; align-items: center; justify-content: center;
+  background: #eef4fa; border: 2px solid var(--blue); box-shadow: 0 3px 0 #1c3a57; cursor: help; transition: transform .12s, width .15s, height .15s; }
+.eqt:hover { transform: translateY(-3px) scale(1.1); z-index: 5; }
+.eqt .ic { font-size: calc(var(--eq) * .44); line-height: 1; }
+.eqt .nm { font-size: 8px; font-weight: 700; margin-top: 2px; max-width: calc(var(--eq) - 4px); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ink); }
+body.eq-sm .eqt .nm { display: none; }
+body.eq-lg .eqt .nm { font-size: 10px; }
+.eqt .bd { position: absolute; top: -7px; right: -7px; min-width: 17px; height: 17px; padding: 0 4px; border-radius: 99px; font-size: 10px; font-weight: 700;
+  display: grid; place-items: center; color: #fff; background: var(--blue); border: 2px solid #fffaf0; }
+.eqt.gun { background: #f3ead9; border-color: #5c3d1e; box-shadow: 0 3px 0 #3a2410; } .eqt.gun .bd { background: #5c3d1e; }
+.eqt.horse { background: #eaf4e6; border-color: var(--green); box-shadow: 0 3px 0 #23481f; } .eqt.horse .bd { background: var(--green); }
+.eqt.jail { background: repeating-linear-gradient(90deg, #4a4f55 0 6px, #2c3035 6px 9px); border-color: #1b1d20; box-shadow: 0 3px 0 #111; }
+.eqt.jail .nm { color: #f3e3c3; }
+.eqt.dyn { background: #fbe3d6; border-color: var(--red); box-shadow: 0 3px 0 #6e1d17, 0 0 12px rgba(255,120,40,.8); animation: fuse 1s infinite; }
+@keyframes fuse { 50% { box-shadow: 0 3px 0 #6e1d17, 0 0 20px rgba(255,160,40,1); } }
+.eqt.clickable { outline: 2px dashed #ff6b5e; outline-offset: 2px; cursor: pointer; }
+.eqt.empty { background: rgba(0,0,0,.08); border: 2px dashed #c9a46a; box-shadow: none; }
+
+/* ---------- prompt + phần của bạn ---------- */
+.prompt { background: var(--paper); border-radius: 10px; padding: 8px 12px; font-size: 13px; border: 3px solid var(--red); animation: glow 1.5s infinite;
+  display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
+.prompt h4 { margin: 0; font-size: 15px; }
+@keyframes glow { 0%,100% { box-shadow: 0 0 6px rgba(181,51,42,.4); } 50% { box-shadow: 0 0 18px rgba(181,51,42,.9); } }
+.btn { background: var(--red); color: #fff; border: none; border-radius: 7px; padding: 6px 11px; cursor: pointer; font-weight: 600; font-size: 13px; box-shadow: 0 3px 0 #6e1d17; }
+.btn.blue { background: var(--blue); box-shadow: 0 3px 0 #1c3a57; }
+.btn.secondary { background: var(--muted); box-shadow: 0 3px 0 #4a3520; }
+.btn.green { background: var(--green); box-shadow: 0 3px 0 #23481f; }
+.mebar { margin-top: 10px; background: var(--paper); border-radius: var(--radius); padding: 12px 14px; border: 3px solid var(--gold); display: grid; grid-template-columns: auto 1fr; gap: 14px; }
+.mebar .lbl { font-size: 11px; font-weight: 700; color: var(--muted); text-transform: uppercase; letter-spacing: .5px; margin-bottom: 6px; display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+.mebar .myeq { padding-right: 14px; border-right: 2px dashed #c9a46a; }
+.mebar .eqs { display: flex; gap: 6px; flex-wrap: wrap; max-width: 280px; margin-top: 8px; }
+.mebar .hp { background: #2a160a; padding: 3px 8px; }
+.hand { display: flex; gap: 8px; flex-wrap: wrap; }
+.card { width: 76px; height: 104px; border-radius: 8px; background: #fffaf0; border: 3px solid #8b5a2b; position: relative; display: flex; flex-direction: column;
+  align-items: center; justify-content: center; text-align: center; box-shadow: 0 3px 6px rgba(0,0,0,.25); cursor: pointer; transition: transform .12s; }
+.card:hover { transform: translateY(-6px); }
+.card.blue { border-color: var(--blue); background: #eef4fa; }
+.card .corner { position: absolute; top: 3px; left: 5px; font-size: 11px; font-weight: 700; }
+.card .corner.red { color: var(--red); }
+.card .icon { font-size: 26px; } .card .cname { font-size: 11px; font-weight: 700; margin-top: 4px; }
+.actions { display: flex; gap: 8px; margin-top: 10px; flex-wrap: wrap; align-items: center; font-size: 13px; color: var(--muted); }
+
+@media (max-width: 900px) {
+  main { grid-template-columns: 1fr; }
+  .arena { aspect-ratio: 1 / 1.15; }
+  .table-shape { inset: 12% 14%; }
+  .seat { width: 90px; } .av { width: 46px; height: 46px; font-size: 22px; } .sub { display: none; }
+  .mebar { grid-template-columns: 1fr; } .mebar .myeq { border-right: 0; padding-right: 0; }
+}
+</style>
+</head>
+<body class="eq-md">
+<div class="picker">
+  <span class="brand">BANG!</span>
+  <span>Thanh máu:</span>
+  <button data-h="heart" class="on">A · Trái tim</button>
+  <button data-h="bullet">B · Viên đạn</button>
+  <button data-h="cyl">C · Ổ đạn quanh avatar</button>
+  <span class="sep"></span>
+  <span>Số người:</span>
+  <span id="nbtns"></span>
+</div>
+<p class="note" id="note"></p>
+
+<div class="roomhead">
+  <h2>Saloon cuối tuần</h2><span class="code">K7QZ</span>
+  <span class="sp"></span>
+  <div class="gear">
+    <button id="gearBtn" aria-expanded="false">⚙️ Cài đặt</button>
+    <div class="settings" id="settings" hidden>
+      <h4>Cài đặt hiển thị</h4>
+      <div class="lbl">Cỡ thẻ trang bị</div>
+      <div class="seg" id="eqSize">
+        <button data-eq="sm"><i style="width:12px;height:12px"></i>Nhỏ</button>
+        <button data-eq="md"><i style="width:16px;height:16px"></i>Vừa</button>
+        <button data-eq="lg"><i style="width:20px;height:20px"></i>To</button>
+      </div>
+      <div class="hint">Chỉ áp dụng trên máy của bạn, được nhớ cho lần sau. Cỡ nhỏ ẩn tên thẻ, rê chuột để xem.</div>
+    </div>
+  </div>
+  <button style="background:transparent;color:var(--paper);border:1px solid var(--paper);border-radius:8px;padding:5px 12px">Rời phòng</button>
+</div>
+
+<main>
+  <div>
+    <div class="arena" id="arena">
+      <div class="table-shape"></div>
+      <div class="center">
+        <div class="pile"><div class="card-back">BANG!</div>Chồng: 47</div>
+        <div class="pile"><div class="mini"><span class="c">K♥</span><span style="font-size:20px">🍺</span>Beer</div>Bài bỏ</div>
+      </div>
+      <div id="seats"></div>
+    </div>
+
+    <div class="prompt">
+      <h4>💥 Bart Cassidy bắn bạn!</h4>
+      <span>Bỏ <b>Missed!</b> để né, hoặc dùng Barrel.</span>
+      <button class="btn blue">🛢️ Barrel</button><button class="btn secondary">Chịu mất 1 máu</button>
+    </div>
+
+    <div class="mebar">
+      <div class="myeq"><div class="lbl">Máu của bạn <span id="myhp"></span></div><div class="lbl" style="margin-top:8px">Trang bị</div><div class="eqs" id="myeq"></div></div>
+      <div>
+        <div class="lbl">Bài trên tay · <span class="role Sheriff">Cảnh sát trưởng</span> Willy the Kid · tầm bắn 1</div>
+        <div class="hand">
+          <div class="card"><div class="corner red">A♦</div><div class="icon">💥</div><div class="cname">Bang!</div></div>
+          <div class="card"><div class="corner">8♣</div><div class="icon">🙅</div><div class="cname">Missed!</div></div>
+          <div class="card"><div class="corner red">6♥</div><div class="icon">🍺</div><div class="cname">Beer</div></div>
+          <div class="card blue"><div class="corner">Q♠</div><div class="icon">🐎</div><div class="cname">Mustang</div></div>
+          <div class="card"><div class="corner red">J♥</div><div class="icon">🃏</div><div class="cname">Panic!</div></div>
+        </div>
+        <div class="actions"><button class="btn green">✅ Kết thúc lượt</button>Máu 4/5 · 5 lá trên tay</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="side">
+    <div class="panel"><h3>Diễn biến</h3>
+      <div class="log"><div class="t">— Lượt của Bart Cassidy —</div><div>Bart rút 2 lá.</div><div>Bart trang bị Schofield.</div><div>Bart dùng Bang! lên Bạn.</div></div>
+    </div>
+  </div>
+</main>
+
+<script>
+const EQ = {
+  Volcanic:   { ic: '🔫', k: 'gun', bd: '1', d: 'Vũ khí tầm 1, Bang! không giới hạn' },
+  Schofield:  { ic: '🔫', k: 'gun', bd: '2', d: 'Vũ khí tầm 2' },
+  Remington:  { ic: '🔫', k: 'gun', bd: '3', d: 'Vũ khí tầm 3' },
+  Winchester: { ic: '🔫', k: 'gun', bd: '5', d: 'Vũ khí tầm 5' },
+  Mustang:    { ic: '🐎', k: 'horse', bd: '+1', d: 'Người khác nhìn bạn xa thêm 1' },
+  Scope:      { ic: '🔭', k: 'horse', bd: '−1', d: 'Bạn nhìn người khác gần hơn 1' },
+  Barrel:     { ic: '🛢️', k: '', d: 'Bị bắn: rút ♥ thì né được' },
+  Jail:       { ic: '⛓️', k: 'jail', d: 'Đầu lượt rút ♥ để thoát, không thì mất lượt' },
+  Dynamite:   { ic: '🧨', k: 'dyn', d: 'Rút ♠2–9 thì nổ, mất 3 máu' },
+};
+const PLAYERS = [
+  { name: 'Bạn', char: 'Willy the Kid', icon: '🤠', hp: 4, max: 5, hand: 5, role: 'Sheriff', eq: ['Volcanic', 'Barrel', 'Scope'], me: true },
+  { name: 'Bart Cassidy', char: 'Bart Cassidy', icon: '🧔', hp: 3, max: 4, hand: 2, eq: ['Schofield'], turn: true },
+  { name: 'Lan', char: 'Rose Doolan', icon: '👩', hp: 4, max: 4, hand: 4, eq: ['Remington', 'Mustang', 'Barrel'], target: true },
+  { name: 'Minh', char: 'Jesse Jones', icon: '🧑', hp: 1, max: 4, hand: 1, eq: ['Jail', 'Scope'], jailed: true, off: true },
+  { name: 'Hùng', char: 'Paul Regret', icon: '👨', hp: 0, max: 3, hand: 0, role: 'Outlaw', eq: [], dead: true },
+  { name: 'Tú', char: 'Calamity Janet', icon: '👱', hp: 2, max: 4, hand: 3, eq: ['Dynamite', 'Winchester'], target: true },
+  { name: 'Phong', char: 'Kit Carlson', icon: '🧓', hp: 4, max: 4, hand: 6, eq: ['Mustang'] },
+];
+const NOTES = {
+  heart: '<b>A · Trái tim</b> — tim đỏ = máu còn, tim rỗng viền = máu đã mất. Còn 1 máu thì thanh máu nhấp nháy đỏ.',
+  bullet: '<b>B · Viên đạn</b> — mỗi máu là một viên đạn đồng; mất máu thì còn lại vỏ đạn xám rỗng.',
+  cyl: '<b>C · Ổ đạn quanh avatar</b> — máu là các viên đạn xếp thành vòng quanh avatar như ổ xoay súng lục; số máu ghi trên bảng tên.',
+};
+let H = 'heart', N = 7;
+
+// ---- biểu tượng máu (SVG để nét, không phụ thuộc emoji) ----
+const HEART = 'M12 21s-7.5-4.6-10-9.2C.3 8.5 2.2 4 6.3 4c2.2 0 3.7 1.3 5.7 3.4C14 5.3 15.5 4 17.7 4 21.8 4 23.7 8.5 22 11.8 19.5 16.4 12 21 12 21z';
+function heart(full, s) {
+  return `<svg width="${s}" height="${s}" viewBox="0 0 24 24">${full
+    ? `<path d="${HEART}" fill="#d8352a" stroke="#7a130c" stroke-width="1.5"/><path d="M6.5 7.2c-1.6.2-2.6 1.6-2.4 3" stroke="#ff9d8f" stroke-width="1.6" fill="none" stroke-linecap="round"/>`
+    : `<path d="${HEART}" fill="rgba(0,0,0,.25)" stroke="#8a7a6a" stroke-width="1.8"/>`}</svg>`;
+}
+function bullet(full, s) {
+  const w = Math.round(s * .45);
+  return `<svg width="${w}" height="${s}" viewBox="0 0 10 24">${full
+    ? `<path d="M5 0C8 2.5 8.6 5.5 8.6 9H1.4C1.4 5.5 2 2.5 5 0z" fill="#c8682c" stroke="#6b3412" stroke-width=".8"/>
+       <rect x="1.4" y="9" width="7.2" height="12" fill="#e2b04a" stroke="#7a5512" stroke-width=".8"/>
+       <rect x=".6" y="20.6" width="8.8" height="3" rx=".6" fill="#c9962f" stroke="#7a5512" stroke-width=".8"/>
+       <rect x="2.6" y="10" width="1.3" height="10" fill="#fbe39a" opacity=".8"/>`
+    : `<rect x="1.4" y="9" width="7.2" height="12" fill="#5d5a55" stroke="#2c2a27" stroke-width=".8" opacity=".75"/>
+       <ellipse cx="5" cy="9" rx="3.6" ry="1" fill="#1d1c1a"/>
+       <rect x=".6" y="20.6" width="8.8" height="3" rx=".6" fill="#4a4743" stroke="#2c2a27" stroke-width=".8"/>`}</svg>`;
+}
+function hpBar(p, size = 16) {
+  if (p.dead) return '<div class="hp" style="color:var(--paper);font-size:11px">☠️ Đã chết</div>';
+  const f = H === 'bullet' ? bullet : heart;
+  let s = ''; for (let i = 0; i < p.max; i++) s += f(i < p.hp, H === 'bullet' ? size + 8 : size);
+  return `<div class="hp ${p.hp === 1 ? 'low' : ''}" title="Máu ${p.hp}/${p.max}">${s}</div>`;
+}
+// Ổ xoay: các viên đạn (nhìn từ đáy) xếp vòng quanh avatar
+function cylinder(p) {
+  const n = p.max, R = 47, c = 48; let s = '';
+  for (let i = 0; i < n; i++) {
+    const a = -Math.PI / 2 + i * 2 * Math.PI / n, x = c + R * Math.cos(a), y = c + R * Math.sin(a), full = i < p.hp && !p.dead;
+    s += full
+      ? `<circle cx="${x}" cy="${y}" r="7.5" fill="#e2b04a" stroke="#6b4a10" stroke-width="1.5"/><circle cx="${x}" cy="${y}" r="3.6" fill="#c8682c" stroke="#7a3a12"/>`
+      : `<circle cx="${x}" cy="${y}" r="7.5" fill="#2a2724" stroke="#5d5a55" stroke-width="1.5"/><circle cx="${x}" cy="${y}" r="3.2" fill="#0d0c0b"/>`;
+  }
+  return `<svg class="cyl ${p.hp === 1 ? 'low' : ''}" viewBox="-4 -4 104 104">${s}</svg>`;
+}
+
+const roleTag = (p) => p.role ? `<span class="role ${p.role}">${p.role === 'Sheriff' ? 'Cảnh sát trưởng' : 'Tội phạm'}</span>` : '<span class="role unknown">?</span>';
+function tile(n, extra = '') {
+  const e = EQ[n];
+  return `<div class="eqt ${e.k} ${extra}" title="${n}: ${e.d}"><span class="ic">${e.ic}</span><span class="nm">${n}</span>${e.bd ? `<span class="bd">${e.bd}</span>` : ''}</div>`;
+}
+
+function render() {
+  const ps = PLAYERS.slice(0, N);
+  const alive = ps.filter((p) => !p.dead);
+  const mobile = innerWidth < 900;
+  const rx = mobile ? 41 : 43, ry = 44;
+  document.getElementById('seats').innerHTML = ps.map((p, i) => {
+    const a = Math.PI / 2 + (i * 2 * Math.PI) / N;
+    const x = 50 + rx * Math.cos(a), y = 50 + ry * Math.sin(a);
+    const ai = alive.indexOf(p), d = ai < 0 ? 0 : Math.min(ai, alive.length - ai);
+    const cls = ['seat', p.turn && 'turn', p.target && 'target', p.jailed && 'jailed', p.dead && 'dead'].filter(Boolean).join(' ');
+    const frame = p.eq.length ? `<div class="eqframe">${p.eq.map((n) => tile(n, p.name === 'Lan' ? 'clickable' : '')).join('')}</div>` : '';
+    return `<div class="${cls}" style="left:${x}%;top:${y}%">
+      ${frame}
+      ${p.me ? '' : `<span class="dist ${p.target ? 'in' : ''}">${p.dead ? '☠️' : 'cách ' + d}</span>`}
+      <div class="av">${p.dead ? '💀' : p.icon}${H === 'cyl' ? cylinder(p) : ''}<span class="hand-n">🂠${p.hand}</span>${roleTag(p)}</div>
+      <div class="plate"><span class="dot ${p.off ? 'off' : ''}"></span>${p.name}${H === 'cyl' ? `<span class="hpnum">${p.dead ? '☠️' : p.hp + '/' + p.max}</span>` : ''}</div>
+      ${H === 'cyl' ? '' : hpBar(p)}
+      <div class="sub">${p.char}</div></div>`;
+  }).join('');
+  const me = PLAYERS[0];
+  const saved = H; if (H === 'cyl') H = 'bullet';   // ổ đạn chỉ dùng quanh avatar; ô "của bạn" dùng hàng đạn
+  document.getElementById('myhp').innerHTML = hpBar(me, 18);
+  H = saved;
+  document.getElementById('myeq').innerHTML = me.eq.map((n) => tile(n)).join('') + '<div class="eqt empty" title="Chưa có ngựa"><span class="ic" style="opacity:.4">🐎</span></div>';
+  document.getElementById('note').innerHTML = NOTES[H] + ' Bấm <b>⚙️ Cài đặt</b> để thử đổi cỡ thẻ trang bị.';
+  document.querySelectorAll('[data-h]').forEach((b) => b.classList.toggle('on', b.dataset.h === H));
+  document.querySelectorAll('[data-n]').forEach((b) => b.classList.toggle('on', +b.dataset.n === N));
+}
+
+// ---- Cài đặt cỡ thẻ: lưu trong localStorage của từng người chơi ----
+function setEqSize(sz) {
+  document.body.classList.remove('eq-sm', 'eq-md', 'eq-lg');
+  document.body.classList.add('eq-' + sz);
+  document.querySelectorAll('[data-eq]').forEach((b) => b.classList.toggle('on', b.dataset.eq === sz));
+  try { localStorage.setItem('bang.eqSize', sz); } catch {}
+}
+let initial = 'md'; try { initial = localStorage.getItem('bang.eqSize') || 'md'; } catch {}
+setEqSize(initial);
+const gearBtn = document.getElementById('gearBtn'), settings = document.getElementById('settings');
+gearBtn.onclick = (e) => { e.stopPropagation(); settings.hidden = !settings.hidden; gearBtn.setAttribute('aria-expanded', !settings.hidden); };
+settings.onclick = (e) => { e.stopPropagation(); const b = e.target.closest('[data-eq]'); if (b) setEqSize(b.dataset.eq); };
+document.addEventListener('click', () => { settings.hidden = true; gearBtn.setAttribute('aria-expanded', 'false'); });
+
+document.getElementById('nbtns').innerHTML = [4, 5, 6, 7].map((n) => `<button data-n="${n}">${n}</button>`).join(' ');
+document.querySelector('.picker').addEventListener('click', (e) => {
+  const b = e.target.closest('button'); if (!b) return;
+  if (b.dataset.h) H = b.dataset.h; if (b.dataset.n) N = +b.dataset.n; render();
+});
+render();
+</script>
+</body>
+</html>
