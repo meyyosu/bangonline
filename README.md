@@ -13,6 +13,10 @@ Giải nén rồi bấm đúp **`CHAY-GAME.bat`**. Script sẽ tự:
 
 Giữ cửa sổ đen mở trong lúc chơi; đóng nó là tắt server. Bạn bè chỉ cần mở link bằng trình duyệt, không phải cài gì.
 
+Launcher hiển thị thư mục đang chạy, kiểm tra server đã nạp đúng mã mới nhất trước khi mở trình duyệt và giữ cửa sổ để đọc lỗi. Nếu server cũ vẫn giữ cổng 3000, nhập **R** khi được hỏi để khởi động lại (các phòng/ván trong bộ nhớ sẽ mất, tài khoản được giữ). Nếu server đã ở bản mới nhất, file BAT chỉ mở lại trình duyệt và báo server đang chạy ở cửa sổ khác. Lỗi khởi động được lưu tại `data/launcher.log`. File BAT trong thư mục con `bangonline/` chuyển về launcher chính để tránh mở bản sao cũ.
+
+Chẩn đoán mà không khởi động/dừng server: `powershell -NoProfile -ExecutionPolicy Bypass -File tools/start.ps1 -CheckOnly`. Có thể truyền `-Port 3001` để dùng cổng khác; `-NoBrowser -SkipFirewall` dành cho kiểm thử cục bộ.
+
 ## Chạy thủ công
 
 ```bash
@@ -32,14 +36,19 @@ Cách chơi: mỗi người tự đăng ký tài khoản → chủ phòng bấm 
 
 ## Tính năng
 
+- Rút bài đầu lượt bằng cách bấm chồng bài. Sau 5 giây không rút, server tự rút từ bộ bài kể cả khi tắt timer lượt hoặc mất kết nối; riêng Jesse Jones/Pedro Ramirez có 20 giây. Jesse bấm trực tiếp người chơi có bài đang sáng; Pedro bấm trực tiếp bài bỏ để dùng kỹ năng, không cần menu. Kit Carlson xem 3 lá giữa bàn và có 20 giây chọn 2 lá về tay, lá còn lại bay về bộ bài; người khác chỉ thấy 3 lá úp. Black Jack lật công khai lá thứ hai giữa bàn trong 3 giây rồi thu về tay; nếu là Cơ/Rô sẽ rút thêm 1 lá với animation. Timer lượt bắt đầu sau khi hoàn tất bước rút/chọn/lật bài. Animation thể hiện đúng nguồn và đích; bài bí mật chỉ hiện mặt cho người nhận.
 - Đăng ký/đăng nhập (mật khẩu được băm bằng scrypt, lưu trong `data/users.json`)
 - Sảnh xem các phòng đang mở; vào phòng bằng mã hoặc link; chủ phòng có thể mời người khác ra
 - Cài đặt tại lúc tạo phòng hoặc trong phòng chờ: chủ phòng đặt, đổi, xóa mật khẩu; người vào bằng mã/link cũng phải nhập mật khẩu (thành viên quay lại không cần nhập lại).
-- Timer mỗi lượt: mặc định tắt (0), có thể đặt 10–600 giây. Hết giờ tự bỏ các lá đầu tay cho đủ giới hạn máu rồi kết thúc lượt. Khi chờ phản hồi, timer lượt tạm dừng; mỗi bước phản hồi có cùng thời lượng riêng. Hết giờ phản hồi sẽ tự chịu đòn, rút từ bộ bài hoặc chọn các lá đầu tiên. Timer tiếp tục chạy khi mất kết nối.
-- Chọn nhân vật đầu game: chủ phòng đặt số lựa chọn từ 1–4 tại lúc tạo phòng hoặc trong phòng chờ. Mặc định 1 là chia ngẫu nhiên; từ 2–4, người chơi chọn lần lượt từ các nhân vật còn lại, không trùng nhau. Timer chọn riêng cho mỗi người, mặc định 30 giây, có thể tắt (0) hoặc đặt 10–600 giây. Hết giờ tự chọn ngẫu nhiên; timer lượt chỉ chạy sau khi mọi người chọn xong. Tải lại trang vẫn tiếp tục bước chọn và giữ nguyên giờ còn lại.
+- Timer mỗi lượt: mặc định 60 giây, có thể tắt (0) hoặc đặt 10–600 giây. Hết giờ tự bỏ các lá đầu tay cho đủ giới hạn máu rồi kết thúc lượt. Khi chờ phản hồi, timer lượt tạm dừng; mỗi bước phản hồi có cùng thời lượng riêng. Hết giờ phản hồi sẽ tự chịu đòn, rút từ bộ bài hoặc chọn các lá đầu tiên. Timer tiếp tục chạy khi mất kết nối.
+- Chọn nhân vật đầu game: chủ phòng đặt số lựa chọn từ 1–4 tại lúc tạo phòng hoặc trong phòng chờ. Mặc định 1 là chia ngẫu nhiên; từ 2–4, người chơi chọn lần lượt từ các nhân vật còn lại, không trùng nhau. Timer chọn riêng cho mỗi người, mặc định 60 giây, có thể tắt (0) hoặc đặt 10–600 giây. Hết giờ tự chọn ngẫu nhiên; timer lượt chỉ chạy sau khi mọi người chọn xong. Tải lại trang vẫn tiếp tục bước chọn và giữ nguyên giờ còn lại.
 - Cập nhật thời gian thực (Server-Sent Events); tải lại trang hay mất mạng thì vẫn vào lại được ván đang chơi
+- Tạm dừng qua biểu quyết: bấm **Tạm dừng**, mọi người khác (kể cả người đã bị loại còn trong phòng) nhận cửa sổ “<người chơi> muốn tạm dừng.” và chọn **Nhất trí** / **Từ chối** trong 10 giây. Một người từ chối hoặc hết giờ không chọn là huỷ. Khi tất cả nhất trí, dừng ván và giữ nguyên đồng hồ lượt/phản hồi/chọn nhân vật trong 60 giây; người yêu cầu có thể bấm **Tiếp tục** bất cứ lúc nào. Hết 60 giây sẽ biểu quyết gia hạn, lặp lại cho đến khi bị từ chối hoặc người yêu cầu tiếp tục. Ván vẫn dừng trong khi biểu quyết gia hạn; biểu quyết lần đầu chưa dừng đồng hồ. Rời phòng sẽ huỷ yêu cầu. Tải lại trang vẫn giữ biểu quyết và thời hạn trên server.
+- Bấm **Bật thông báo Windows** để cấp quyền thông báo desktop với hai nút **Nhất trí** / **Từ chối** khi trình duyệt hỗ trợ; bấm nội dung thông báo để quay lại game. Tính năng này cần quyền thông báo và HTTPS hoặc localhost; khi chơi qua địa chỉ LAN/Radmin HTTP vẫn có cửa sổ biểu quyết trong game.
 - Chat trong phòng, nhật ký diễn biến ván đấu, chấm xanh báo ai đang online
 - Bàn chơi tròn với ghế theo thứ tự người chơi, bài và trang bị hiển thị quanh bàn; có thể thu gọn chat và đổi cỡ thẻ trang bị.
+- Tất cả người chơi đều thấy lá vừa đánh/phản hồi bay từ tay người đánh ra bài bỏ; lá trang bị bay tới khu vực trang bị của người nhận. Mục tiêu có thể chọn được đánh dấu bằng viền avatar vàng nhấp nháy.
+- Các lá bỏ bớt cuối lượt bay lần lượt từ tay xuống bài bỏ cho cả bàn cùng thấy, kể cả khi server tự bỏ do hết giờ. Lá xanh/súng bị bỏ cũng đi xuống bài bỏ.
 - Countdown hiện ở đầu phòng và ngay khu vực chơi/chọn nhân vật. Bấm bắt đầu sẽ lưu luôn cài đặt đang hiển thị trong phòng chờ.
 - Có thể rời phòng giữa ván: người còn sống được tính là bỏ cuộc và bị loại, chủ phòng được chuyển cho người còn lại. Nếu rời trong bước chọn nhân vật, phòng trở về trạng thái chờ.
 - Đủ luật bản gốc: 80 lá bài, 16 nhân vật với kỹ năng riêng, 4 vai trò, khoảng cách và tầm súng, Dynamite, Jail, Barrel, General Store, Duel, Indians, Gatling, phần thưởng khi hạ Outlaw và hình phạt khi Sheriff giết Deputy

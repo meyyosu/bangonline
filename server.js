@@ -6,10 +6,14 @@ const path = require('path');
 const crypto = require('crypto');
 const { Game, GameError, CARD_INFO, CHAR_INFO, ROLE_INFO } = require('./game');
 const { syncTimer, tickTimer } = require('./room-timer');
+const { pauseAction, finishPause, pauseView } = require('./room-pause');
 
 const PORT = Number(process.env.PORT) || 3000;
 const DATA_DIR = path.join(__dirname, 'data');
 const PUBLIC_DIR = path.join(__dirname, 'public');
+const RUNTIME_FILES = ['server.js', 'game.js', 'room-timer.js', 'room-pause.js'];
+const runtimeRevision = crypto.createHash('sha256').update(Buffer.concat(RUNTIME_FILES.map((file) => fs.readFileSync(path.join(__dirname, file))))).digest('hex');
+const startedAt = new Date().toISOString();
 const USERS_FILE = path.join(DATA_DIR, 'users.json');
 const SESSIONS_FILE = path.join(DATA_DIR, 'sessions.json');
 fs.mkdirSync(DATA_DIR, { recursive: true });
@@ -47,7 +51,8 @@ function roomView(r, user) {
     chat: r.chat.slice(-60),
     game: r.game ? r.game.viewFor(user) : null,
     serverNow: Date.now(),
-    timer: r.clock ? { deadline: r.clock.deadline, player: r.clock.player, response: !!r.clock.pending, character: !!r.clock.character } : null,
+    pause: pauseView(r),
+    timer: r.clock ? { deadline: r.clock.deadline, player: r.clock.player, response: !!r.clock.pending, character: !!r.clock.character, draw: !!r.clock.draw, seconds: r.clock.seconds } : null,
   };
 }
 
@@ -133,6 +138,9 @@ function serveStatic(req, res, pathname) {
 
 const server = http.createServer(async (req, res) => {
   const { pathname } = new URL(req.url, 'http://x');
+  if (req.method === 'GET' && pathname === '/api/health') {
+    return send(res, 200, { app: 'bang-online', pid: process.pid, revision: runtimeRevision, startedAt });
+  }
   if (!pathname.startsWith('/api/')) return serveStatic(req, res, pathname);
 
   const user = getUser(req);
@@ -188,9 +196,9 @@ const server = http.createServer(async (req, res) => {
       const { name } = body;
       const code = newCode();
       const r = { code, name: String(name || `Phòng của ${user}`).slice(0, 40), host: user, players: [user], status: 'waiting', game: null, chat: [] };
-      r.turnSeconds = 0;
+      r.turnSeconds = 60;
       r.characterChoices = 1;
-      r.characterSeconds = 30;
+      r.characterSeconds = 60;
       updateSettings(r, body);
       rooms.set(code, r);
       broadcastLobby();
@@ -235,6 +243,7 @@ const server = http.createServer(async (req, res) => {
         updateSettings(r, body);
         r.chat.push({ system: true, text: 'Chủ phòng đã cập nhật cài đặt phòng.' });
       } else if (sub === 'leave') {
+        finishPause(r, r.pause ? `${user} rời phòng. Yêu cầu tạm dừng bị huỷ.` : null);
         if (r.status === 'playing' && r.game) {
           if (r.game.phase === 'character') {
             r.game = null; r.status = 'waiting';
@@ -253,18 +262,23 @@ const server = http.createServer(async (req, res) => {
         if (r.status === 'playing') return err(res, 'Ván đã bắt đầu.');
         if (r.players.length < 4) return err(res, 'Cần ít nhất 4 người để chơi Bang!.');
         updateSettings(r, body);
+        r.pause = null; r.clock = null;
         r.game = new Game(r.players, { characterChoices: r.characterChoices });
         r.status = 'playing';
         r.chat.push({ system: true, text: 'Ván đấu bắt đầu!' });
       } else if (sub === 'reset') {
         if (r.host !== user) return err(res, 'Chỉ chủ phòng mới làm được.');
         if (r.status === 'playing' && !r.game?.winner) return err(res, 'Ván chưa kết thúc.');
-        r.game = null; r.status = 'waiting';
+        r.game = null; r.status = 'waiting'; r.pause = null;
+      } else if (sub === 'pause') {
+        if (tickTimer(r)) broadcastRoom(r);
+        pauseAction(r, user, body);
       } else if (sub === 'action') {
         if (!r.game) return err(res, 'Chưa có ván đấu.');
         if (tickTimer(r)) { broadcastRoom(r); broadcastLobby(); return err(res, 'Đã hết thời gian. Vui lòng thực hiện theo lượt hiện tại.'); }
+        if (r.pause?.frozenAt != null) return err(res, 'Ván chơi đang tạm dừng.');
         r.game.act(user, body.action || {});
-        if (r.game.winner) r.status = 'ended';
+        if (r.game.winner) { r.status = 'ended'; finishPause(r); }
       } else if (sub === 'chat') {
         const text = String(body.text || '').trim().slice(0, 300);
         if (text) r.chat.push({ user, text, t: Date.now() });

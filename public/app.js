@@ -98,7 +98,98 @@ function toast(msg, ok = false) {
   setTimeout(() => t.remove(), 3200);
 }
 const run = (fn) => async (...a) => { try { await fn(...a); } catch (e) { toast(e.message); } };
-function closeStreams() { lobbyES?.close(); roomES?.close(); lobbyES = roomES = null; }
+function closeStreams() {
+  lobbyES?.close(); roomES?.close(); lobbyES = roomES = null;
+  clearPauseUI();
+}
+
+// ---------- tạm dừng và thông báo desktop ----------
+function clearPauseUI() {
+  $('#pauseDialog')?.remove();
+  ui.pauseDialogKey = null;
+  ui.pauseNotification?.close();
+  ui.pauseNotification = null;
+}
+
+async function enablePauseNotifications() {
+  if (!window.isSecureContext || !('Notification' in window)) {
+    return toast('Thông báo Windows cần trình duyệt hỗ trợ và kết nối HTTPS hoặc localhost.');
+  }
+  const permission = await Notification.requestPermission();
+  if (permission === 'granted' && 'serviceWorker' in navigator) {
+    await navigator.serviceWorker.register('/pause-notifications.js');
+    await navigator.serviceWorker.ready;
+  }
+  toast(permission === 'granted' ? 'Đã bật thông báo Windows.' : 'Chưa được cấp quyền thông báo. Bạn vẫn nhận cửa sổ biểu quyết trong game.', permission === 'granted');
+}
+
+async function notifyPause(p, code) {
+  try {
+    const registration = 'serviceWorker' in navigator ? await navigator.serviceWorker.getRegistration() : null;
+    if (ROOM?.code !== code || ROOM.pause?.id !== p.id || ROOM.pause.phase !== 'voting' || ROOM.pause.accepted.includes(ME)) return;
+    const title = `${p.requester} muốn tạm dừng.`;
+    const body = `${p.renewal ? 'Gia hạn thêm 60 giây. ' : ''}Chọn Nhất trí hoặc Từ chối trong 10 giây.`;
+    ui.pauseNotification?.close();
+    if (registration?.active) {
+      const tag = `bang-pause-${code}-${p.id}`;
+      await registration.showNotification(title, { body, tag, requireInteraction: true,
+        actions: [{ action: 'agree', title: 'Nhất trí' }, { action: 'reject', title: 'Từ chối' }],
+        data: { code, id: p.id, deadline: p.deadline } });
+      const close = () => { registration.getNotifications({ tag }).then((list) => list.forEach((n) => n.close())).catch(() => {}); };
+      if (ROOM?.code !== code || ROOM.pause?.id !== p.id || ROOM.pause.phase !== 'voting' || ROOM.pause.accepted.includes(ME)) close();
+      else ui.pauseNotification = { close };
+    } else {
+      const notification = ui.pauseNotification = new Notification(title, { body: body + ' Mở game để bỏ phiếu.', tag: 'bang-pause' });
+      notification.onclick = () => { window.focus(); $('#pauseDialog')?.focus(); notification.close(); };
+    }
+  } catch { /* Cửa sổ trong game vẫn hoạt động khi desktop không hỗ trợ. */ }
+}
+
+function renderPause() {
+  const p = ROOM.pause;
+  const main = $('#mainArea');
+  if (main) main.inert = !!p?.frozen;
+  if (!p) { clearPauseUI(); return; }
+  const own = p.requester === ME;
+  const voted = p.accepted.includes(ME);
+  const canVote = p.phase === 'voting' && p.voters.includes(ME) && !voted;
+  const key = `${ROOM.code}:${p.id}:${p.phase}:${own}:${voted}`;
+  if (canVote && ui.pauseNotified !== `${ROOM.code}:${p.id}`) {
+    ui.pauseNotified = `${ROOM.code}:${p.id}`;
+    if ('Notification' in window && Notification.permission === 'granted') {
+      void notifyPause(p, ROOM.code);
+    }
+  }
+  if (!canVote) { ui.pauseNotification?.close(); ui.pauseNotification = null; }
+  if (ui.pauseDialogKey !== key) {
+    $('#pauseDialog')?.remove();
+    ui.pauseDialogKey = key;
+    const dialog = document.createElement('dialog');
+    dialog.id = 'pauseDialog';
+    dialog.className = 'panel pause-dialog';
+    dialog.setAttribute('aria-labelledby', 'pauseTitle');
+    dialog.innerHTML = `<h2 id="pauseTitle">${p.phase === 'voting' ? `${esc(p.requester)} muốn tạm dừng.` : '⏸ Ván chơi đang tạm dừng'}</h2>
+      <p>${p.phase === 'voting' ? `${p.renewal ? 'Gia hạn thêm 60 giây. ' : ''}Cần tất cả người chơi khác nhất trí. Không chọn trong 10 giây được tính là từ chối.` : `Chờ ${esc(p.requester)} tiếp tục. Hết 60 giây sẽ biểu quyết gia hạn.`}</p>
+      <p data-pause-clock role="timer"></p><p id="pauseVotes" class="muted"></p>
+      ${voted && p.phase === 'voting' ? '<p>Bạn đã nhất trí. Đang chờ những người còn lại.</p>' : ''}
+      <div class="row">${canVote ? '<button class="btn green" data-pause-vote="yes">Nhất trí</button><button class="btn secondary" data-pause-vote="no">Từ chối</button>' : ''}
+      ${own ? `<button class="btn" id="resumeGame">${p.frozen ? 'Tiếp tục' : 'Huỷ yêu cầu'}</button>` : ''}</div>`;
+    dialog.oncancel = (event) => event.preventDefault();
+    document.body.appendChild(dialog);
+    dialog.showModal();
+    dialog.querySelectorAll('[data-pause-vote]').forEach((button) => {
+      button.onclick = run(async () => {
+        dialog.querySelectorAll('button').forEach((b) => { b.disabled = true; });
+        try { await api(`/api/rooms/${ROOM.code}/pause`, { type: 'vote', id: p.id, agree: button.dataset.pauseVote === 'yes' }); }
+        finally { dialog.querySelectorAll('button').forEach((b) => { b.disabled = false; }); }
+      });
+    });
+    const resume = dialog.querySelector('#resumeGame');
+    if (resume) resume.onclick = run(() => api(`/api/rooms/${ROOM.code}/pause`, { type: 'resume', id: p.id }));
+  }
+  $('#pauseVotes').textContent = p.phase === 'voting' ? `Đã nhất trí: ${p.accepted.length}/${p.voters.length}` : '';
+  updateClock();
+}
 
 function renderUserbox() {
   const box = $('#userbox');
@@ -180,12 +271,12 @@ async function joinRoom(code) {
   }
 }
 
-function timerField(value = 0) {
+function timerField(value = 60) {
   return `<label for="turnSeconds">Thời gian mỗi lượt (giây)</label>
     <input id="turnSeconds" type="number" name="turnSeconds" min="0" max="600" step="1" value="${esc(value)}" required>
     <p class="muted">0 = tắt; từ 10–600 giây. Tạm dừng lượt khi chờ phản hồi; mỗi phản hồi có timer riêng cùng thời lượng.</p>`;
 }
-function characterFields(choices = 1, seconds = 30) {
+function characterFields(choices = 1, seconds = 60) {
   return `<label for="characterChoices">Số nhân vật để chọn đầu game</label>
     <select id="characterChoices" name="characterChoices">${[1, 2, 3, 4].map((n) => `<option value="${n}" ${Number(choices) === n ? 'selected' : ''}>${n}${n === 1 ? ' (chia ngẫu nhiên)' : ''}</option>`).join('')}</select>
     <label for="characterSeconds">Thời gian chọn nhân vật mỗi người (giây)</label>
@@ -205,8 +296,8 @@ function showLobby() {
         <form id="createForm">
           <label>Tên phòng</label><input type="text" name="name" placeholder="Phòng của ${esc(ME)}" maxlength="40">
           <label for="createPassword">Mật khẩu phòng (không bắt buộc)</label><input id="createPassword" type="password" name="password" maxlength="64" autocomplete="new-password">
-          ${timerField()}
           ${characterFields()}
+          ${timerField()}
           <button class="btn" style="width:100%;margin-top:10px">🎲 Tạo phòng mới</button>
         </form>
         <h2 style="margin-top:22px">Vào bằng mã</h2>
@@ -270,7 +361,6 @@ function enterRoom(code) {
         <div class="row"><h2 id="roomName"></h2><span class="code">${code}</span>
           <button class="btn ghost small" id="copyLink">📋 Copy link mời</button>${settingsMenuHTML()}</div>
         <div class="row" id="roomBtns"></div>
-        <div id="turnClock" class="room-clock" data-room-clock role="timer" hidden></div>
       </div>
       <div id="mainArea"></div>
       <div class="side">
@@ -311,9 +401,14 @@ function enterRoom(code) {
     if (d.type === 'closed') { toast('Phòng đã đóng.'); return showLobby(); }
     if (d.type !== 'room') return;
     if (!d.room.players.includes(ME)) { toast('Bạn không còn ở trong phòng.'); return showLobby(); }
+    const previousGame = ROOM?.game;
+    const handOrigins = Object.fromEntries([...document.querySelectorAll('#hand [data-card]')].map((el) => [el.dataset.card, el.getBoundingClientRect()]));
+    const drawOrigins = [...document.querySelectorAll('.draw-stage .draw-slot')].map((el) => el.getBoundingClientRect());
     ROOM = d.room;
     ui.serverOffset = ROOM.serverNow - Date.now();
     renderRoom();
+    showPlayedCards(ROOM.game, previousGame, handOrigins);
+    showCardTransfers(ROOM.game, previousGame, drawOrigins);
   };
   roomES.onerror = () => { if (roomES && roomES.readyState === EventSource.CLOSED) showLobby(); };
 }
@@ -340,7 +435,10 @@ function renderRoom() {
   const g = r.game;
   btns.innerHTML = `
     ${isHost && g?.winner ? '<button class="btn green" id="resetBtn">🔁 Về phòng chờ</button>' : ''}
+    ${g && !g.winner ? `<button class="btn" id="pauseBtn" ${r.pause ? 'disabled' : ''}>Tạm dừng</button><button class="btn ghost small" id="pauseNotifications">Bật thông báo Windows</button>` : ''}
     <button class="btn secondary" id="leaveBtn">Rời phòng${g && !g.winner ? ' giữa ván' : ''}</button>`;
+  $('#pauseBtn') && ($('#pauseBtn').onclick = run(() => api(`/api/rooms/${r.code}/pause`, { type: 'request' })));
+  $('#pauseNotifications') && ($('#pauseNotifications').onclick = run(enablePauseNotifications));
   $('#leaveBtn') && ($('#leaveBtn').onclick = run(async () => { await api(`/api/rooms/${r.code}/leave`, {}); showLobby(); }));
   $('#resetBtn') && ($('#resetBtn').onclick = run(() => api(`/api/rooms/${r.code}/reset`, {})));
 
@@ -352,6 +450,7 @@ function renderRoom() {
   updateChatUnread(r.chat);
 
   $('#logPanel').style.display = g ? '' : 'none';
+  renderPause();
   if (!g) return renderWaiting();
   renderGame();
   updateClock();
@@ -382,11 +481,11 @@ function renderWaiting() {
         <p>${r.hasPassword ? '🔒 Có mật khẩu' : '🔓 Không có mật khẩu'} · ${r.turnSeconds ? r.turnSeconds + ' giây/lượt' : 'Không giới hạn thời gian'}</p>
         <p>Chọn 1 trong ${r.characterChoices} nhân vật · ${r.characterSeconds ? r.characterSeconds + ' giây/người để chọn' : 'Không giới hạn giờ chọn nhân vật'}</p>
         ${isHost ? `<form id="settingsForm">
-          ${timerField(ui.settingsDraft?.turnSeconds ?? r.turnSeconds)}
-          ${characterFields(ui.settingsDraft?.characterChoices ?? r.characterChoices, ui.settingsDraft?.characterSeconds ?? r.characterSeconds)}
           <label for="roomPassword">Mật khẩu mới (để trống để giữ nguyên)</label>
           <input id="roomPassword" type="password" name="password" maxlength="64" autocomplete="new-password" value="${esc(ui.settingsDraft?.password || '')}">
           <label><input type="checkbox" name="removePassword" ${ui.settingsDraft?.removePassword ? 'checked' : ''}> Xóa mật khẩu phòng</label>
+          ${characterFields(ui.settingsDraft?.characterChoices ?? r.characterChoices, ui.settingsDraft?.characterSeconds ?? r.characterSeconds)}
+          ${timerField(ui.settingsDraft?.turnSeconds ?? r.turnSeconds)}
           <button class="btn small blue">Lưu cài đặt</button>
         </form>` : '<p class="muted">Chủ phòng có thể đổi cài đặt trước khi bắt đầu.</p>'}
       </div>
@@ -435,12 +534,20 @@ function updateClock() {
   const g = ROOM?.game;
   const seconds = t ? Math.max(0, Math.ceil((t.deadline - Date.now() - (ui.serverOffset || 0)) / 1000)) : 0;
   const name = g?.players[t?.player]?.name || '';
-  const text = t ? `⏱ ${name} · ${t.character ? 'Chọn nhân vật' : t.response ? 'Phản hồi' : 'Lượt chơi'}: ${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`
+  const p = ROOM?.pause;
+  const pauseSeconds = p ? Math.max(0, Math.ceil((p.deadline - Date.now() - (ui.serverOffset || 0)) / 1000)) : 0;
+  document.querySelectorAll('[data-pause-clock]').forEach((el) => {
+    el.textContent = `${p?.phase === 'voting' ? 'Thời gian biểu quyết' : 'Tạm dừng còn'}: ${pauseSeconds} giây`;
+  });
+  if (p && pauseSeconds === 0) { ui.pauseNotification?.close(); ui.pauseNotification = null; }
+  document.querySelectorAll('[data-draw-clock]').forEach((el) => { el.textContent = p?.frozen ? 'Đang tạm dừng' : `${seconds} giây`; });
+  const drawLabel = g?.pending?.type === 'blackJack' ? 'Black Jack lật bài' : g?.pending?.type === 'kit' ? 'Chọn 2 lá' : `Rút bài (tự động sau ${t?.seconds || 5} giây)`;
+  const text = p?.frozen ? '⏸ Ván chơi tạm dừng · Đồng hồ lượt được giữ nguyên' : t ? `⏱ ${name} · ${t.character ? 'Chọn nhân vật' : t.draw ? drawLabel : t.response ? 'Phản hồi' : 'Lượt chơi'}: ${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`
     : `⏱ ${g?.phase === 'character' ? 'Chọn nhân vật' : 'Lượt chơi'}: không giới hạn`;
   document.querySelectorAll('[data-room-clock]').forEach((el) => {
     el.hidden = !g || !!g.winner;
     el.textContent = text;
-    el.classList.toggle('urgent', !!t && seconds <= 10);
+    el.classList.toggle('urgent', !p?.frozen && !!t && seconds <= 10);
   });
 }
 setInterval(updateClock, 250);
@@ -654,6 +761,9 @@ function renderGame() {
     tfilter = card ? targetFilter(card, g, meP) : null;
     if (!tfilter) ui.mode = null;
   }
+  if (myPrompt && pend.type === 'draw' && pend.options.includes('player')) {
+    tfilter = (p) => p.alive && p.name !== ME && p.handCount > 0;
+  }
 
   // Ghế quanh bàn tròn: mình ở đáy bàn, người sau mình ngồi bên trái, cứ thế theo chiều kim đồng hồ
   const n = g.players.length;
@@ -674,6 +784,7 @@ function renderGame() {
       !p.alive ? 'dead' : '',
       p.winner ? 'winner' : '',
       tfilter ? (tfilter(p) ? 'targetable' : 'notarget') : '',
+      myPrompt && pend.type === 'draw' && pend.options.includes('player') && tfilter?.(p) ? 'draw-target' : '',
       p.jailed ? 'jailed' : '',
     ].join(' ');
     const ch = META.chars[p.char];
@@ -696,12 +807,13 @@ function renderGame() {
     <div class="arena">
       <div class="felt"></div>
       <div class="piles">
-        <div class="pile"><div class="deck ${pend?.type === 'check' ? (myPrompt ? 'ready' : 'waiting') : ''}" id="deck"><div class="card-back">BANG!</div>
-          ${pend?.type === 'check' ? (myPrompt ? '<div class="tap">👆 Bấm để rút!</div>' : `<div class="tap other">⏳ ${esc(g.players[pend.player].name)} đang rút…</div>`) : ''}</div>
+        <div class="pile"><div class="deck ${['check', 'draw'].includes(pend?.type) ? (myPrompt ? 'ready' : 'waiting') : ''}" id="deck"><div class="card-back">BANG!</div>
+          ${['check', 'draw'].includes(pend?.type) && !myPrompt ? `<div class="tap other">⏳ ${esc(g.players[pend.player].name)} đang rút…</div>` : ''}</div>
           Chồng: ${g.deckCount}</div>
-        <div class="pile">${discardStackHTML(g)}<div>Bài bỏ</div></div>
+        <div class="pile ${myPrompt && pend?.type === 'draw' && pend.options.includes('discard') ? 'draw-source' : ''}" id="discardPile">${discardStackHTML(g)}<div>Bài bỏ</div></div>
       </div>
       ${seatsHTML}
+      ${drawStageHTML(g)}
     </div>`;
   const promptBoxHTML = `<div class="prompt ${myPrompt || (canPlay && !ui.mode) ? 'mine' : ''}" id="prompt">${promptHTML(g, meIdx, meP)}</div>`;
 
@@ -721,7 +833,7 @@ function renderGame() {
           <div class="idcard myeq"><b>Trang bị</b>
             <div class="eqs">${meP.eq.length ? meP.eq.map((c) => eqTileHTML(c)).join('') : '<span class="muted">Chưa có trang bị</span>'}</div></div>
         </div>
-        <div class="hand" id="hand">${g.me.hand.map((c) => {
+        <div class="hand" id="hand">${g.me.hand.filter((c) => !(pend?.type === 'blackJack' && pend.player === meIdx && pend.card.id === c.id)).map((c) => {
           const sel = ui.selected.includes(c.id) || ui.mode?.cardId === c.id;
           return cardHTML(c, (sel ? 'selected ' : '') + (playableIds.has(c.id) ? 'playable' : (canPlay || myPrompt ? 'dim' : '')));
         }).join('') || '<span class="muted">Không có bài trên tay.</span>'}</div>
@@ -739,8 +851,86 @@ function renderGame() {
   lb.scrollTop = lb.scrollHeight;
 
   bindGame(g, meIdx, meP, canPlay, myPrompt);
+  animateDrawStage(g);
   showCheckReveal(g);
   updateClock();
+}
+
+function drawStageHTML(g) {
+  const pend = g.pending;
+  if (!pend || !['kit', 'blackJack'].includes(pend.type)) return '';
+  const mine = pend.player === g.me?.index;
+  const kit = pend.type === 'kit';
+  const cards = kit ? pend.cards : [pend.card];
+  return `<div class="draw-stage ${kit ? 'kit-stage' : 'black-jack-stage'}" data-stage="${pend.stage}">
+    <div class="draw-stage-title">${kit ? `${esc(g.players[pend.player].name)} · Kit Carlson chọn 2 lá <span data-draw-clock></span>` : `Black Jack · Lá thứ hai ${pend.red ? '♥ / ♦: rút thêm 1 lá' : '♠ / ♣: không rút thêm'}`}</div>
+    <div class="stage-cards" id="${kit ? 'kitCards' : 'blackJackCard'}">${cards.map((card, slot) => {
+      const selected = card && ui.selected.includes(card.id);
+      const content = card ? cardHTML(card, `small ${selected ? 'selected' : ''}`) : '<div class="card-back">BANG!</div>';
+      const face = kit ? content : `<div class="stage-flip"><div class="stage-front">${content}</div><div class="stage-back"><div class="card-back">BANG!</div></div></div>`;
+      return kit && mine ? `<button type="button" class="draw-slot kit-choice" data-slot="${slot}" data-kit-id="${card.id}" aria-label="${esc(card.name)} ${esc(card.rank)}" aria-pressed="${!!selected}">${face}</button>`
+        : `<div class="draw-slot" data-slot="${slot}">${face}</div>`;
+    }).join('')}</div>
+    ${kit && mine ? `<button class="btn" data-act="confirmKit" ${ui.selected.length === Math.min(2, cards.length) ? '' : 'disabled'}>Giữ 2 lá đã chọn</button>` : ''}
+  </div>`;
+}
+
+function animateDrawStage(g) {
+  const pend = g.pending;
+  const stage = $('.draw-stage');
+  if (!stage) { ui.drawStageKey = null; return; }
+  const key = `${pend.type}:${pend.stage}`;
+  if (ui.drawStageKey === key) return;
+  ui.drawStageKey = key;
+  if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+  const deck = $('#deck .card-back').getBoundingClientRect();
+  stage.querySelectorAll('.draw-slot').forEach((slot, i) => {
+    const end = slot.getBoundingClientRect();
+    slot.animate([
+      { transform: `translate(${deck.left - end.left}px, ${deck.top - end.top}px) scale(.7) rotate(-12deg)`, opacity: 0 },
+      { transform: 'translate(0, 0) scale(1) rotate(0)', opacity: 1 },
+    ], { duration: 500, delay: i * 100, easing: 'ease-out', fill: 'backwards' });
+  });
+  stage.querySelector('.stage-flip')?.animate([{ transform: 'rotateY(180deg)' }, { transform: 'rotateY(0deg)' }], { duration: 400, easing: 'ease-in-out' });
+}
+
+// Transfers come from the server so steals animate on every player's screen.
+function showCardTransfers(g, previous, drawOrigins = []) {
+  if (!g || !previous || window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+  const lastSeq = previous.transfers?.at(-1)?.seq || 0;
+  const seatHand = (index) => {
+    const seat = [...document.querySelectorAll('.player[data-player]')].find((el) => el.dataset.player === g.players[index]?.name);
+    return seat?.querySelector('.hand-fan') || seat;
+  };
+  let order = 0;
+  for (const event of g.transfers || []) {
+    if (event.seq <= lastSeq) continue;
+    const source = event.from === 'deck' ? $('#deck .card-back')
+      : event.from === 'discard' ? $('.arena .pile:last-child .discard-stack') || $('.arena .pile:last-child .card-back')
+      : seatHand(event.from);
+    for (const [index, card] of event.cards.entries()) {
+      const target = event.to === 'deck' ? $('#deck .card-back') : event.to === g.me?.index ? (card && $(`#hand [data-card="${card.id}"]`)) || $('#hand') : seatHand(event.to);
+      const origin = ['kit', 'reveal'].includes(event.from) ? drawOrigins[event.slots?.[index] ?? 0] : null;
+      if ((!source && !origin) || !target) continue;
+      const start = origin || source.getBoundingClientRect(), end = target.getBoundingClientRect();
+      const flyer = document.createElement('div');
+      flyer.className = 'transfer-card';
+      flyer.setAttribute('aria-hidden', 'true');
+      // Only the recipient sees a hidden card's face; public discard cards stay visible.
+      flyer.innerHTML = card ? cardHTML(card, 'small') : '<div class="card-back">BANG!</div>';
+      Object.assign(flyer.style, { left: `${start.left + start.width / 2 - 28}px`, top: `${start.top + start.height / 2 - 39}px` });
+      document.body.appendChild(flyer);
+      const dx = end.left + end.width / 2 - start.left - start.width / 2;
+      const dy = end.top + end.height / 2 - start.top - start.height / 2;
+      const animation = flyer.animate([
+        { transform: 'translate(0, 0) rotate(-8deg) scale(1)', opacity: 1 },
+        { transform: `translate(${dx * .5}px, ${dy * .5 - 45}px) rotate(5deg) scale(1.15)`, opacity: 1, offset: .5 },
+        { transform: `translate(${dx}px, ${dy}px) rotate(0deg) scale(.85)`, opacity: 0 },
+      ], { duration: 650, delay: (event.from === 'deck' && previous.pending?.type === 'blackJack' ? 650 : 0) + order++ * 130, easing: 'ease-in-out', fill: 'both' });
+      animation.onfinish = () => flyer.remove();
+      animation.oncancel = () => flyer.remove();
+    }
+  }
 }
 
 // ---------- rút kiểm tra: lá bay ra giữa bàn, lật mặt, báo thành công/thất bại ----------
@@ -830,7 +1020,7 @@ function promptHTML(g, meIdx, meP) {
   if (g.winner) return '<h4>Ván đấu đã kết thúc.</h4><div class="muted">Xem kết quả ở trên.</div>';
   if (ui.mode?.kind === 'target') {
     const c = g.me.hand.find((x) => x.id === ui.mode.cardId);
-    return `<h4>🎯 Chọn mục tiêu cho ${esc(c?.name)}</h4><div class="muted">Bấm vào người chơi được viền đỏ.</div>
+    return `<h4>🎯 Chọn mục tiêu cho ${esc(c?.name)}</h4><div class="muted">Bấm vào người chơi có viền vàng nhấp nháy.</div>
       <div class="row"><button class="btn secondary small" data-act="cancel">Huỷ</button></div>`;
   }
   if (ui.mode?.kind === 'discard') {
@@ -881,20 +1071,15 @@ function promptHTML(g, meIdx, meP) {
     }
     case 'kit':
       if (!mine) return `<h4>Kit Carlson ${P(pend.player)} đang chọn bài…</h4>`;
-      return `<h4>Kit Carlson: chọn 2 lá để giữ</h4>
-        <div class="row" id="kitCards">${pend.cards.map((c) => cardHTML(c, 'small playable ' + (ui.selected.includes(c.id) ? 'selected' : ''))).join('')}</div>
-        <div class="row"><button class="btn" data-act="confirmKit" ${ui.selected.length === Math.min(2, pend.cards.length) ? '' : 'disabled'}>Giữ 2 lá này</button></div>`;
+      return '<h4>Kit Carlson: chọn 2 lá ở giữa bàn</h4><p>Bạn có 20 giây để chọn. Hai lá đã chọn về tay; lá còn lại trở về bộ bài.</p>';
+    case 'blackJack':
+      return `<h4>Black Jack đang lật lá thứ hai trong 3 giây</h4><p>${pend.red ? 'Lá Cơ hoặc Rô: sẽ rút thêm 1 lá sau khi thu lá này về tay.' : 'Lá Bích hoặc Chuồn: thu lá này về tay rồi bắt đầu lượt.'}</p>`;
     case 'draw': {
       if (!mine) return `<h4>${P(pend.player)} đang chọn cách rút bài…</h4>`;
-      const opts = [];
-      opts.push('<button class="btn" data-act="draw" data-from="deck">Rút 2 lá từ chồng bài</button>');
-      if (pend.options.includes('discard') && g.discardTop) opts.push(`<button class="btn blue" data-act="draw" data-from="discard">Lấy ${esc(g.discardTop.name)} từ bài bỏ + 1 lá</button>`);
-      if (pend.options.includes('player')) {
-        const cand = g.players.filter((p) => p.alive && p.name !== ME && p.handCount > 0);
-        opts.push(`<select id="drawTarget">${cand.map((p) => `<option>${esc(p.name)}</option>`).join('')}</select>
-          <button class="btn blue" data-act="draw" data-from="player">Lấy ngẫu nhiên 1 lá từ người này + 1 lá</button>`);
-      }
-      return `<h4>Chọn cách rút bài</h4><div class="row">${opts.join('')}</div>`;
+      const seconds = ['Jesse Jones', 'Pedro Ramirez'].includes(meP.char) ? 20 : 5;
+      const source = pend.options.includes('player') ? ' Hoặc bấm trực tiếp người chơi có bài đang sáng để lấy 1 lá từ tay họ và rút thêm 1 lá.'
+        : pend.options.includes('discard') ? ' Hoặc bấm trực tiếp chồng bài bỏ đang sáng để lấy lá trên cùng và rút thêm 1 lá.' : '';
+      return `<h4>Rút bài đầu lượt</h4><p>Bấm chồng bài để rút.${source} Sau ${seconds} giây sẽ tự rút. Đồng hồ lượt bắt đầu khi rút xong.</p>`;
     }
   }
   return '';
@@ -923,6 +1108,57 @@ function winnerHTML(g) {
 }
 
 const sendAction = (action) => api(`/api/rooms/${ROOM.code}/action`, { action });
+
+function showPlayedCards(g, previous, handOrigins = {}) {
+  if (!g || !previous) return;
+  const lastSeq = previous.plays?.at(-1)?.seq || 0;
+  let discardOrder = 0;
+  for (const event of g.plays || []) {
+    if (event.seq <= lastSeq) continue;
+    const player = g.players[event.player]?.name;
+    if (!player) continue;
+    let origin = event.player === g.me?.index ? handOrigins[event.card.id] : null;
+    if (!origin) {
+      const seat = [...document.querySelectorAll('.player[data-player]')].find((el) => el.dataset.player === player);
+      const hand = seat?.querySelector('.hand-fan') || seat;
+      if (!hand) continue;
+      const rect = hand.getBoundingClientRect();
+      origin = { left: rect.left + rect.width / 2 - 28, top: rect.top + rect.height / 2 - 39, width: 56, height: 78 };
+    }
+    animatePlayedCard(event.card, origin, {
+      target: g.players[event.recipient]?.name, kind: event.kind,
+      delay: event.kind === 'discard' ? discardOrder++ * 110 : 0,
+    }, player);
+  }
+}
+
+function animatePlayedCard(card, origin, action, player) {
+  if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+  const equipment = action.kind !== 'discard' && ['blue', 'gun'].includes(cardInfo(card).type);
+  const recipient = card.name === 'Jail' ? action.target : player;
+  const seat = [...document.querySelectorAll('.player[data-player]')].find((el) => el.dataset.player === recipient);
+  const target = equipment ? seat?.querySelector(`[data-eq="${card.id}"]`) || seat?.querySelector('.eqframe') || seat?.querySelector('.av')
+    : $('#discardPile .ds-slot:last-child .card') || $('#discardPile');
+  if (!target) return;
+  const end = target.getBoundingClientRect();
+  const flyer = document.createElement('div');
+  flyer.className = 'played-card-flight';
+  flyer.setAttribute('aria-hidden', 'true');
+  flyer.innerHTML = cardHTML(card);
+  Object.assign(flyer.style, { left: `${origin.left}px`, top: `${origin.top}px`, width: `${origin.width}px`, height: `${origin.height}px` });
+  document.body.appendChild(flyer);
+  const dx = end.left + end.width / 2 - origin.left - origin.width / 2;
+  const dy = end.top + end.height / 2 - origin.top - origin.height / 2;
+  const scale = Math.min(end.width / origin.width, end.height / origin.height);
+  const animation = flyer.animate([
+    { transform: 'translate(0, 0) rotate(0deg) scale(1)', opacity: 1 },
+    { transform: `translate(${dx * .5}px, ${dy * .5 - 45}px) rotate(-10deg) scale(1.08)`, opacity: 1, offset: .5 },
+    { transform: `translate(${dx}px, ${dy}px) rotate(0deg) scale(${scale})`, opacity: 1, offset: .9 },
+    { transform: `translate(${dx}px, ${dy}px) rotate(0deg) scale(${scale})`, opacity: 0 },
+  ], { duration: 650, delay: action.delay || 0, easing: 'ease-in-out', fill: 'both' });
+  animation.onfinish = () => flyer.remove();
+  animation.oncancel = () => flyer.remove();
+}
 
 function bindGame(g, meIdx, meP, canPlay, myPrompt) {
   const main = $('#mainArea');
@@ -956,6 +1192,11 @@ function bindGame(g, meIdx, meP, canPlay, myPrompt) {
   }));
 
   main.querySelectorAll('.player').forEach((el) => el.onclick = run(async () => {
+    if (myPrompt && pend.type === 'draw' && pend.options.includes('player')) {
+      const target = g.players.find((p) => p.name === el.dataset.player);
+      if (!target?.alive || target.name === ME || !target.handCount) return;
+      return sendAction({ type: 'drawChoice', from: 'player', target: target.name });
+    }
     if (ui.mode?.kind !== 'target') return;
     const p = g.players.find((x) => x.name === el.dataset.player);
     const card = g.me.hand.find((x) => x.id === ui.mode.cardId);
@@ -971,14 +1212,20 @@ function bindGame(g, meIdx, meP, canPlay, myPrompt) {
   }));
 
   const deckEl = main.querySelector('#deck.ready');
-  if (deckEl) deckEl.onclick = run(async () => { deckEl.classList.remove('ready'); await sendAction({ type: 'checkDraw' }); });
+  if (deckEl) deckEl.onclick = run(async () => {
+    deckEl.classList.remove('ready');
+    await sendAction(g.pending.type === 'draw' ? { type: 'drawChoice', from: 'deck' } : { type: 'checkDraw' });
+  });
+  const discardEl = main.querySelector('#discardPile.draw-source');
+  if (discardEl) discardEl.onclick = run(() => sendAction({ type: 'drawChoice', from: 'discard' }));
 
   main.querySelectorAll('#storeCards .card').forEach((el) => el.onclick = run(async () => {
     if (!myPrompt) return;
     await sendAction({ type: 'pick', cardId: Number(el.dataset.card) });
   }));
-  main.querySelectorAll('#kitCards .card').forEach((el) => el.onclick = () => {
-    const id = Number(el.dataset.card);
+  main.querySelectorAll('#kitCards .kit-choice').forEach((el) => el.onclick = () => {
+    if (!myPrompt || pend.type !== 'kit') return;
+    const id = Number(el.dataset.kitId);
     if (ui.selected.includes(id)) ui.selected = ui.selected.filter((x) => x !== id);
     else if (ui.selected.length < 2) ui.selected.push(id);
     renderGame();
