@@ -197,7 +197,7 @@ const server = http.createServer(async (req, res) => {
       const code = newCode();
       const r = { code, name: String(name || `Phòng của ${user}`).slice(0, 40), host: user, players: [user], status: 'waiting', game: null, chat: [] };
       r.turnSeconds = 60;
-      r.characterChoices = 1;
+      r.characterChoices = 3;
       r.characterSeconds = 60;
       updateSettings(r, body);
       rooms.set(code, r);
