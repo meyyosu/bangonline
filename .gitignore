@@ -3,3 +3,4 @@ data/
 test/*.png
 node/
 node-tmp/
+node-tmp-*/

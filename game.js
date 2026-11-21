@@ -181,7 +181,21 @@ class Game {
     }
     return out;
   }
-  give(p, n) { p.hand.push(...this.draw(n)); }
+  recordTransfer(p, cards, from = 'deck', destination = null, publicCards = false, slots = null) {
+    if (!cards.length) return;
+    this.transferSeq = (this.transferSeq || 0) + 1;
+    this.transfers = [...(this.transfers || []), { seq: this.transferSeq, to: destination ?? this.idx(p.name), owner: this.idx(p.name), from, cards, publicCards, slots }].slice(-40);
+  }
+  give(p, n) {
+    const cards = this.draw(n);
+    p.hand.push(...cards);
+    this.recordTransfer(p, cards);
+  }
+  recordPlay(player, card, kind = 'play') {
+    const recipient = this.players.findIndex((p) => p.eq.some((c) => c.id === card.id));
+    this.playSeq = (this.playSeq || 0) + 1;
+    this.plays = [...(this.plays || []), { seq: this.playSeq, player, card, recipient: recipient < 0 ? null : recipient, kind }].slice(-40);
+  }
   toDiscard(...cards) { this.discard.push(...cards); }
   hasEq(p, name) { return p.eq.some((c) => c.name === name); }
   gun(p) { return p.eq.find((c) => CARD_INFO[c.name].type === 'gun'); }
@@ -211,6 +225,7 @@ class Game {
     if (!from.hand.length) return null;
     const c = from.hand.splice(Math.floor(this.rng() * from.hand.length), 1)[0];
     to.hand.push(c);
+    this.recordTransfer(to, [c], this.idx(from.name));
     return c;
   }
   // "Rút kiểm tra" (Draw!). Kết quả lần rút gần nhất lưu ở lastCheck để giao diện lật bài cho mọi người xem.
@@ -292,14 +307,12 @@ class Game {
   beginDraw() {
     const pi = this.turn, p = this.players[pi];
     this.phase = 'draw';
-    if (p.char === 'Kit Carlson') {
-      this.pending = { type: 'kit', player: pi, cards: this.draw(3) };
-    } else if (p.char === 'Jesse Jones' && this.alive().some((i) => i !== pi && this.players[i].hand.length)) {
+    if (p.char === 'Jesse Jones' && this.alive().some((i) => i !== pi && this.players[i].hand.length)) {
       this.pending = { type: 'draw', player: pi, options: ['deck', 'player'] };
     } else if (p.char === 'Pedro Ramirez' && this.discard.length) {
       this.pending = { type: 'draw', player: pi, options: ['deck', 'discard'] };
     } else {
-      this.normalDraw(p);
+      this.pending = { type: 'draw', player: pi, options: ['deck'] };
     }
   }
 
@@ -308,9 +321,13 @@ class Game {
     p.hand.push(...cards);
     if (p.char === 'Black Jack' && cards[1]) {
       const red = cards[1].suit === 'H' || cards[1].suit === 'D';
-      this.addLog(`${p.name} lật lá thứ hai: ${cardStr(cards[1])}${red ? ' → rút thêm 1 lá!' : ''}`);
-      if (red) this.give(p, 1);
+      this.recordTransfer(p, cards.slice(0, 1));
+      this.drawStageSeq = (this.drawStageSeq || 0) + 1;
+      this.pending = { type: 'blackJack', player: this.idx(p.name), card: cards[1], red, stage: this.drawStageSeq };
+      this.addLog(`${p.name} lật lá thứ hai trong 3 giây: ${cardStr(cards[1])}${red ? ' → sẽ rút thêm 1 lá!' : ''}`);
+      return;
     }
+    this.recordTransfer(p, cards);
     this.phase = 'play';
   }
 
@@ -478,21 +495,29 @@ class Game {
     const pend = this.pending;
     if (pend) {
       if (pend.player !== pi) fail('Chưa đến lượt bạn phản hồi.');
+      const played = a.type === 'respond' ? p.hand.find((c) => c.id === a.cardId) : null;
       this.respond(pi, p, pend, a);
+      if (played && !p.hand.some((c) => c.id === played.id)) this.recordPlay(pi, played);
       return this.afterAction();
     }
 
     if (this.turn !== pi) fail('Chưa đến lượt của bạn.');
     if (this.phase !== 'play') fail('Không thể làm việc này lúc này.');
 
-    if (a.type === 'play') this.playCard(pi, p, a);
+    if (a.type === 'play') {
+      const played = p.hand.find((c) => c.id === a.cardId);
+      this.playCard(pi, p, a);
+      this.recordPlay(pi, played);
+    }
     else if (a.type === 'discard') {
       const ids = a.cardIds || [];
       const excess = p.hand.length - p.hp;
       if (excess <= 0) fail('Bạn không cần bỏ bài.');
       if (!ids.length || ids.length > excess) fail(`Chỉ cần bỏ tối đa ${excess} lá.`);
+      if (new Set(ids).size !== ids.length || !ids.every((id) => p.hand.some((c) => c.id === id))) fail('Chọn các lá bài khác nhau đang có trên tay.');
       const cards = ids.map((id) => this.takeFromHand(p, id));
       this.toDiscard(...cards);
+      for (const card of cards) this.recordPlay(pi, card, 'discard');
       this.addLog(`${p.name} bỏ ${cards.length} lá.`);
     } else if (a.type === 'endTurn') {
       if (p.hand.length > p.hp) fail(`Bạn phải bỏ bớt ${p.hand.length - p.hp} lá trước khi kết thúc lượt.`);
@@ -506,6 +531,13 @@ class Game {
     if (this.winner) return;
     const pend = this.pending;
     const p = this.players[pend ? pend.player : this.turn];
+    if (pend?.type === 'blackJack') {
+      this.recordTransfer(p, [pend.card], 'reveal', null, true);
+      if (pend.red) this.give(p, 1);
+      this.pending = null;
+      this.phase = 'play';
+      return this.afterAction();
+    }
     if (this.phase === 'character') {
       this.addLog(`⏱ ${p.name} hết giờ chọn nhân vật, tự động chọn ngẫu nhiên.`);
       this.chooseCharacter(pend.player, pend.options[Math.floor(this.rng() * pend.options.length)]);
@@ -534,6 +566,11 @@ class Game {
       }
       case 'draw': {
         if (a.type !== 'drawChoice' || !pend.options.includes(a.from)) fail('Lựa chọn không hợp lệ.');
+        if (p.char === 'Kit Carlson') {
+          this.drawStageSeq = (this.drawStageSeq || 0) + 1;
+          this.pending = { type: 'kit', player: pi, cards: this.draw(3), stage: this.drawStageSeq };
+          return;
+        }
         if (a.from === 'player') {
           const ti = this.idx(a.target);
           const t = this.players[ti];
@@ -544,11 +581,13 @@ class Game {
         } else if (a.from === 'discard') {
           const c = this.discard.pop();
           p.hand.push(c);
+          this.recordTransfer(p, [c], 'discard');
           this.give(p, 1);
           this.addLog(`${p.name} lấy ${cardStr(c)} từ chồng bài bỏ và rút 1 lá.`);
         } else {
-          this.give(p, 2);
+          this.normalDraw(p);
           this.addLog(`${p.name} rút 2 lá.`);
+          if (this.pending?.type === 'blackJack') return;
         }
         this.pending = null;
         this.phase = 'play';
@@ -560,7 +599,10 @@ class Game {
         const keep = pend.cards.filter((c) => ids.includes(c.id));
         if (keep.length !== ids.length) fail('Lá không hợp lệ.');
         p.hand.push(...keep);
-        for (const c of pend.cards) if (!ids.includes(c.id)) this.deck.push(c);
+        this.recordTransfer(p, keep, 'kit', null, false, keep.map((c) => pend.cards.indexOf(c)));
+        const returned = pend.cards.filter((c) => !ids.includes(c.id));
+        this.deck.push(...returned);
+        this.recordTransfer(p, returned, 'kit', 'deck', false, returned.map((c) => pend.cards.indexOf(c)));
         this.addLog(`${p.name} xem 3 lá, giữ 2 và trả lại 1.`);
         this.pending = null;
         this.phase = 'play';
@@ -755,6 +797,8 @@ class Game {
       if (pend.type === 'store') pending.cards = pend.cards;
       if (pend.type === 'draw') pending.options = pend.options;
       if (pend.type === 'kit') pending.cards = pend.player === me ? pend.cards : pend.cards.map(() => null);
+      if (['kit', 'blackJack'].includes(pend.type)) pending.stage = pend.stage;
+      if (pend.type === 'blackJack') Object.assign(pending, { card: pend.card, red: pend.red });
       if (pend.type === 'check') {
         pending.kind = pend.kind;
         if (pend.resume) Object.assign(pending, { source: pend.resume.source, need: pend.resume.need, got: pend.resume.got });
@@ -778,6 +822,12 @@ class Game {
       discardRecent: this.discard.slice(-3), // [cũ nhất, ..., trên cùng]
       pending, log: this.log.slice(-60), winner: this.winner,
       lastCheck: this.lastCheck || null, // lá rút kiểm tra gần nhất (đã công khai ở chồng bài bỏ)
+      plays: (this.plays || []).map((event) => ({ ...event })),
+      transfers: (this.transfers || []).map((event) => ({
+        seq: event.seq, to: event.to, from: event.from,
+        cards: event.cards.map((c) => event.owner === me || event.publicCards || event.from === 'discard' ? c : null),
+        slots: event.slots,
+      })),
     };
   }
 }

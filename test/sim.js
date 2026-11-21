@@ -9,7 +9,7 @@ function seeded(seed) {
 function countCards(g) {
   let n = g.deck.length + g.discard.length;
   for (const p of g.players) n += p.hand.length + p.eq.length;
-  if (g.pending && (g.pending.type === 'store' || g.pending.type === 'kit')) n += g.pending.cards.length;
+  if (g.pending?.cards) n += g.pending.cards.length;
   for (const q of g.queue) if (q.cards) n += q.cards.length;
   return n;
 }
@@ -56,6 +56,11 @@ for (let s = 1; s <= N; s++) {
   while (!g.winner) {
     if (++steps > 20000) throw new Error(`Ván ${s}: kẹt vòng lặp`);
     if (g.pending?.type === 'check') checks[g.pending.kind] = (checks[g.pending.kind] || 0) + 1;
+    if (g.pending?.type === 'blackJack') {
+      g.timeout();
+      if (countCards(g) !== 80) throw new Error(`Ván ${s}: mất bài khi Black Jack lật bài`);
+      continue;
+    }
     const pi = g.pending ? g.pending.player : g.turn;
     const cands = candidates(g, pi, rng);
     // ưu tiên hành động "có ích" bằng cách thử ngẫu nhiên tới khi hợp lệ
