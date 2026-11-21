@@ -276,7 +276,7 @@ function timerField(value = 60) {
     <input id="turnSeconds" type="number" name="turnSeconds" min="0" max="600" step="1" value="${esc(value)}" required>
     <p class="muted">0 = tắt; từ 10–600 giây. Tạm dừng lượt khi chờ phản hồi; mỗi phản hồi có timer riêng cùng thời lượng.</p>`;
 }
-function characterFields(choices = 1, seconds = 60) {
+function characterFields(choices = 3, seconds = 60) {
   return `<label for="characterChoices">Số nhân vật để chọn đầu game</label>
     <select id="characterChoices" name="characterChoices">${[1, 2, 3, 4].map((n) => `<option value="${n}" ${Number(choices) === n ? 'selected' : ''}>${n}${n === 1 ? ' (chia ngẫu nhiên)' : ''}</option>`).join('')}</select>
     <label for="characterSeconds">Thời gian chọn nhân vật mỗi người (giây)</label>
