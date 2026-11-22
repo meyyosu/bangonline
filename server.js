@@ -6,10 +6,14 @@ const path = require('path');
 const crypto = require('crypto');
 const { Game, GameError, CARD_INFO, CHAR_INFO, ROLE_INFO } = require('./game');
 const { syncTimer, tickTimer } = require('./room-timer');
+const { pauseAction, finishPause, pauseView } = require('./room-pause');
 
 const PORT = Number(process.env.PORT) || 3000;
 const DATA_DIR = path.join(__dirname, 'data');
 const PUBLIC_DIR = path.join(__dirname, 'public');
+const RUNTIME_FILES = ['server.js', 'game.js', 'room-timer.js', 'room-pause.js'];
+const runtimeRevision = crypto.createHash('sha256').update(Buffer.concat(RUNTIME_FILES.map((file) => fs.readFileSync(path.join(__dirname, file))))).digest('hex');
+const startedAt = new Date().toISOString();
 const USERS_FILE = path.join(DATA_DIR, 'users.json');
 const SESSIONS_FILE = path.join(DATA_DIR, 'sessions.json');
 fs.mkdirSync(DATA_DIR, { recursive: true });
@@ -35,10 +39,11 @@ function newCode() {
 }
 
 function roomSummary(r) {
-  return { code: r.code, name: r.name, host: r.host, players: r.players, status: r.status, max: 7, hasPassword: !!r.passwordHash, turnSeconds: r.turnSeconds, charChoices: r.charChoices ?? 3 };
+  return { code: r.code, name: r.name, host: r.host, players: r.players, status: r.status, max: 7, hasPassword: !!r.passwordHash, turnSeconds: r.turnSeconds, characterChoices: r.characterChoices, characterSeconds: r.characterSeconds };
 }
 
 function roomView(r, user) {
+  syncTimer(r);
   const online = [...(roomClients.get(r.code) || [])].map((c) => c.user);
   return {
     ...roomSummary(r),
@@ -46,7 +51,8 @@ function roomView(r, user) {
     chat: r.chat.slice(-60),
     game: r.game ? r.game.viewFor(user) : null,
     serverNow: Date.now(),
-    timer: r.clock ? { deadline: r.clock.deadline, player: r.clock.player, response: !!r.clock.pending } : null,
+    pause: pauseView(r),
+    timer: r.clock ? { deadline: r.clock.deadline, player: r.clock.player, response: !!r.clock.pending, character: !!r.clock.character, draw: !!r.clock.draw, seconds: r.clock.seconds } : null,
   };
 }
 
@@ -62,13 +68,16 @@ function broadcastLobby() {
 function findRoomOf(user) { return [...rooms.values()].find((r) => r.players.includes(user)); }
 
 function updateSettings(r, body) {
+  if (body.characterChoices !== undefined && (!Number.isInteger(body.characterChoices) || body.characterChoices < 1 || body.characterChoices > 4)) {
+    throw new GameError('Số nhân vật để chọn phải từ 1 đến 4.');
+  }
+  if (body.characterSeconds !== undefined && (!Number.isInteger(body.characterSeconds) || (body.characterSeconds !== 0 && (body.characterSeconds < 10 || body.characterSeconds > 600)))) {
+    throw new GameError('Thời gian chọn nhân vật phải là 0 (tắt) hoặc từ 10 đến 600 giây.');
+  }
   if (body.turnSeconds !== undefined) {
     if (!Number.isInteger(body.turnSeconds) || (body.turnSeconds !== 0 && (body.turnSeconds < 10 || body.turnSeconds > 600))) {
       throw new GameError('Thời gian mỗi lượt phải là 0 (tắt) hoặc từ 10 đến 600 giây.');
     }
-  }
-  if (body.charChoices !== undefined && (!Number.isInteger(body.charChoices) || body.charChoices < 1 || body.charChoices > 5)) {
-    throw new GameError('Số lá nhân vật để chọn phải từ 1 đến 5.');
   }
   if (body.password !== undefined && (typeof body.password !== 'string' || body.password.length > 64)) {
     throw new GameError('Mật khẩu phòng tối đa 64 ký tự.');
@@ -78,7 +87,8 @@ function updateSettings(r, body) {
     r.passwordHash = body.password ? hashPw(body.password, r.passwordSalt) : null;
   }
   if (body.turnSeconds !== undefined) r.turnSeconds = body.turnSeconds;
-  if (body.charChoices !== undefined) r.charChoices = body.charChoices;
+  if (body.characterChoices !== undefined) r.characterChoices = body.characterChoices;
+  if (body.characterSeconds !== undefined) r.characterSeconds = body.characterSeconds;
 }
 
 function leaveRoom(r, user) {
@@ -121,13 +131,16 @@ function serveStatic(req, res, pathname) {
         res.writeHead(200, { 'Content-Type': MIME['.html'] }); res.end(d2);
       });
     }
-    res.writeHead(200, { 'Content-Type': MIME[path.extname(file)] || 'application/octet-stream' });
+    res.writeHead(200, { 'Content-Type': MIME[path.extname(file)] || 'application/octet-stream', 'Cache-Control': 'no-cache' });
     res.end(data);
   });
 }
 
 const server = http.createServer(async (req, res) => {
   const { pathname } = new URL(req.url, 'http://x');
+  if (req.method === 'GET' && pathname === '/api/health') {
+    return send(res, 200, { app: 'bang-online', pid: process.pid, revision: runtimeRevision, startedAt });
+  }
   if (!pathname.startsWith('/api/')) return serveStatic(req, res, pathname);
 
   const user = getUser(req);
@@ -183,8 +196,9 @@ const server = http.createServer(async (req, res) => {
       const { name } = body;
       const code = newCode();
       const r = { code, name: String(name || `Phòng của ${user}`).slice(0, 40), host: user, players: [user], status: 'waiting', game: null, chat: [] };
-      r.turnSeconds = 0;
-      r.charChoices = 3;
+      r.turnSeconds = 60;
+      r.characterChoices = 3;
+      r.characterSeconds = 60;
       updateSettings(r, body);
       rooms.set(code, r);
       broadcastLobby();
@@ -229,7 +243,16 @@ const server = http.createServer(async (req, res) => {
         updateSettings(r, body);
         r.chat.push({ system: true, text: 'Chủ phòng đã cập nhật cài đặt phòng.' });
       } else if (sub === 'leave') {
-        if (r.status === 'playing' && r.game?.players[r.game.idx(user)]?.alive) return err(res, 'Không thể rời phòng khi đang chơi.');
+        finishPause(r, r.pause ? `${user} rời phòng. Yêu cầu tạm dừng bị huỷ.` : null);
+        if (r.status === 'playing' && r.game) {
+          if (r.game.phase === 'character') {
+            r.game = null; r.status = 'waiting';
+            r.chat.push({ system: true, text: 'Có người rời khi chọn nhân vật. Phòng trở về trạng thái chờ.' });
+          } else {
+            r.game.forfeit(user);
+            if (r.game.winner) r.status = 'ended';
+          }
+        }
         leaveRoom(r, user);
       } else if (sub === 'kick') {
         if (r.host !== user || r.status === 'playing') return err(res, 'Chỉ chủ phòng mới mời ra được (khi chưa chơi).');
@@ -238,18 +261,24 @@ const server = http.createServer(async (req, res) => {
         if (r.host !== user) return err(res, 'Chỉ chủ phòng mới bắt đầu được.');
         if (r.status === 'playing') return err(res, 'Ván đã bắt đầu.');
         if (r.players.length < 4) return err(res, 'Cần ít nhất 4 người để chơi Bang!.');
-        r.game = new Game(r.players, { charChoices: r.charChoices ?? 3 });
+        updateSettings(r, body);
+        r.pause = null; r.clock = null;
+        r.game = new Game(r.players, { characterChoices: r.characterChoices });
         r.status = 'playing';
         r.chat.push({ system: true, text: 'Ván đấu bắt đầu!' });
       } else if (sub === 'reset') {
         if (r.host !== user) return err(res, 'Chỉ chủ phòng mới làm được.');
         if (r.status === 'playing' && !r.game?.winner) return err(res, 'Ván chưa kết thúc.');
-        r.game = null; r.status = 'waiting';
+        r.game = null; r.status = 'waiting'; r.pause = null;
+      } else if (sub === 'pause') {
+        if (tickTimer(r)) broadcastRoom(r);
+        pauseAction(r, user, body);
       } else if (sub === 'action') {
         if (!r.game) return err(res, 'Chưa có ván đấu.');
         if (tickTimer(r)) { broadcastRoom(r); broadcastLobby(); return err(res, 'Đã hết thời gian. Vui lòng thực hiện theo lượt hiện tại.'); }
+        if (r.pause?.frozenAt != null) return err(res, 'Ván chơi đang tạm dừng.');
         r.game.act(user, body.action || {});
-        if (r.game.winner) r.status = 'ended';
+        if (r.game.winner) { r.status = 'ended'; finishPause(r); }
       } else if (sub === 'chat') {
         const text = String(body.text || '').trim().slice(0, 300);
         if (text) r.chat.push({ user, text, t: Date.now() });

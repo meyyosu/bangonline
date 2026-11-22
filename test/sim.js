@@ -9,7 +9,7 @@ function seeded(seed) {
 function countCards(g) {
   let n = g.deck.length + g.discard.length;
   for (const p of g.players) n += p.hand.length + p.eq.length;
-  if (g.pending && (g.pending.type === 'store' || g.pending.type === 'kit')) n += g.pending.cards.length;
+  if (g.pending?.cards) n += g.pending.cards.length;
   for (const q of g.queue) if (q.cards) n += q.cards.length;
   return n;
 }
@@ -19,7 +19,7 @@ function candidates(g, pi, rng) {
   const others = g.players.filter((q, i) => q.alive && i !== pi).map((q) => q.name);
   const pick = (a) => a[Math.floor(rng() * a.length)];
   const out = [];
-  if (g.phase === 'choose') return p.choices.map((char) => ({ type: 'chooseChar', char }));
+  if (g.phase === 'character') return g.pending.options.map((character) => ({ type: 'chooseCharacter', character }));
   const pend = g.pending;
   if (pend) {
     if (pend.type === 'draw') for (const from of pend.options) out.push({ type: 'drawChoice', from, target: pick(others) });
@@ -51,12 +51,17 @@ const checks = {}; // số lần phải chờ rút kiểm tra theo loại
 for (let s = 1; s <= N; s++) {
   const rng = seeded(s);
   const names = Array.from({ length: 4 + (s % 4) }, (_, i) => `P${i + 1}`);
-  const g = new Game(names, { rng, charChoices: 1 + (s % 3) }); // 1 = chia thẳng, 2–3 = có bước chọn nhân vật
+  const g = new Game(names, { rng, characterChoices: 1 + (s % 4) }); // Exercise all room choice counts.
   let steps = 0;
   while (!g.winner) {
     if (++steps > 20000) throw new Error(`Ván ${s}: kẹt vòng lặp`);
     if (g.pending?.type === 'check') checks[g.pending.kind] = (checks[g.pending.kind] || 0) + 1;
-    const pi = g.phase === 'choose' ? g.players.findIndex((p) => !p.picked) : g.pending ? g.pending.player : g.turn;
+    if (g.pending?.type === 'blackJack') {
+      g.timeout();
+      if (countCards(g) !== 80) throw new Error(`Ván ${s}: mất bài khi Black Jack lật bài`);
+      continue;
+    }
+    const pi = g.pending ? g.pending.player : g.turn;
     const cands = candidates(g, pi, rng);
     // ưu tiên hành động "có ích" bằng cách thử ngẫu nhiên tới khi hợp lệ
     let done = false;

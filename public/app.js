@@ -98,7 +98,99 @@ function toast(msg, ok = false) {
   setTimeout(() => t.remove(), 3200);
 }
 const run = (fn) => async (...a) => { try { await fn(...a); } catch (e) { toast(e.message); } };
-function closeStreams() { lobbyES?.close(); roomES?.close(); lobbyES = roomES = null; }
+function closeStreams() {
+  lobbyES?.close(); roomES?.close(); lobbyES = roomES = null;
+  clearPauseUI();
+  clearMatchResult();
+}
+
+// ---------- tạm dừng và thông báo desktop ----------
+function clearPauseUI() {
+  $('#pauseDialog')?.remove();
+  ui.pauseDialogKey = null;
+  ui.pauseNotification?.close();
+  ui.pauseNotification = null;
+}
+
+async function enablePauseNotifications() {
+  if (!window.isSecureContext || !('Notification' in window)) {
+    return toast('Thông báo Windows cần trình duyệt hỗ trợ và kết nối HTTPS hoặc localhost.');
+  }
+  const permission = await Notification.requestPermission();
+  if (permission === 'granted' && 'serviceWorker' in navigator) {
+    await navigator.serviceWorker.register('/pause-notifications.js');
+    await navigator.serviceWorker.ready;
+  }
+  toast(permission === 'granted' ? 'Đã bật thông báo Windows.' : 'Chưa được cấp quyền thông báo. Bạn vẫn nhận cửa sổ biểu quyết trong game.', permission === 'granted');
+}
+
+async function notifyPause(p, code) {
+  try {
+    const registration = 'serviceWorker' in navigator ? await navigator.serviceWorker.getRegistration() : null;
+    if (ROOM?.code !== code || ROOM.pause?.id !== p.id || ROOM.pause.phase !== 'voting' || ROOM.pause.accepted.includes(ME)) return;
+    const title = `${p.requester} muốn tạm dừng.`;
+    const body = `${p.renewal ? 'Gia hạn thêm 60 giây. ' : ''}Chọn Nhất trí hoặc Từ chối trong 10 giây.`;
+    ui.pauseNotification?.close();
+    if (registration?.active) {
+      const tag = `bang-pause-${code}-${p.id}`;
+      await registration.showNotification(title, { body, tag, requireInteraction: true,
+        actions: [{ action: 'agree', title: 'Nhất trí' }, { action: 'reject', title: 'Từ chối' }],
+        data: { code, id: p.id, deadline: p.deadline } });
+      const close = () => { registration.getNotifications({ tag }).then((list) => list.forEach((n) => n.close())).catch(() => {}); };
+      if (ROOM?.code !== code || ROOM.pause?.id !== p.id || ROOM.pause.phase !== 'voting' || ROOM.pause.accepted.includes(ME)) close();
+      else ui.pauseNotification = { close };
+    } else {
+      const notification = ui.pauseNotification = new Notification(title, { body: body + ' Mở game để bỏ phiếu.', tag: 'bang-pause' });
+      notification.onclick = () => { window.focus(); $('#pauseDialog')?.focus(); notification.close(); };
+    }
+  } catch { /* Cửa sổ trong game vẫn hoạt động khi desktop không hỗ trợ. */ }
+}
+
+function renderPause() {
+  const p = ROOM.pause;
+  const main = $('#mainArea');
+  if (main) main.inert = !!p?.frozen;
+  if (!p) { clearPauseUI(); return; }
+  const own = p.requester === ME;
+  const voted = p.accepted.includes(ME);
+  const canVote = p.phase === 'voting' && p.voters.includes(ME) && !voted;
+  const key = `${ROOM.code}:${p.id}:${p.phase}:${own}:${voted}`;
+  if (canVote && ui.pauseNotified !== `${ROOM.code}:${p.id}`) {
+    ui.pauseNotified = `${ROOM.code}:${p.id}`;
+    if ('Notification' in window && Notification.permission === 'granted') {
+      void notifyPause(p, ROOM.code);
+    }
+  }
+  if (!canVote) { ui.pauseNotification?.close(); ui.pauseNotification = null; }
+  if (ui.pauseDialogKey !== key) {
+    $('#pauseDialog')?.remove();
+    ui.pauseDialogKey = key;
+    const dialog = document.createElement('dialog');
+    dialog.id = 'pauseDialog';
+    dialog.className = 'panel pause-dialog';
+    dialog.setAttribute('aria-labelledby', 'pauseTitle');
+    dialog.innerHTML = `<h2 id="pauseTitle">${p.phase === 'voting' ? `${esc(p.requester)} muốn tạm dừng.` : '⏸ Ván chơi đang tạm dừng'}</h2>
+      <p>${p.phase === 'voting' ? `${p.renewal ? 'Gia hạn thêm 60 giây. ' : ''}Cần tất cả người chơi khác nhất trí. Không chọn trong 10 giây được tính là từ chối.` : `Chờ ${esc(p.requester)} tiếp tục. Hết 60 giây sẽ biểu quyết gia hạn.`}</p>
+      <p data-pause-clock role="timer"></p><p id="pauseVotes" class="muted"></p>
+      ${voted && p.phase === 'voting' ? '<p>Bạn đã nhất trí. Đang chờ những người còn lại.</p>' : ''}
+      <div class="row">${canVote ? '<button class="btn green" data-pause-vote="yes">Nhất trí</button><button class="btn secondary" data-pause-vote="no">Từ chối</button>' : ''}
+      ${own ? `<button class="btn" id="resumeGame">${p.frozen ? 'Tiếp tục' : 'Huỷ yêu cầu'}</button>` : ''}</div>`;
+    dialog.oncancel = (event) => event.preventDefault();
+    document.body.appendChild(dialog);
+    dialog.showModal();
+    dialog.querySelectorAll('[data-pause-vote]').forEach((button) => {
+      button.onclick = run(async () => {
+        dialog.querySelectorAll('button').forEach((b) => { b.disabled = true; });
+        try { await api(`/api/rooms/${ROOM.code}/pause`, { type: 'vote', id: p.id, agree: button.dataset.pauseVote === 'yes' }); }
+        finally { dialog.querySelectorAll('button').forEach((b) => { b.disabled = false; }); }
+      });
+    });
+    const resume = dialog.querySelector('#resumeGame');
+    if (resume) resume.onclick = run(() => api(`/api/rooms/${ROOM.code}/pause`, { type: 'resume', id: p.id }));
+  }
+  $('#pauseVotes').textContent = p.phase === 'voting' ? `Đã nhất trí: ${p.accepted.length}/${p.voters.length}` : '';
+  updateClock();
+}
 
 function renderUserbox() {
   const box = $('#userbox');
@@ -180,17 +272,17 @@ async function joinRoom(code) {
   }
 }
 
-function timerField(value = 0) {
+function timerField(value = 60) {
   return `<label for="turnSeconds">Thời gian mỗi lượt (giây)</label>
     <input id="turnSeconds" type="number" name="turnSeconds" min="0" max="600" step="1" value="${esc(value)}" required>
     <p class="muted">0 = tắt; từ 10–600 giây. Tạm dừng lượt khi chờ phản hồi; mỗi phản hồi có timer riêng cùng thời lượng.</p>`;
 }
-function charField(value = 3) {
-  const v = Number(value) || 3;
-  return `<label for="charChoices">Số lá nhân vật mỗi người rút để chọn</label>
-    <select id="charChoices" name="charChoices">${[1, 2, 3, 4, 5].map((n) =>
-      `<option value="${n}" ${n === v ? 'selected' : ''}>${n}${n === 1 ? ' (chia ngẫu nhiên, không chọn)' : ' lá'}</option>`).join('')}</select>
-    <p class="muted">Mặc định 3. Bang! chỉ có 16 nhân vật nên phòng 6–7 người tối đa 2 lá mỗi người.</p>`;
+function characterFields(choices = 3, seconds = 60) {
+  return `<label for="characterChoices">Số nhân vật để chọn đầu game</label>
+    <select id="characterChoices" name="characterChoices">${[1, 2, 3, 4].map((n) => `<option value="${n}" ${Number(choices) === n ? 'selected' : ''}>${n}${n === 1 ? ' (chia ngẫu nhiên)' : ''}</option>`).join('')}</select>
+    <label for="characterSeconds">Thời gian chọn nhân vật mỗi người (giây)</label>
+    <input id="characterSeconds" type="number" name="characterSeconds" min="0" max="600" step="1" value="${esc(seconds)}" required>
+    <p class="muted">0 = tắt; từ 10–600 giây, riêng với timer lượt. Chọn lần lượt, không trùng nhân vật; hết giờ tự chọn ngẫu nhiên. Khi đặt 1 nhân vật, game tự chia và bỏ qua bước chọn.</p>`;
 }
 
 // ---------- sảnh ----------
@@ -205,8 +297,8 @@ function showLobby() {
         <form id="createForm">
           <label>Tên phòng</label><input type="text" name="name" placeholder="Phòng của ${esc(ME)}" maxlength="40">
           <label for="createPassword">Mật khẩu phòng (không bắt buộc)</label><input id="createPassword" type="password" name="password" maxlength="64" autocomplete="new-password">
+          ${characterFields()}
           ${timerField()}
-          ${charField()}
           <button class="btn" style="width:100%;margin-top:10px">🎲 Tạo phòng mới</button>
         </form>
         <h2 style="margin-top:22px">Vào bằng mã</h2>
@@ -224,7 +316,7 @@ function showLobby() {
   $('#createForm').onsubmit = run(async (e) => {
     e.preventDefault();
     const f = new FormData(e.target);
-    const r = await api('/api/rooms', { name: f.get('name'), password: f.get('password'), turnSeconds: Number(f.get('turnSeconds')), charChoices: Number(f.get('charChoices')) });
+    const r = await api('/api/rooms', { name: f.get('name'), password: f.get('password'), turnSeconds: Number(f.get('turnSeconds')), characterChoices: Number(f.get('characterChoices')), characterSeconds: Number(f.get('characterSeconds')) });
     enterRoom(r.code);
   });
   $('#joinForm').onsubmit = run(async (e) => {
@@ -270,7 +362,6 @@ function enterRoom(code) {
         <div class="row"><h2 id="roomName"></h2><span class="code">${code}</span>
           <button class="btn ghost small" id="copyLink">📋 Copy link mời</button>${settingsMenuHTML()}</div>
         <div class="row" id="roomBtns"></div>
-        <div id="turnClock" role="timer"></div>
       </div>
       <div id="mainArea"></div>
       <div class="side">
@@ -311,9 +402,14 @@ function enterRoom(code) {
     if (d.type === 'closed') { toast('Phòng đã đóng.'); return showLobby(); }
     if (d.type !== 'room') return;
     if (!d.room.players.includes(ME)) { toast('Bạn không còn ở trong phòng.'); return showLobby(); }
+    const previousGame = ROOM?.game;
+    const handOrigins = Object.fromEntries([...document.querySelectorAll('#hand [data-card]')].map((el) => [el.dataset.card, el.getBoundingClientRect()]));
+    const drawOrigins = [...document.querySelectorAll('.draw-stage .draw-slot')].map((el) => el.getBoundingClientRect());
     ROOM = d.room;
     ui.serverOffset = ROOM.serverNow - Date.now();
     renderRoom();
+    showPlayedCards(ROOM.game, previousGame, handOrigins);
+    showCardTransfers(ROOM.game, previousGame, drawOrigins);
   };
   roomES.onerror = () => { if (roomES && roomES.readyState === EventSource.CLOSED) showLobby(); };
 }
@@ -338,10 +434,12 @@ function renderRoom() {
   const btns = $('#roomBtns');
   const isHost = r.host === ME;
   const g = r.game;
-  const meAlive = g ? g.players.find((p) => p.name === ME)?.alive : true;
   btns.innerHTML = `
     ${isHost && g?.winner ? '<button class="btn green" id="resetBtn">🔁 Về phòng chờ</button>' : ''}
-    ${!g || g.winner || !meAlive ? '<button class="btn secondary" id="leaveBtn">Rời phòng</button>' : ''}`;
+    ${g && !g.winner ? `<button class="btn" id="pauseBtn" ${r.pause ? 'disabled' : ''}>Tạm dừng</button><button class="btn ghost small" id="pauseNotifications">Bật thông báo Windows</button>` : ''}
+    <button class="btn secondary" id="leaveBtn">Rời phòng${g && !g.winner ? ' giữa ván' : ''}</button>`;
+  $('#pauseBtn') && ($('#pauseBtn').onclick = run(() => api(`/api/rooms/${r.code}/pause`, { type: 'request' })));
+  $('#pauseNotifications') && ($('#pauseNotifications').onclick = run(enablePauseNotifications));
   $('#leaveBtn') && ($('#leaveBtn').onclick = run(async () => { await api(`/api/rooms/${r.code}/leave`, {}); showLobby(); }));
   $('#resetBtn') && ($('#resetBtn').onclick = run(() => api(`/api/rooms/${r.code}/reset`, {})));
 
@@ -353,8 +451,20 @@ function renderRoom() {
   updateChatUnread(r.chat);
 
   $('#logPanel').style.display = g ? '' : 'none';
+  renderPause();
+  if (!g?.winner) clearMatchResult();
   if (!g) return renderWaiting();
   renderGame();
+  renderMatchResult(g);
+  updateClock();
+}
+
+function roomSettingsBody(form) {
+  const f = new FormData(form);
+  const body = { turnSeconds: Number(f.get('turnSeconds')), characterChoices: Number(f.get('characterChoices')), characterSeconds: Number(f.get('characterSeconds')) };
+  if (f.has('removePassword')) body.password = '';
+  else if (f.get('password')) body.password = f.get('password');
+  return body;
 }
 
 function renderWaiting() {
@@ -371,14 +481,14 @@ function renderWaiting() {
       </ul>
       <div class="room-settings">
         <h3>Cài đặt phòng</h3>
-        <p>${r.hasPassword ? '🔒 Có mật khẩu' : '🔓 Không có mật khẩu'} · ${r.turnSeconds ? r.turnSeconds + ' giây/lượt' : 'Không giới hạn thời gian'}
-          · ${r.charChoices > 1 ? `Mỗi người rút ${r.charChoices} nhân vật để chọn` : 'Nhân vật chia ngẫu nhiên'}</p>
+        <p>${r.hasPassword ? '🔒 Có mật khẩu' : '🔓 Không có mật khẩu'} · ${r.turnSeconds ? r.turnSeconds + ' giây/lượt' : 'Không giới hạn thời gian'}</p>
+        <p>Chọn 1 trong ${r.characterChoices} nhân vật · ${r.characterSeconds ? r.characterSeconds + ' giây/người để chọn' : 'Không giới hạn giờ chọn nhân vật'}</p>
         ${isHost ? `<form id="settingsForm">
-          ${timerField(ui.settingsDraft?.turnSeconds ?? r.turnSeconds)}
-          ${charField(ui.settingsDraft?.charChoices ?? r.charChoices)}
           <label for="roomPassword">Mật khẩu mới (để trống để giữ nguyên)</label>
           <input id="roomPassword" type="password" name="password" maxlength="64" autocomplete="new-password" value="${esc(ui.settingsDraft?.password || '')}">
           <label><input type="checkbox" name="removePassword" ${ui.settingsDraft?.removePassword ? 'checked' : ''}> Xóa mật khẩu phòng</label>
+          ${characterFields(ui.settingsDraft?.characterChoices ?? r.characterChoices, ui.settingsDraft?.characterSeconds ?? r.characterSeconds)}
+          ${timerField(ui.settingsDraft?.turnSeconds ?? r.turnSeconds)}
           <button class="btn small blue">Lưu cài đặt</button>
         </form>` : '<p class="muted">Chủ phòng có thể đổi cài đặt trước khi bắt đầu.</p>'}
       </div>
@@ -396,19 +506,23 @@ function renderWaiting() {
         </ul>
       </div>
     </div>`;
-  $('#startBtn') && ($('#startBtn').onclick = run(() => api(`/api/rooms/${r.code}/start`, {})));
+  $('#startBtn') && ($('#startBtn').onclick = run(async () => {
+    const form = $('#settingsForm');
+    if (form && !form.reportValidity()) return;
+    // Save the visible settings even when the host starts without pressing Save.
+    const settings = form ? roomSettingsBody(form) : {};
+    await api(`/api/rooms/${r.code}/start`, settings);
+    ui.settingsDraft = null;
+  }));
   const settings = $('#settingsForm');
   if (settings) {
     settings.oninput = () => {
       const f = new FormData(settings);
-      ui.settingsDraft = { turnSeconds: f.get('turnSeconds'), charChoices: f.get('charChoices'), password: f.get('password'), removePassword: f.has('removePassword') };
+      ui.settingsDraft = { turnSeconds: f.get('turnSeconds'), characterChoices: f.get('characterChoices'), characterSeconds: f.get('characterSeconds'), password: f.get('password'), removePassword: f.has('removePassword') };
     };
     settings.onsubmit = run(async (e) => {
       e.preventDefault();
-      const f = new FormData(settings);
-      const body = { turnSeconds: Number(f.get('turnSeconds')), charChoices: Number(f.get('charChoices')) };
-      if (f.has('removePassword')) body.password = '';
-      else if (f.get('password')) body.password = f.get('password');
+      const body = roomSettingsBody(settings);
       await api(`/api/rooms/${r.code}/settings`, body);
       ui.settingsDraft = null;
       if (ROOM && !ROOM.game) renderWaiting();
@@ -419,15 +533,25 @@ function renderWaiting() {
 }
 
 function updateClock() {
-  const el = $('#turnClock');
-  if (!el) return;
   const t = ROOM?.timer;
-  el.hidden = !t;
-  if (!t) return;
-  const seconds = Math.max(0, Math.ceil((t.deadline - Date.now() - (ui.serverOffset || 0)) / 1000));
-  const name = ROOM.game.players[t.player].name;
-  el.textContent = ROOM.game.phase === 'choose' ? `⏱ Chọn nhân vật: ${seconds}s` : `⏱ ${name} · ${t.response ? 'Phản hồi' : 'Lượt chơi'}: ${seconds}s`;
-  el.classList.toggle('urgent', seconds <= 10);
+  const g = ROOM?.game;
+  const seconds = t ? Math.max(0, Math.ceil((t.deadline - Date.now() - (ui.serverOffset || 0)) / 1000)) : 0;
+  const name = g?.players[t?.player]?.name || '';
+  const p = ROOM?.pause;
+  const pauseSeconds = p ? Math.max(0, Math.ceil((p.deadline - Date.now() - (ui.serverOffset || 0)) / 1000)) : 0;
+  document.querySelectorAll('[data-pause-clock]').forEach((el) => {
+    el.textContent = `${p?.phase === 'voting' ? 'Thời gian biểu quyết' : 'Tạm dừng còn'}: ${pauseSeconds} giây`;
+  });
+  if (p && pauseSeconds === 0) { ui.pauseNotification?.close(); ui.pauseNotification = null; }
+  document.querySelectorAll('[data-draw-clock]').forEach((el) => { el.textContent = p?.frozen ? 'Đang tạm dừng' : `${seconds} giây`; });
+  const drawLabel = g?.pending?.type === 'blackJack' ? 'Black Jack lật bài' : g?.pending?.type === 'kit' ? 'Chọn 2 lá' : `Rút bài (tự động sau ${t?.seconds || 5} giây)`;
+  const text = p?.frozen ? '⏸ Ván chơi tạm dừng · Đồng hồ lượt được giữ nguyên' : t ? `⏱ ${name} · ${t.character ? 'Chọn nhân vật' : t.draw ? drawLabel : t.response ? 'Phản hồi' : 'Lượt chơi'}: ${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`
+    : `⏱ ${g?.phase === 'character' ? 'Chọn nhân vật' : 'Lượt chơi'}: không giới hạn`;
+  document.querySelectorAll('[data-room-clock]').forEach((el) => {
+    el.hidden = !g || !!g.winner;
+    el.textContent = text;
+    el.classList.toggle('urgent', !p?.frozen && !!t && seconds <= 10);
+  });
 }
 setInterval(updateClock, 250);
 
@@ -491,6 +615,13 @@ const CHAR_ICON = {
   'Jourdonnais': '👴', 'Kit Carlson': '🧓', 'Lucky Duke': '🍀', 'Paul Regret': '👨', 'Pedro Ramirez': '👱',
   'Rose Doolan': '🌹', 'Sid Ketchum': '👦', 'Slab the Killer': '😠', 'Suzy Lafayette': '🎀', 'Vulture Sam': '🦅', 'Willy the Kid': '🤠',
 };
+
+// Bàn chơi và màn hình kết quả dùng chung avatar theo nhân vật/trạng thái.
+function playerAvatarHTML(player) {
+  const icon = player.alive ? (CHAR_ICON[player.char] || '🤠') : '💀';
+  const label = `${player.char || 'Cao bồi'}${player.alive ? '' : ' · Đã bị hạ'}`;
+  return `<span class="character-avatar" role="img" aria-label="${esc(label)}">${icon}</span>`;
+}
 
 // ---------- cài đặt hiển thị (lưu trên máy từng người) ----------
 const EQ_SIZES = { sm: 'Nhỏ', md: 'Vừa', lg: 'To' };
@@ -563,61 +694,57 @@ function targetFilter(card, g, meP) {
 
 // ---------- chọn nhân vật (trước khi vào trận) ----------
 const ROLE_ICON = { Sheriff: '⭐', Deputy: '🛡️', Outlaw: '💀', Renegade: '🎭' };
-function renderChoose(g) {
-  const me = g.me;
-  const meP = me ? g.players[me.index] : null;
-  const locked = !me || !!me.picked;
-  if (locked) ui.choosePick = null;
-  const sel = me?.picked || ui.choosePick;
-  const done = g.players.filter((p) => p.picked).length;
-  let roleHTML = '';
-  if (meP) {
-    const role = META.roles[meP.role];
-    roleHTML = `<div class="rolecard ${meP.role}"><div class="rstar">${ROLE_ICON[meP.role]}</div>
-      <div><h3>Bạn là ${esc(ROLE_VI[meP.role])} · ${esc(role.vi)}</h3><p>${esc(role.goal)}${meP.role === 'Sheriff' ? ' Bạn được +1 máu.' : ''}</p></div>
-      <span class="secret">${meP.role === 'Sheriff' ? '👁️ Mọi người đều biết' : '🔒 Chỉ bạn thấy'}</span></div>`;
-  }
-  const cards = (me?.choices || []).map((name) => {
+function renderCharacterSelection() {
+  const g = ROOM.game;
+  const meP = g.players[g.me.index];
+  const mine = g.pending.player === g.me.index;
+  const options = mine ? g.pending.options : meP.char ? [meP.char] : [];
+  const choiceKey = `${ROOM.code}:${g.pending.player}`;
+  if (ui.chooseFor !== choiceKey) { ui.chooseFor = choiceKey; ui.choosePick = null; }
+  if (!options.includes(ui.choosePick)) ui.choosePick = null;
+  const selected = meP.char || ui.choosePick;
+  const done = g.players.filter((p) => p.char).length;
+  const role = META.roles[meP.role];
+  const cards = options.map((name) => {
     const ch = META.chars[name];
-    const max = ch.hp + (meP?.role === 'Sheriff' ? 1 : 0);
-    let hp = '';
-    for (let i = 0; i < max; i++) hp += bulletSVG(true, 22);
-    return `<div class="ccard ${sel === name ? 'sel' : ''}" data-char="${esc(name)}" role="button" tabindex="0">
+    const max = ch.hp + (meP.role === 'Sheriff' ? 1 : 0);
+    return `<div class="ccard ${selected === name ? 'sel' : ''}" ${mine ? `data-character="${esc(name)}" role="button" tabindex="0" aria-pressed="${selected === name}"` : ''}>
       <div class="por">${CHAR_ICON[name] || '🤠'}</div><div class="nm">${esc(name)}</div>
-      <div class="chp" title="${max} máu">${hp}${meP?.role === 'Sheriff' ? '<span class="plus">+1 Sheriff</span>' : ''}</div>
+      <div class="chp" title="${max} máu">${Array.from({ length: max }, () => bulletSVG(true, 22)).join('')}${meP.role === 'Sheriff' ? '<span class="plus">+1 Sheriff</span>' : ''}</div>
       <div class="ab">${esc(ch.desc)}</div></div>`;
   }).join('');
-  const list = g.players.map((p, i) => `<li>${roleBadge(p)} <b>${esc(p.name)}</b>${i === me?.index ? ' <span class="muted">(bạn)</span>' : ''}
-    <span class="st ${p.picked ? 'done' : 'wait'}">${p.picked ? '✔ Đã chọn' : 'Đang chọn'}</span></li>`).join('');
   $('#mainArea').innerHTML = `<div class="panel choose">
-    ${roleHTML}
-    <div class="choose-head"><h2>Chọn nhân vật</h2><span class="muted">${!me ? 'Đang chờ người chơi chọn nhân vật…'
-      : locked ? 'Bạn đã chốt nhân vật. Đang chờ những người khác…' : `Bạn được chia ${me.choices.length} lá — bấm vào 1 lá rồi xác nhận.`}</span></div>
-    <div class="chars ${sel ? 'has-sel' : ''} ${locked ? 'locked' : ''}" id="chars">${cards}</div>
-    <div class="actions" style="justify-content:center">${!me ? '' : locked
-      ? `<span class="muted">✔ Bạn chơi <b>${esc(me.picked)}</b>. Ván đấu bắt đầu khi tất cả đã chọn.</span>`
-      : `<button class="btn" data-act="confirmChar" ${sel ? '' : 'disabled'}>✔ Chọn ${esc(sel || 'nhân vật')}</button>
-         ${ROOM.turnSeconds ? '<span class="muted">Hết giờ sẽ tự chọn lá đầu tiên.</span>' : ''}`}</div>
+    <div class="rolecard ${meP.role}"><div class="rstar">${ROLE_ICON[meP.role]}</div>
+      <div><h3>Bạn là ${esc(ROLE_VI[meP.role])} · ${esc(role.vi)}</h3><p>${esc(role.goal)}${meP.role === 'Sheriff' ? ' Bạn được +1 máu.' : ''}</p></div>
+      <span class="secret">${meP.role === 'Sheriff' ? '👁️ Mọi người đều biết' : '🔒 Chỉ bạn thấy'}</span></div>
+    <div class="choose-head"><h2>Chọn nhân vật</h2><span class="muted">${mine ? `Bạn được chia ${options.length} lá — bấm vào 1 lá rồi xác nhận.` : `Đang chờ ${esc(g.players[g.pending.player].name)} chọn nhân vật…`}</span></div>
+    <div class="room-clock" data-room-clock role="timer"></div>
+    <div class="chars ${selected ? 'has-sel' : ''} ${mine ? '' : 'locked'}">${cards}</div>
+    <div class="actions" style="justify-content:center">${mine ? `<button class="btn" id="confirmCharacter" ${selected ? '' : 'disabled'}>✔ Chọn ${esc(selected || 'nhân vật')}</button>` : meP.char ? `<span class="muted">✔ Bạn chơi <b>${esc(meP.char)}</b>. Đang chờ những người khác…</span>` : '<span class="muted">Chờ tới lượt của bạn.</span>'}
+      ${mine && ROOM.characterSeconds ? '<span class="muted">Hết giờ sẽ tự chọn ngẫu nhiên.</span>' : ''}</div>
     <h3 style="margin-top:18px">Người chơi (${done}/${g.players.length} đã chọn)</h3>
-    <div class="cprogress"><i style="width:${(done / g.players.length) * 100}%"></i></div>
-    <ul class="plist">${list}</ul>
-    <p class="muted">Nhân vật của mọi người chỉ lộ ra khi ván đấu bắt đầu.</p>
+    <div class="cprogress"><i style="width:${done / g.players.length * 100}%"></i></div>
+    <ul class="plist">${g.players.map((p, i) => `<li>${roleBadge(p)} <b>${esc(p.name)}</b>${i === g.me.index ? ' (bạn)' : ''}<span class="st ${p.char ? 'done' : 'wait'}">${p.char ? '✔ Đã chọn' : i === g.pending.player ? 'Đang chọn' : 'Chờ tới lượt'}</span></li>`).join('')}</ul>
+    <p class="muted">Ván đấu và timer lượt bắt đầu khi mọi người đã chọn xong.</p>
   </div>`;
-  const lb = $('#logBox');
-  lb.innerHTML = g.log.map((l) => `<div>${esc(l)}</div>`).join('');
-  if (locked) return;
-  $('#mainArea').querySelectorAll('[data-char]').forEach((el) => {
-    const pickIt = () => { ui.choosePick = el.dataset.char; renderChoose(g); };
-    el.onclick = pickIt;
-    el.onkeydown = (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); pickIt(); } };
+  document.querySelectorAll('[data-character]').forEach((el) => {
+    const select = () => { ui.choosePick = el.dataset.character; renderCharacterSelection(); };
+    el.onclick = select;
+    el.onkeydown = (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); select(); } };
   });
-  const btn = $('#mainArea [data-act="confirmChar"]');
-  if (btn) btn.onclick = run(async () => { btn.disabled = true; await sendAction({ type: 'chooseChar', char: ui.choosePick }); });
+  const confirm = $('#confirmCharacter');
+  if (confirm) confirm.onclick = run(async () => {
+    confirm.disabled = true;
+    try { await sendAction({ type: 'chooseCharacter', character: ui.choosePick }); }
+    finally { if (confirm.isConnected) confirm.disabled = false; }
+  });
+  $('#logBox').innerHTML = g.log.map((l) => `<div>${esc(l)}</div>`).join('');
+  updateClock();
 }
 
 function renderGame() {
   const g = ROOM.game;
-  if (g.phase === 'choose') return renderChoose(g);
+  if (g.phase === 'character') return renderCharacterSelection();
   ui.choosePick = null;
   const meIdx = g.me?.index ?? -1;
   const meP = g.players[meIdx];
@@ -644,6 +771,9 @@ function renderGame() {
     tfilter = card ? targetFilter(card, g, meP) : null;
     if (!tfilter) ui.mode = null;
   }
+  if (myPrompt && pend.type === 'draw' && pend.options.includes('player')) {
+    tfilter = (p) => p.alive && p.name !== ME && p.handCount > 0;
+  }
 
   // Ghế quanh bàn tròn: mình ở đáy bàn, người sau mình ngồi bên trái, cứ thế theo chiều kim đồng hồ
   const n = g.players.length;
@@ -664,6 +794,7 @@ function renderGame() {
       !p.alive ? 'dead' : '',
       p.winner ? 'winner' : '',
       tfilter ? (tfilter(p) ? 'targetable' : 'notarget') : '',
+      myPrompt && pend.type === 'draw' && pend.options.includes('player') && tfilter?.(p) ? 'draw-target' : '',
       p.jailed ? 'jailed' : '',
     ].join(' ');
     const ch = META.chars[p.char];
@@ -674,7 +805,7 @@ function renderGame() {
     const frame = p.eq.length ? `<div class="eqframe">${p.eq.map((c) => eqTileHTML(c, c.name === checking ? 'checking' : '')).join('')}</div>` : '';
     return `<div class="player ${cls}" data-player="${esc(p.name)}" style="left:${x.toFixed(2)}%;top:${y.toFixed(2)}%">
       ${frame}${dist}
-      <div class="av">${p.alive ? (CHAR_ICON[p.char] || '🤠') : '💀'}${jailBarsHTML(p)}
+      <div class="av">${playerAvatarHTML(p)}${jailBarsHTML(p)}
         ${handFanHTML(p.handCount)}${roleBadge(p)}</div>
       <div class="plate"><span class="dot ${ROOM.online.includes(p.name) ? 'on' : ''}"></span>${g.turn === i && !g.winner ? '⭐ ' : ''}${esc(p.name)}${isMe ? ' (bạn)' : ''}</div>
       ${hpBarHTML(p)}
@@ -686,12 +817,13 @@ function renderGame() {
     <div class="arena">
       <div class="felt"></div>
       <div class="piles">
-        <div class="pile"><div class="deck ${pend?.type === 'check' ? (myPrompt ? 'ready' : 'waiting') : ''}" id="deck"><div class="card-back">BANG!</div>
-          ${pend?.type === 'check' ? (myPrompt ? '<div class="tap">👆 Bấm để rút!</div>' : `<div class="tap other">⏳ ${esc(g.players[pend.player].name)} đang rút…</div>`) : ''}</div>
+        <div class="pile"><div class="deck ${['check', 'draw'].includes(pend?.type) ? (myPrompt ? 'ready' : 'waiting') : ''}" id="deck"><div class="card-back">BANG!</div>
+          ${['check', 'draw'].includes(pend?.type) && !myPrompt ? `<div class="tap other">⏳ ${esc(g.players[pend.player].name)} đang rút…</div>` : ''}</div>
           Chồng: ${g.deckCount}</div>
-        <div class="pile">${discardStackHTML(g)}<div>Bài bỏ</div></div>
+        <div class="pile ${myPrompt && pend?.type === 'draw' && pend.options.includes('discard') ? 'draw-source' : ''}" id="discardPile">${discardStackHTML(g)}<div>Bài bỏ</div></div>
       </div>
       ${seatsHTML}
+      ${drawStageHTML(g)}
     </div>`;
   const promptBoxHTML = `<div class="prompt ${myPrompt || (canPlay && !ui.mode) ? 'mine' : ''}" id="prompt">${promptHTML(g, meIdx, meP)}</div>`;
 
@@ -711,7 +843,7 @@ function renderGame() {
           <div class="idcard myeq"><b>Trang bị</b>
             <div class="eqs">${meP.eq.length ? meP.eq.map((c) => eqTileHTML(c)).join('') : '<span class="muted">Chưa có trang bị</span>'}</div></div>
         </div>
-        <div class="hand" id="hand">${g.me.hand.map((c) => {
+        <div class="hand" id="hand">${g.me.hand.filter((c) => !(pend?.type === 'blackJack' && pend.player === meIdx && pend.card.id === c.id)).map((c) => {
           const sel = ui.selected.includes(c.id) || ui.mode?.cardId === c.id;
           return cardHTML(c, (sel ? 'selected ' : '') + (playableIds.has(c.id) ? 'playable' : (canPlay || myPrompt ? 'dim' : '')));
         }).join('') || '<span class="muted">Không có bài trên tay.</span>'}</div>
@@ -721,7 +853,7 @@ function renderGame() {
 
   // Bàn ở giữa; ô thông báo + bài của mình ở cột bên phải
   $('#mainArea').innerHTML = `<div class="board playing">${g.winner ? winnerHTML(g) : ''}
-    <div class="table-col">${tableHTML}</div><div class="right-col">${promptBoxHTML}${meHTML}</div></div>`;
+    <div class="table-col">${tableHTML}</div><div class="right-col"><div class="room-clock" data-room-clock role="timer"></div>${promptBoxHTML}${meHTML}</div></div>`;
 
   // log
   const lb = $('#logBox');
@@ -729,7 +861,86 @@ function renderGame() {
   lb.scrollTop = lb.scrollHeight;
 
   bindGame(g, meIdx, meP, canPlay, myPrompt);
+  animateDrawStage(g);
   showCheckReveal(g);
+  updateClock();
+}
+
+function drawStageHTML(g) {
+  const pend = g.pending;
+  if (!pend || !['kit', 'blackJack'].includes(pend.type)) return '';
+  const mine = pend.player === g.me?.index;
+  const kit = pend.type === 'kit';
+  const cards = kit ? pend.cards : [pend.card];
+  return `<div class="draw-stage ${kit ? 'kit-stage' : 'black-jack-stage'}" data-stage="${pend.stage}">
+    <div class="draw-stage-title">${kit ? `${esc(g.players[pend.player].name)} · Kit Carlson chọn 2 lá <span data-draw-clock></span>` : `Black Jack · Lá thứ hai ${pend.red ? '♥ / ♦: rút thêm 1 lá' : '♠ / ♣: không rút thêm'}`}</div>
+    <div class="stage-cards" id="${kit ? 'kitCards' : 'blackJackCard'}">${cards.map((card, slot) => {
+      const selected = card && ui.selected.includes(card.id);
+      const content = card ? cardHTML(card, `small ${selected ? 'selected' : ''}`) : '<div class="card-back">BANG!</div>';
+      const face = kit ? content : `<div class="stage-flip"><div class="stage-front">${content}</div><div class="stage-back"><div class="card-back">BANG!</div></div></div>`;
+      return kit && mine ? `<button type="button" class="draw-slot kit-choice" data-slot="${slot}" data-kit-id="${card.id}" aria-label="${esc(card.name)} ${esc(card.rank)}" aria-pressed="${!!selected}">${face}</button>`
+        : `<div class="draw-slot" data-slot="${slot}">${face}</div>`;
+    }).join('')}</div>
+    ${kit && mine ? `<button class="btn" data-act="confirmKit" ${ui.selected.length === Math.min(2, cards.length) ? '' : 'disabled'}>Giữ 2 lá đã chọn</button>` : ''}
+  </div>`;
+}
+
+function animateDrawStage(g) {
+  const pend = g.pending;
+  const stage = $('.draw-stage');
+  if (!stage) { ui.drawStageKey = null; return; }
+  const key = `${pend.type}:${pend.stage}`;
+  if (ui.drawStageKey === key) return;
+  ui.drawStageKey = key;
+  if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+  const deck = $('#deck .card-back').getBoundingClientRect();
+  stage.querySelectorAll('.draw-slot').forEach((slot, i) => {
+    const end = slot.getBoundingClientRect();
+    slot.animate([
+      { transform: `translate(${deck.left - end.left}px, ${deck.top - end.top}px) scale(.7) rotate(-12deg)`, opacity: 0 },
+      { transform: 'translate(0, 0) scale(1) rotate(0)', opacity: 1 },
+    ], { duration: 500, delay: i * 100, easing: 'ease-out', fill: 'backwards' });
+  });
+  stage.querySelector('.stage-flip')?.animate([{ transform: 'rotateY(180deg)' }, { transform: 'rotateY(0deg)' }], { duration: 400, easing: 'ease-in-out' });
+}
+
+// Transfers come from the server so steals animate on every player's screen.
+function showCardTransfers(g, previous, drawOrigins = []) {
+  if (!g || !previous || window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+  const lastSeq = previous.transfers?.at(-1)?.seq || 0;
+  const seatHand = (index) => {
+    const seat = [...document.querySelectorAll('.player[data-player]')].find((el) => el.dataset.player === g.players[index]?.name);
+    return seat?.querySelector('.hand-fan') || seat;
+  };
+  let order = 0;
+  for (const event of g.transfers || []) {
+    if (event.seq <= lastSeq) continue;
+    const source = event.from === 'deck' ? $('#deck .card-back')
+      : event.from === 'discard' ? $('.arena .pile:last-child .discard-stack') || $('.arena .pile:last-child .card-back')
+      : seatHand(event.from);
+    for (const [index, card] of event.cards.entries()) {
+      const target = event.to === 'deck' ? $('#deck .card-back') : event.to === g.me?.index ? (card && $(`#hand [data-card="${card.id}"]`)) || $('#hand') : seatHand(event.to);
+      const origin = ['kit', 'reveal'].includes(event.from) ? drawOrigins[event.slots?.[index] ?? 0] : null;
+      if ((!source && !origin) || !target) continue;
+      const start = origin || source.getBoundingClientRect(), end = target.getBoundingClientRect();
+      const flyer = document.createElement('div');
+      flyer.className = 'transfer-card';
+      flyer.setAttribute('aria-hidden', 'true');
+      // Only the recipient sees a hidden card's face; public discard cards stay visible.
+      flyer.innerHTML = card ? cardHTML(card, 'small') : '<div class="card-back">BANG!</div>';
+      Object.assign(flyer.style, { left: `${start.left + start.width / 2 - 28}px`, top: `${start.top + start.height / 2 - 39}px` });
+      document.body.appendChild(flyer);
+      const dx = end.left + end.width / 2 - start.left - start.width / 2;
+      const dy = end.top + end.height / 2 - start.top - start.height / 2;
+      const animation = flyer.animate([
+        { transform: 'translate(0, 0) rotate(-8deg) scale(1)', opacity: 1 },
+        { transform: `translate(${dx * .5}px, ${dy * .5 - 45}px) rotate(5deg) scale(1.15)`, opacity: 1, offset: .5 },
+        { transform: `translate(${dx}px, ${dy}px) rotate(0deg) scale(.85)`, opacity: 0 },
+      ], { duration: 650, delay: (event.from === 'deck' && previous.pending?.type === 'blackJack' ? 650 : 0) + order++ * 130, easing: 'ease-in-out', fill: 'both' });
+      animation.onfinish = () => flyer.remove();
+      animation.oncancel = () => flyer.remove();
+    }
+  }
 }
 
 // ---------- rút kiểm tra: lá bay ra giữa bàn, lật mặt, báo thành công/thất bại ----------
@@ -819,7 +1030,7 @@ function promptHTML(g, meIdx, meP) {
   if (g.winner) return '<h4>Ván đấu đã kết thúc.</h4><div class="muted">Xem kết quả ở trên.</div>';
   if (ui.mode?.kind === 'target') {
     const c = g.me.hand.find((x) => x.id === ui.mode.cardId);
-    return `<h4>🎯 Chọn mục tiêu cho ${esc(c?.name)}</h4><div class="muted">Bấm vào người chơi được viền đỏ.</div>
+    return `<h4>🎯 Chọn mục tiêu cho ${esc(c?.name)}</h4><div class="muted">Bấm vào người chơi có viền vàng nhấp nháy.</div>
       <div class="row"><button class="btn secondary small" data-act="cancel">Huỷ</button></div>`;
   }
   if (ui.mode?.kind === 'discard') {
@@ -870,20 +1081,15 @@ function promptHTML(g, meIdx, meP) {
     }
     case 'kit':
       if (!mine) return `<h4>Kit Carlson ${P(pend.player)} đang chọn bài…</h4>`;
-      return `<h4>Kit Carlson: chọn 2 lá để giữ</h4>
-        <div class="row" id="kitCards">${pend.cards.map((c) => cardHTML(c, 'small playable ' + (ui.selected.includes(c.id) ? 'selected' : ''))).join('')}</div>
-        <div class="row"><button class="btn" data-act="confirmKit" ${ui.selected.length === Math.min(2, pend.cards.length) ? '' : 'disabled'}>Giữ 2 lá này</button></div>`;
+      return '<h4>Kit Carlson: chọn 2 lá ở giữa bàn</h4><p>Bạn có 20 giây để chọn. Hai lá đã chọn về tay; lá còn lại trở về bộ bài.</p>';
+    case 'blackJack':
+      return `<h4>Black Jack đang lật lá thứ hai trong 3 giây</h4><p>${pend.red ? 'Lá Cơ hoặc Rô: sẽ rút thêm 1 lá sau khi thu lá này về tay.' : 'Lá Bích hoặc Chuồn: thu lá này về tay rồi bắt đầu lượt.'}</p>`;
     case 'draw': {
       if (!mine) return `<h4>${P(pend.player)} đang chọn cách rút bài…</h4>`;
-      const opts = [];
-      opts.push('<button class="btn" data-act="draw" data-from="deck">Rút 2 lá từ chồng bài</button>');
-      if (pend.options.includes('discard') && g.discardTop) opts.push(`<button class="btn blue" data-act="draw" data-from="discard">Lấy ${esc(g.discardTop.name)} từ bài bỏ + 1 lá</button>`);
-      if (pend.options.includes('player')) {
-        const cand = g.players.filter((p) => p.alive && p.name !== ME && p.handCount > 0);
-        opts.push(`<select id="drawTarget">${cand.map((p) => `<option>${esc(p.name)}</option>`).join('')}</select>
-          <button class="btn blue" data-act="draw" data-from="player">Lấy ngẫu nhiên 1 lá từ người này + 1 lá</button>`);
-      }
-      return `<h4>Chọn cách rút bài</h4><div class="row">${opts.join('')}</div>`;
+      const seconds = ['Jesse Jones', 'Pedro Ramirez'].includes(meP.char) ? 20 : 5;
+      const source = pend.options.includes('player') ? ' Hoặc bấm trực tiếp người chơi có bài đang sáng để lấy 1 lá từ tay họ và rút thêm 1 lá.'
+        : pend.options.includes('discard') ? ' Hoặc bấm trực tiếp chồng bài bỏ đang sáng để lấy lá trên cùng và rút thêm 1 lá.' : '';
+      return `<h4>Rút bài đầu lượt</h4><p>Bấm chồng bài để rút.${source} Sau ${seconds} giây sẽ tự rút. Đồng hồ lượt bắt đầu khi rút xong.</p>`;
     }
   }
   return '';
@@ -911,7 +1117,234 @@ function winnerHTML(g) {
     <div class="muted" style="margin-top:6px">${iWon ? 'Chúc mừng, cao bồi!' : 'Lần sau may mắn hơn nhé.'} ${ROOM.host === ME ? 'Bấm “Về phòng chờ” để chơi ván mới.' : 'Chờ chủ phòng mở ván mới.'}</div></div>`;
 }
 
+// Kết quả dùng cờ winner do server tính, kể cả đồng đội đã bị loại.
+function clearMatchResult() {
+  $('#matchResult')?.remove();
+  document.body.classList.remove('match-result-open');
+  ui.resultDismissed = false;
+}
+
+function resultFaction(role) {
+  return role === 'Sheriff' || role === 'Deputy' ? 'law' : role;
+}
+
+
+// 12 danh hiệu cuối ván: id → [biểu tượng, tên, mô tả, loại]. glory = vinh danh, tease = chọc ghẹo.
+const AWARD_INFO = {
+  gunslinger: ['🔫', 'Tay súng nóng nhất', 'Bắn nhiều Bang! nhất', 'glory'],
+  damage: ['💥', 'Kẻ gây tổn thương', 'Gây nhiều sát thương nhất', 'glory'],
+  mass: ['🏹', 'Đại đại đi', 'Đánh nhiều Gatling + Indians! nhất', 'glory'],
+  schemer: ['🧠', 'Kẻ ủ mưu', 'Gây nhiều sát thương nhất trong 1 lượt', 'glory'],
+  saloon: ['🍺', 'Khách quen Saloon', 'Hồi nhiều máu nhất bằng Beer / Saloon', 'glory'],
+  bandit: ['🏴‍☠️', 'Tướng cướp', 'Outlaw đầu tiên nhắm vào Sheriff (Bang!, Panic!, Cat Balou, Duel, Jesse Jones)', 'glory'],
+  rich: ['💰', 'Nhà giàu', 'Đặt nhiều lá trang bị nhất', 'glory'],
+  popular: ['💘', 'Ai cũng quý bạn', 'Bị nhắm nhiều nhất (Bang!, Panic!, Cat Balou, Duel, Jail)', 'tease'],
+  lucky: ['🍀', 'Nhân phẩm tốt', 'Rút kiểm tra may hơn kỳ vọng nhiều nhất (từ 3 lần)', 'glory'],
+  unlucky: ['🐕', 'Sống chó', 'Rút kiểm tra xui hơn kỳ vọng nhiều nhất (từ 3 lần)', 'tease'],
+  friendlyFire: ['🤦', 'Bắn nhầm đồng đội', 'Gây nhiều sát thương nhất cho người cùng phe', 'tease'],
+  passenger: ['🪑', 'Có tham dự', 'Người phe thắng gây ít sát thương nhất', 'tease'],
+};
+const RESULT_STEPS = [['result', 'Kết quả'], ['awards', 'Danh hiệu'], ['stats', 'Thống kê']];
+const STAT_COLUMNS = [
+  ['bangs', 'Bang! bắn'], ['dealt', 'Sát thương gây'], ['taken', 'Máu mất'], ['kills', 'Hạ gục'],
+  ['dodged', 'Né được'], ['healed', 'Hồi máu'], ['equips', 'Trang bị'], ['targeted', 'Bị nhắm'],
+];
+
+function resultHeaderHTML(g, won) {
+  const names = { Sheriff: 'Sheriff & Deputy', Outlaw: 'Outlaw', Renegade: 'Renegade' };
+  const nav = RESULT_STEPS.map(([k, l], i) => `<button type="button" data-step="${k}" class="${ui.resultStep === k ? 'on' : ''}"><span>${i + 1}</span>${l}</button>`).join('');
+  return `<p class="result-mini">Phe ${names[g.winner]} chiến thắng · ${won ? 'Bạn đã thắng' : 'Bạn đã thua'}</p>
+    <nav class="result-steps" aria-label="Màn kết quả">${nav}</nav>`;
+}
+
+function awardCardHTML(g, award) {
+  const [icon, title, desc, kind] = AWARD_INFO[award.id];
+  const roleOf = (name) => g.players.find((p) => p.name === name)?.role;
+  const mine = award.ranks[0]?.players.includes(ME);
+  const row = (rank, i) => {
+    if (!rank) return `<div class="aw-rank r${i + 1} none"><span class="aw-medal">${i ? '🥈' : '🥇'}</span><span class="aw-who">— không có ai —</span></div>`;
+    const who = rank.players.map((n) => `<span class="aw-name ${n === ME ? 'aw-me' : ''}"><b>${esc(n)}</b>${n === ME ? ' <i>(bạn)</i>' : ''}${rank.players.length === 1 ? ` <span class="aw-role role-${roleOf(n).toLowerCase()}">${esc(roleOf(n))}</span>` : ''}</span>`).join('');
+    return `<div class="aw-rank r${i + 1} ${rank.players.includes(ME) ? 'aw-mine' : ''}"><span class="aw-medal">${i ? '🥈' : '🥇'}</span>
+      <span class="aw-who">${who}</span><span class="aw-val">${esc(rank.value)}${rank.sub ? `<small>${esc(rank.sub)}</small>` : ''}</span></div>`;
+  };
+  return `<div class="aw-card ${kind} ${mine ? 'mine' : ''}">${mine ? '<span class="aw-you">Bạn!</span>' : ''}
+    <div class="aw-head"><span class="aw-icon">${icon}</span><div><div class="aw-title">${title}</div><div class="aw-desc">${desc}</div></div></div>
+    ${row(award.ranks[0], 0)}${row(award.ranks[1], 1)}</div>`;
+}
+
+function resultAwardsHTML(g, won) {
+  const awards = g.summary?.awards || [];
+  const mine = awards.filter((a) => a.ranks.some((r) => r.players.includes(ME))).length;
+  return `${resultHeaderHTML(g, won)}
+    <div class="aw-bar"><span>Bạn lên bục <b>${mine}</b>/${awards.length} danh hiệu</span>
+      <span class="aw-legend"><span><i class="glory"></i>Vinh danh</span><span><i class="tease"></i>Chọc ghẹo</span></span></div>
+    <div class="aw-grid">${awards.map((a) => awardCardHTML(g, a)).join('')}</div>
+    <div class="result-foot"><button type="button" class="btn ghost" data-step="result">← Kết quả</button><span></span>
+      <button type="button" class="result-continue small" data-step="stats"><span aria-hidden="true">✺</span> Tiếp tục</button></div>`;
+}
+
+function resultStatsHTML(g, won) {
+  const sum = g.summary || { stats: [], turns: 0 };
+  const byName = Object.fromEntries(sum.stats.map((s) => [s.name, s]));
+  const rows = [...g.players].sort((a, b) => b.winner - a.winner);
+  const best = Object.fromEntries(STAT_COLUMNS.map(([k]) => [k, Math.max(0, ...sum.stats.map((s) => s[k]))]));
+  const total = (k) => sum.stats.reduce((n, s) => n + s[k], 0);
+  const kpi = (v, l) => `<div class="st-kpi"><b>${v}</b>${l}</div>`;
+  const body = rows.map((p) => {
+    const s = byName[p.name] || {};
+    return `<tr class="${p.winner ? 'win' : 'lose'} ${p.name === ME ? 'st-me' : ''}">
+      <td><div class="st-player"><span class="st-av">${p.alive ? playerAvatarHTML(p) : '💀'}</span>
+        <div><b>${esc(p.name)}</b>${p.name === ME ? ' <i>(bạn)</i>' : ''}<small>${esc(p.char || '')}</small></div></div></td>
+      <td><span class="aw-role role-${p.role.toLowerCase()}">${esc(p.role)}</span></td>
+      <td><span class="st-res ${p.winner ? 'w' : 'l'}">${p.winner ? 'Thắng' : 'Thua'}</span></td>
+      ${STAT_COLUMNS.map(([k]) => `<td><span class="${best[k] > 0 && s[k] === best[k] ? 'st-best' : ''}">${s[k] ?? 0}</span></td>`).join('')}
+      <td>${s.checksOk ?? 0}/${s.checks ?? 0}</td></tr>`;
+  }).join('');
+  return `${resultHeaderHTML(g, won)}
+    <div class="st-kpis">${kpi(sum.turns, 'lượt chơi')}${kpi(sum.minutes ? `${sum.minutes}′` : '—', 'thời gian')}${kpi(total('bangs'), 'phát Bang! cả bàn')}${kpi(total('taken'), 'máu đã đổ')}</div>
+    <div class="st-panel"><div class="st-scroll"><table class="st-table">
+      <thead><tr><th>Người chơi</th><th>Vai trò</th><th>Kết quả</th>${STAT_COLUMNS.map(([, l]) => `<th>${l}</th>`).join('')}<th>Rút kiểm tra</th></tr></thead>
+      <tbody>${body}</tbody></table></div>
+      <div class="st-note">Ô tô vàng = cao nhất ván · Rút kiểm tra = số lần thành công / số lần rút (Barrel, Jail, Dynamite)</div></div>
+    <div class="result-foot"><button type="button" class="btn ghost" data-step="awards">← Danh hiệu</button><span></span>
+      <button type="button" class="btn ghost" data-close>Xem bàn chơi</button>
+      ${ROOM.host === ME ? '<button type="button" class="result-continue small" data-reset><span aria-hidden="true">🔁</span> Về phòng chờ</button>' : '<span class="st-wait">Chờ chủ phòng mở ván mới…</span>'}</div>`;
+}
+
+function resultMainHTML(g, won, team) {
+  const names = { Sheriff: 'Sheriff & Deputy', Outlaw: 'Outlaw', Renegade: 'Renegade' };
+  return `<h2 id="resultHeadline" class="result-headline">${won ? 'CHIẾN THẮNG' : 'THUA CUỘC'}</h2>
+    <div class="result-emblem" aria-hidden="true"><span></span><img src="/result-revolvers.svg" alt=""><span></span></div>
+    <p id="resultSummary" class="result-summary">Phe ${names[g.winner]} chiến thắng!</p>
+    <div class="result-team">${team.map((p) => `<div class="result-member ${p.name === ME ? 'result-you' : ''}">
+      <div class="result-portrait"><div class="result-medallion"><div class="result-avatar role-${p.role.toLowerCase()}">
+        ${playerAvatarHTML(p)}${!p.alive ? '<div class="result-eliminated"><span>ĐÃ BỊ HẠ</span></div>' : ''}
+      </div></div><span class="result-role role-${p.role.toLowerCase()}">${esc(p.role)}</span></div>
+      <div class="result-player"><span title="${esc(p.name)}">${esc(p.name)}</span>${p.name === ME ? '<b>Bạn</b>' : ''}</div>
+      <div class="result-character">${esc(p.char)}</div>
+    </div>`).join('')}</div>
+    <button type="button" class="result-continue" data-step="awards"><span aria-hidden="true">✺</span> Tiếp tục</button>`;
+}
+
+// Desktop: thu nhỏ cả màn (zoom) cho vừa chiều cao cửa sổ, không bao giờ phải cuộn.
+// Màn hẹp (điện thoại) thì giữ cỡ chữ bình thường và cho cuộn.
+function fitMatchResult(dialog) {
+  const body = dialog.querySelector('.result-body');
+  if (!body) return;
+  body.style.zoom = '';
+  if (innerWidth < 900) return;
+  const frame = body.parentElement;
+  const px = (el, prop) => parseFloat(getComputedStyle(el)[prop]) || 0;
+  const avail = dialog.clientHeight - px(dialog, 'paddingTop') - px(dialog, 'paddingBottom')
+    - px(frame, 'paddingTop') - px(frame, 'paddingBottom') - px(frame, 'borderTopWidth') - px(frame, 'borderBottomWidth');
+  let zoom = 1;
+  for (let k = 0; k < 4; k++) {
+    const need = body.getBoundingClientRect().height;
+    if (need <= avail + 1) break;
+    zoom = Math.max(0.45, zoom * (avail / need) - 0.005);
+    body.style.zoom = zoom;
+  }
+}
+
+// Màn kết thúc: ① Kết quả → Tiếp tục → ② Danh hiệu → Tiếp tục → ③ Thống kê
+function renderMatchResult(g) {
+  if (!g.winner || ui.resultDismissed || $('#matchResult')) return;
+  const me = g.players.find((p) => p.name === ME);
+  const won = !!me?.winner;
+  const team = g.players.filter((p) => me ? resultFaction(p.role) === resultFaction(me.role) : p.winner);
+  // Đóng lựa chọn bài còn mở khi server vừa xác định thắng cuộc.
+  $('#modal').classList.add('hidden');
+  $('#modal').innerHTML = '';
+  const dialog = document.createElement('dialog');
+  dialog.id = 'matchResult';
+  dialog.className = `match-result ${won ? 'result-victory' : 'result-defeat'}`;
+  dialog.setAttribute('aria-labelledby', 'resultHeadline');
+  dialog.setAttribute('aria-describedby', 'resultSummary');
+  const refit = () => fitMatchResult(dialog);
+  const resizeWatch = new ResizeObserver(refit); // co giãn lại mỗi khi cửa sổ đổi cỡ
+  const dismiss = () => {
+    ui.resultDismissed = true;
+    resizeWatch.disconnect();
+    dialog.remove();
+    document.body.classList.remove('match-result-open');
+    ($('#resetBtn') || $('#leaveBtn'))?.focus();
+  };
+  const show = (step) => {
+    ui.resultStep = step;
+    dialog.dataset.step = step;
+    const html = step === 'awards' ? resultAwardsHTML(g, won) : step === 'stats' ? resultStatsHTML(g, won) : resultMainHTML(g, won, team);
+    dialog.innerHTML = `<div class="result-frame step-${step}"><div class="result-body">${html}</div></div>`;
+    dialog.scrollTop = 0;
+    dialog.querySelectorAll('[data-step]').forEach((b) => { b.onclick = () => show(b.dataset.step); });
+    const close = dialog.querySelector('[data-close]');
+    if (close) close.onclick = dismiss;
+    const reset = dialog.querySelector('[data-reset]');
+    if (reset) reset.onclick = () => { dismiss(); $('#resetBtn')?.click(); };
+    (dialog.querySelector('.result-continue') || dialog.querySelector('[data-close]'))?.focus();
+    fitMatchResult(dialog);
+  };
+  dialog.oncancel = (event) => { event.preventDefault(); dismiss(); };
+  document.body.appendChild(dialog);
+  document.body.classList.add('match-result-open');
+  show('result');
+  dialog.showModal();
+  fitMatchResult(dialog);
+  resizeWatch.observe(dialog);
+  document.fonts?.ready.then(refit); // font tải xong có thể làm chữ cao hơn
+}
+
 const sendAction = (action) => api(`/api/rooms/${ROOM.code}/action`, { action });
+
+function showPlayedCards(g, previous, handOrigins = {}) {
+  if (!g || !previous) return;
+  const lastSeq = previous.plays?.at(-1)?.seq || 0;
+  let discardOrder = 0;
+  for (const event of g.plays || []) {
+    if (event.seq <= lastSeq) continue;
+    const player = g.players[event.player]?.name;
+    if (!player) continue;
+    let origin = event.player === g.me?.index ? handOrigins[event.card.id] : null;
+    if (!origin) {
+      const seat = [...document.querySelectorAll('.player[data-player]')].find((el) => el.dataset.player === player);
+      const hand = seat?.querySelector('.hand-fan') || seat;
+      if (!hand) continue;
+      const rect = hand.getBoundingClientRect();
+      origin = { left: rect.left + rect.width / 2 - 28, top: rect.top + rect.height / 2 - 39, width: 56, height: 78 };
+    }
+    animatePlayedCard(event.card, origin, {
+      target: g.players[event.recipient]?.name, kind: event.kind,
+      delay: event.kind === 'discard' ? discardOrder++ * 110 : 0,
+    }, player);
+  }
+}
+
+function animatePlayedCard(card, origin, action, player) {
+  if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+  const equipment = action.kind !== 'discard' && ['blue', 'gun'].includes(cardInfo(card).type);
+  const recipient = card.name === 'Jail' ? action.target : player;
+  const seat = [...document.querySelectorAll('.player[data-player]')].find((el) => el.dataset.player === recipient);
+  const target = equipment ? seat?.querySelector(`[data-eq="${card.id}"]`) || seat?.querySelector('.eqframe') || seat?.querySelector('.av')
+    : $('#discardPile .ds-slot:last-child .card') || $('#discardPile');
+  if (!target) return;
+  const end = target.getBoundingClientRect();
+  const flyer = document.createElement('div');
+  flyer.className = 'played-card-flight';
+  flyer.setAttribute('aria-hidden', 'true');
+  flyer.innerHTML = cardHTML(card);
+  Object.assign(flyer.style, { left: `${origin.left}px`, top: `${origin.top}px`, width: `${origin.width}px`, height: `${origin.height}px` });
+  document.body.appendChild(flyer);
+  const dx = end.left + end.width / 2 - origin.left - origin.width / 2;
+  const dy = end.top + end.height / 2 - origin.top - origin.height / 2;
+  const scale = Math.min(end.width / origin.width, end.height / origin.height);
+  const animation = flyer.animate([
+    { transform: 'translate(0, 0) rotate(0deg) scale(1)', opacity: 1 },
+    { transform: `translate(${dx * .5}px, ${dy * .5 - 45}px) rotate(-10deg) scale(1.08)`, opacity: 1, offset: .5 },
+    { transform: `translate(${dx}px, ${dy}px) rotate(0deg) scale(${scale})`, opacity: 1, offset: .9 },
+    { transform: `translate(${dx}px, ${dy}px) rotate(0deg) scale(${scale})`, opacity: 0 },
+  ], { duration: 650, delay: action.delay || 0, easing: 'ease-in-out', fill: 'both' });
+  animation.onfinish = () => flyer.remove();
+  animation.oncancel = () => flyer.remove();
+}
 
 function bindGame(g, meIdx, meP, canPlay, myPrompt) {
   const main = $('#mainArea');
@@ -945,6 +1378,11 @@ function bindGame(g, meIdx, meP, canPlay, myPrompt) {
   }));
 
   main.querySelectorAll('.player').forEach((el) => el.onclick = run(async () => {
+    if (myPrompt && pend.type === 'draw' && pend.options.includes('player')) {
+      const target = g.players.find((p) => p.name === el.dataset.player);
+      if (!target?.alive || target.name === ME || !target.handCount) return;
+      return sendAction({ type: 'drawChoice', from: 'player', target: target.name });
+    }
     if (ui.mode?.kind !== 'target') return;
     const p = g.players.find((x) => x.name === el.dataset.player);
     const card = g.me.hand.find((x) => x.id === ui.mode.cardId);
@@ -960,14 +1398,20 @@ function bindGame(g, meIdx, meP, canPlay, myPrompt) {
   }));
 
   const deckEl = main.querySelector('#deck.ready');
-  if (deckEl) deckEl.onclick = run(async () => { deckEl.classList.remove('ready'); await sendAction({ type: 'checkDraw' }); });
+  if (deckEl) deckEl.onclick = run(async () => {
+    deckEl.classList.remove('ready');
+    await sendAction(g.pending.type === 'draw' ? { type: 'drawChoice', from: 'deck' } : { type: 'checkDraw' });
+  });
+  const discardEl = main.querySelector('#discardPile.draw-source');
+  if (discardEl) discardEl.onclick = run(() => sendAction({ type: 'drawChoice', from: 'discard' }));
 
   main.querySelectorAll('#storeCards .card').forEach((el) => el.onclick = run(async () => {
     if (!myPrompt) return;
     await sendAction({ type: 'pick', cardId: Number(el.dataset.card) });
   }));
-  main.querySelectorAll('#kitCards .card').forEach((el) => el.onclick = () => {
-    const id = Number(el.dataset.card);
+  main.querySelectorAll('#kitCards .kit-choice').forEach((el) => el.onclick = () => {
+    if (!myPrompt || pend.type !== 'kit') return;
+    const id = Number(el.dataset.kitId);
     if (ui.selected.includes(id)) ui.selected = ui.selected.filter((x) => x !== id);
     else if (ui.selected.length < 2) ui.selected.push(id);
     renderGame();
