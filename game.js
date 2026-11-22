@@ -1,6 +1,8 @@
 'use strict';
 // Logic luật chơi Bang! (bản gốc): 80 lá bài, 16 nhân vật, 4 vai trò.
 
+const { readFileSync } = require('node:fs');
+
 const RANKS = { J: 11, Q: 12, K: 13, A: 14 };
 const rankVal = (r) => RANKS[r] || Number(r);
 const SUIT_SYMBOL = { S: '♠', H: '♥', D: '♦', C: '♣' };
@@ -49,6 +51,26 @@ const CHAR_INFO = {
   'Willy the Kid': { hp: 4, desc: 'Được dùng Bang! không giới hạn.' },
 };
 
+const DODGE_CITY_CHAR_INFO = {
+  'Apache Kid': { hp: 3, desc: 'Miễn hiệu ứng lá Rô của người khác đánh vào bạn, trừ Duel.' },
+  'Belle Star': { hp: 4, desc: 'Trong lượt của bạn, trang bị trên bàn của người khác mất hiệu lực.' },
+  'Bill Noface': { hp: 4, desc: 'Đầu lượt rút 1 lá, cộng thêm 1 lá cho mỗi điểm máu đang thiếu.' },
+  'Chuck Wengam': { hp: 4, desc: 'Trong lượt, có thể trả 1 máu để rút 2 lá nhiều lần. Không được trả điểm máu cuối.' },
+  'Doc Holyday': { hp: 4, desc: 'Mỗi lượt bỏ 2 lá trên tay để bắn một người trong tầm súng. Không tính vào giới hạn Bang!.' },
+  'Elena Fuente': { hp: 3, desc: 'Có thể dùng bất kỳ lá trên tay để né một đòn bắn.' },
+  'Greg Digger': { hp: 4, desc: 'Khi người khác bị loại, hồi 2 máu, tối đa bằng giới hạn máu.' },
+  'Herb Hunter': { hp: 4, desc: 'Khi người khác bị loại, rút thêm 2 lá.' },
+  'José Delgado': { hp: 4, desc: 'Tối đa 2 lần mỗi lượt, bỏ 1 lá viền xanh dương trên tay để rút 2 lá.' },
+  'Molly Stark': { hp: 4, desc: 'Rút bù khi tự nguyện dùng hoặc bỏ Missed!, Beer hay Bang! ngoài lượt. Lá Bang! dùng trong Duel được rút bù khi Duel kết thúc.' },
+  'Pat Brennan': { hp: 4, desc: 'Đầu lượt chọn rút 2 lá hoặc lấy 1 trang bị đang đặt trên bàn, kể cả của bạn.' },
+  'Pixie Pete': { hp: 3, desc: 'Đầu lượt rút 3 lá.' },
+  'Sean Mallory': { hp: 3, desc: 'Cuối lượt được giữ tối đa 10 lá trên tay.' },
+  'Tequila Joe': { hp: 4, desc: 'Beer hồi 2 máu, kể cả khi dùng để sống sót.' },
+  'Vera Custer': { hp: 3, desc: 'Trước khi rút, chọn một nhân vật khác còn sống để sao chép kỹ năng đến lượt sau.' },
+};
+const BASE_CHARACTERS = Object.keys(CHAR_INFO);
+Object.assign(CHAR_INFO, DODGE_CITY_CHAR_INFO);
+
 const ROLE_INFO = {
   Sheriff: { vi: 'Cảnh sát trưởng', goal: 'Tiêu diệt tất cả Outlaw và Renegade.' },
   Deputy: { vi: 'Phó cảnh sát', goal: 'Bảo vệ Sheriff, tiêu diệt Outlaw và Renegade.' },
@@ -63,6 +85,8 @@ const ROLE_SETS = {
   7: ['Sheriff', 'Renegade', 'Outlaw', 'Outlaw', 'Outlaw', 'Deputy', 'Deputy'],
 };
 
+const RULES_PREVIEW = process.env.BANG_RULES_PREVIEW === '1';
+
 const DECK_SPEC = [
   ['Bang', 'S', 'A'], ['Bang', 'D', '2 3 4 5 6 7 8 9 10 J Q K A'], ['Bang', 'C', '2 3 4 5 6 7 8 9'], ['Bang', 'H', 'Q K A'],
   ['Missed', 'C', '10 J Q K A'], ['Missed', 'S', '2 3 4 5 6 7 8'],
@@ -75,16 +99,70 @@ const DECK_SPEC = [
   ['Schofield', 'S', 'K'], ['Remington', 'C', 'K'], ['Rev. Carabine', 'C', 'A'], ['Winchester', 'S', '8'],
 ];
 
-function buildDeck() {
+const GREEN_EFFECTS = {
+  draw: ['🃏', 'Rút bài.'],
+  heal: ['❤️', 'Hồi máu.'],
+  dodge: ['🙅', 'Né một đòn bắn.'],
+  attack: ['💥', 'Bắn một người.'],
+  attackAll: ['💥', 'Bắn tất cả người khác.'],
+  take: ['✋', 'Lấy một lá của người khác.'],
+  discard: ['🗑️', 'Buộc người khác bỏ một lá.'],
+};
+
+function loadGreenCards(filename) {
+  if (!filename) return [];
+  try {
+    const definitions = JSON.parse(readFileSync(filename, 'utf8').replace(/^\uFEFF/, ''));
+    if (!Array.isArray(definitions) || definitions.length !== 13) throw new Error('Cần đúng 13 loại lá.');
+    const names = new Set(Object.keys(CARD_INFO).map((name) => name.toLowerCase()));
+    const cards = [];
+    for (const entry of definitions) {
+      if (!entry || typeof entry !== 'object') throw new Error('Thông tin lá bài không hợp lệ.');
+      const { name, effect, copies, draw = effect === 'draw' ? 1 : 0, heal = 1, maxDistance } = entry;
+      if (typeof name !== 'string' || name !== name.trim() || !name || name.length > 60 || name in CARD_INFO || names.has(name.toLowerCase())) {
+        throw new Error('Tên lá phải khác nhau và không trùng tên lá gốc.');
+      }
+      if (!Object.hasOwn(GREEN_EFFECTS, effect)) throw new Error(`Hiệu ứng không hợp lệ cho ${name}.`);
+      if (!Array.isArray(copies) || !copies.length || copies.some((copy) => !copy || !Object.hasOwn(SUIT_SYMBOL, copy.suit) ||
+          typeof copy.rank !== 'string' || !/^(?:[2-9]|10|[JQKA])$/.test(copy.rank))) {
+        throw new Error(`Chất hoặc hạng bài không hợp lệ cho ${name}.`);
+      }
+      const validRange = maxDistance === undefined || (maxDistance === 'weapon'
+        ? effect === 'attack'
+        : ['attack', 'take', 'discard'].includes(effect) && Number.isInteger(maxDistance) && maxDistance >= 1 && maxDistance <= 7);
+      if (!Number.isInteger(draw) || draw < 0 || draw > 3 || (effect === 'draw' && draw === 0) ||
+          (draw > 0 && !['draw', 'dodge', 'attack'].includes(effect)) ||
+          !Number.isInteger(heal) || heal < 1 || heal > 2 || !validRange) {
+        throw new Error(`Tham số hiệu ứng không hợp lệ cho ${name}.`);
+      }
+      const [icon, description] = GREEN_EFFECTS[effect];
+      let desc = effect === 'draw' ? `Rút ${draw} lá.` : effect === 'heal' ? `Hồi ${heal} máu.` : description;
+      if (effect !== 'draw' && draw) desc += ` Rút thêm ${draw} lá.`;
+      if (maxDistance === 'weapon') desc += ' Chọn mục tiêu trong tầm súng.';
+      else if (maxDistance !== undefined) desc += ` Khoảng cách tối đa ${maxDistance}.`;
+      CARD_INFO[name] = { type: 'green', effect, icon, desc, draw, heal, maxDistance, defense: effect === 'dodge', activate: effect !== 'dodge' };
+      names.add(name.toLowerCase());
+      for (const { rank, suit } of copies) cards.push({ name, rank, suit });
+    }
+    if (cards.length !== 14) throw new Error('Cần đúng 14 lá tính cả các bản trùng.');
+    return cards;
+  } catch (error) {
+    throw new Error(`Không nạp được BANG_GREEN_CARDS_FILE. ${error.message}`);
+  }
+}
+
+const GREEN_CARDS = loadGreenCards(process.env.BANG_GREEN_CARDS_FILE);
+
+function buildDeck(dodgeCity) {
   const deck = [];
   let id = 1;
   for (const [name, suit, ranks] of DECK_SPEC) {
     for (const rank of ranks.split(' ')) deck.push({ id: id++, name, suit, rank });
   }
+  if (dodgeCity) for (const card of GREEN_CARDS) deck.push({ ...card, id: id++ });
   return deck;
 }
 
-const FULL_DECK = buildDeck(); // để tính xác suất thành công của một lần rút kiểm tra
 const MIN_CHECKS = 3; // Nhân phẩm tốt / Kiếp trước đốt chùa: cần rút kiểm tra ít nhất 3 lần
 const FACTION = { Sheriff: 'law', Deputy: 'law', Outlaw: 'outlaw', Renegade: 'renegade' };
 const sameFaction = (a, b) => a !== 'Renegade' && FACTION[a] === FACTION[b]; // Renegade không có đồng đội
@@ -112,15 +190,17 @@ class Game {
     if (names.length < 4 || names.length > 7) fail('Cần 4–7 người chơi.');
     this.rng = opts.rng || Math.random;
     const roles = shuffle([...ROLE_SETS[names.length]], this.rng);
-    const chars = shuffle(Object.keys(CHAR_INFO), this.rng);
+    const chars = shuffle(opts.dodgeCity ? Object.keys(CHAR_INFO) : [...BASE_CHARACTERS], this.rng);
     const order = shuffle([...names], this.rng);
     this.players = order.map((name, i) => {
       const role = roles[i];
       const char = opts.chars?.[name] || chars[i];
       const maxHp = CHAR_INFO[char].hp + (role === 'Sheriff' ? 1 : 0);
-      return { name, role, char, maxHp, hp: maxHp, hand: [], eq: [], alive: true, jailed: 0 };
+      return { name, role, char, maxHp, hp: maxHp, hand: [], eq: [], coolingGreen: new Set(), alive: true, jailed: 0 };
     });
-    this.deck = shuffle(buildDeck(), this.rng);
+    if (opts.dodgeCity && !GREEN_CARDS.length) fail('Chưa nạp bộ lá xanh lá.');
+    this.fullDeck = buildDeck(opts.dodgeCity); // Dùng bộ bài ban đầu của phòng để tính xác suất rút kiểm tra.
+    this.deck = shuffle([...this.fullDeck], this.rng);
     this.discard = [];
     this.log = [];
     this.queue = [];
@@ -210,11 +290,34 @@ class Game {
     this.plays = [...(this.plays || []), { seq: this.playSeq, player, card, recipient: recipient < 0 ? null : recipient, kind }].slice(-40);
   }
   toDiscard(...cards) { this.discard.push(...cards); }
+  ability(p) { return p.char === 'Vera Custer' ? p.copiedAbility : p.char; }
+  handLimit(p) { return this.ability(p) === 'Sean Mallory' ? 10 : p.hp; }
+  beerHealing(p) { return this.ability(p) === 'Tequila Joe' ? 2 : 1; }
+  equipmentActive(p) {
+    const current = this.players[this.turn];
+    return p === current || this.ability(current) !== 'Belle Star';
+  }
+  ignoresDiamonds(p) { return this.ability(p) === 'Apache Kid'; }
+  ignoredCard(p, card) {
+    if (card.suit !== 'D' || !this.ignoresDiamonds(p)) return false;
+    this.addLog(`${p.name} miễn hiệu ứng ${card.name} chất Rô.`);
+    return true;
+  }
+  isBlue(c) { return ['blue', 'gun'].includes(CARD_INFO[c.name].type); }
   hasEq(p, name) { return p.eq.some((c) => c.name === name); }
   gun(p) { return p.eq.find((c) => CARD_INFO[c.name].type === 'gun'); }
-  range(p) { const g = this.gun(p); return g ? CARD_INFO[g.name].range : 1; }
-  unlimitedBang(p) { return p.char === 'Willy the Kid' || this.gun(p)?.name === 'Volcanic'; }
-  barrelCount(p) { return (this.hasEq(p, 'Barrel') ? 1 : 0) + (p.char === 'Jourdonnais' ? 1 : 0); }
+  range(p) { const g = this.gun(p); return g && this.equipmentActive(p) ? CARD_INFO[g.name].range : 1; }
+  unlimitedBang(p) { return this.ability(p) === 'Willy the Kid' || (this.equipmentActive(p) && this.gun(p)?.name === 'Volcanic'); }
+  barrelCount(p) { return (this.equipmentActive(p) && this.hasEq(p, 'Barrel') ? 1 : 0) + (this.ability(p) === 'Jourdonnais' ? 1 : 0); }
+  attackPrompt(source, player, need) {
+    return { type: 'bang', source, player, need, got: 0, barrels: this.barrelCount(this.players[player]) };
+  }
+  dodgeCards(p) {
+    const skill = this.ability(p);
+    const hand = p.hand.filter((c) => skill === 'Elena Fuente' || c.name === 'Missed' || (c.name === 'Bang' && skill === 'Calamity Janet'));
+    const equipment = this.equipmentActive(p) ? p.eq.filter((c) => CARD_INFO[c.name].defense && !p.coolingGreen.has(c.id)) : [];
+    return [...hand, ...equipment];
+  }
   distance(a, b) {
     if (a === b) return 0;
     const al = this.alive();
@@ -223,10 +326,10 @@ class Game {
     const d = Math.abs(ia - ib);
     let dist = Math.min(d, al.length - d);
     const pa = this.players[a], pb = this.players[b];
-    if (this.hasEq(pb, 'Mustang')) dist++;
-    if (pb.char === 'Paul Regret') dist++;
-    if (this.hasEq(pa, 'Scope')) dist--;
-    if (pa.char === 'Rose Doolan') dist--;
+    if (this.equipmentActive(pb) && this.hasEq(pb, 'Mustang')) dist++;
+    if (this.ability(pb) === 'Paul Regret') dist++;
+    if (this.equipmentActive(pa) && this.hasEq(pa, 'Scope')) dist--;
+    if (this.ability(pa) === 'Rose Doolan') dist--;
     return Math.max(1, dist);
   }
   takeFromHand(p, cardId) {
@@ -243,14 +346,15 @@ class Game {
   }
   // "Rút kiểm tra" (Draw!). Kết quả lần rút gần nhất lưu ở lastCheck để giao diện lật bài cho mọi người xem.
   check(p, success, label) {
-    const cards = this.draw(p.char === 'Lucky Duke' ? 2 : 1);
+    const luckyDuke = this.ability(p) === 'Lucky Duke';
+    const cards = this.draw(luckyDuke ? 2 : 1);
     const chosen = cards.find(success) || cards[0];
     this.toDiscard(...cards);
     const ok = !!chosen && success(chosen);
     const st = this.stats[this.idx(p.name)];
-    const chance = FULL_DECK.filter(success).length / FULL_DECK.length;
+    const chance = this.fullDeck.filter(success).length / this.fullDeck.length;
     st.checks++; if (ok) st.checksOk++;
-    st.checkExpected += p.char === 'Lucky Duke' ? 1 - (1 - chance) ** 2 : chance;
+    st.checkExpected += luckyDuke ? 1 - (1 - chance) ** 2 : chance;
     this.addLog(`${p.name} rút kiểm tra (${label}): ${cards.map(cardStr).join(', ')} → ${ok ? 'thành công' : 'thất bại'}.`);
     this.checkSeq = (this.checkSeq || 0) + 1;
     this.lastCheck = { seq: this.checkSeq, player: this.idx(p.name), kind: label, cards, chosen: chosen ? chosen.id : null, ok };
@@ -266,7 +370,10 @@ class Game {
     if (this.winner) return;
     this.turnNumber = (this.turnNumber || 0) + 1;
     const pi = this.turn, p = this.players[pi];
+    p.coolingGreen.clear();
+    if (p.char === 'Vera Custer') p.copiedAbility = null;
     this.bangsPlayed = 0;
+    this.skillUses = 0;
     this.phase = 'start';
     this.addLog(`— Lượt của ${p.name} —`);
     this.continueTurnStart();
@@ -277,6 +384,11 @@ class Game {
     const pi = this.turn, p = this.players[pi];
     if (p.eq.some((c) => c.name === 'Dynamite')) return this.askCheck(pi, 'Dynamite');
     if (p.eq.some((c) => c.name === 'Jail')) return this.askCheck(pi, 'Jail');
+    if (p.char === 'Vera Custer') {
+      this.phase = 'draw';
+      this.pending = { type: 'copyAbility', player: pi };
+      return;
+    }
     this.beginDraw();
   }
 
@@ -317,26 +429,28 @@ class Game {
     // Barrel: rút xong thì quay lại phát Bang! đang chờ
     const bang = pend.resume;
     if (this.check(p, (c) => c.suit === 'H', 'Barrel')) { bang.got++; this.stats[pi].dodged++; }
-    if (bang.got >= bang.need) { this.addLog(`${p.name} đã né được!`); return this.nextPending(); }
+    if (bang.got >= bang.need) { this.addLog(`${p.name} đã né được!`); return this.finishResponse(bang); }
     this.pending = bang;
   }
 
   beginDraw() {
     const pi = this.turn, p = this.players[pi];
     this.phase = 'draw';
-    if (p.char === 'Jesse Jones' && this.alive().some((i) => i !== pi && this.players[i].hand.length)) {
-      this.pending = { type: 'draw', player: pi, options: ['deck', 'player'] };
-    } else if (p.char === 'Pedro Ramirez' && this.discard.length) {
-      this.pending = { type: 'draw', player: pi, options: ['deck', 'discard'] };
-    } else {
-      this.pending = { type: 'draw', player: pi, options: ['deck'] };
-    }
+    const skill = this.ability(p);
+    const options = ['deck'];
+    if (skill === 'Jesse Jones' && this.alive().some((i) => i !== pi && this.players[i].hand.length)) options.push('player');
+    if (skill === 'Pedro Ramirez' && this.discard.length) options.push('discard');
+    if (skill === 'Pat Brennan' && this.players.some((q) => q.alive && q.eq.length)) options.push('equipment');
+    this.pending = { type: 'draw', player: pi, options };
   }
 
   normalDraw(p) {
-    const cards = this.draw(2);
+    const skill = this.ability(p);
+    const n = skill === 'Bill Noface' ? 1 + p.maxHp - p.hp : skill === 'Pixie Pete' ? 3 : 2;
+    const cards = this.draw(n);
     p.hand.push(...cards);
-    if (p.char === 'Black Jack' && cards[1]) {
+    this.addLog(`${p.name} rút ${cards.length} lá.`);
+    if (skill === 'Black Jack' && cards[1]) {
       const red = cards[1].suit === 'H' || cards[1].suit === 'D';
       this.recordTransfer(p, cards.slice(0, 1));
       this.drawStageSeq = (this.drawStageSeq || 0) + 1;
@@ -357,36 +471,54 @@ class Game {
   }
 
   // ---------- máu, chết, thắng ----------
-  damage(ti, amount, src) {
+  damage(ti, amount, src, response = null) {
     const t = this.players[ti];
     if (!t.alive) return;
     this.recordDamage(ti, Math.min(amount, Math.max(t.hp, 0)), src);
     t.hp -= amount;
     this.addLog(`${t.name} mất ${amount} máu (còn ${Math.max(t.hp, 0)}).`);
-    if (t.hp <= 0) this.trySave(t);
+    if (t.hp <= 0) this.trySave(t, response);
     if (t.hp <= 0) return this.kill(ti, src);
-    if (t.char === 'Bart Cassidy') { this.give(t, amount); this.addLog(`${t.name} rút ${amount} lá (Bart Cassidy).`); }
-    if (t.char === 'El Gringo' && src != null && src !== ti) {
+    if (this.ability(t) === 'Bart Cassidy') { this.give(t, amount); this.addLog(`${t.name} rút ${amount} lá (Bart Cassidy).`); }
+    if (this.ability(t) === 'El Gringo' && src != null && src !== ti) {
       for (let k = 0; k < amount; k++) {
         if (this.stealRandom(this.players[src], t)) this.addLog(`${t.name} lấy 1 lá từ tay ${this.players[src].name} (El Gringo).`);
       }
     }
   }
 
-  trySave(t) {
+  trySave(t, response) {
     while (t.hp <= 0) {
       const beer = t.hand.find((c) => c.name === 'Beer');
       if (beer && this.alive().length > 2) {
         t.hand.splice(t.hand.indexOf(beer), 1);
         this.toDiscard(beer);
-        t.hp++;
-        this.stats[this.idx(t.name)].healed++;
+        const heal = Math.min(t.maxHp - t.hp, this.beerHealing(t));
+        t.hp += heal;
+        this.stats[this.idx(t.name)].healed += heal;
         this.addLog(`🍺 ${t.name} uống Beer để sống sót!`);
-      } else if (t.char === 'Sid Ketchum' && t.hand.length >= 2) {
+        this.mollyDraw(t, beer, response);
+      } else if (this.ability(t) === 'Sid Ketchum' && t.hand.length >= 2) {
         this.toDiscard(...t.hand.splice(0, 2));
         t.hp++;
         this.addLog(`${t.name} bỏ 2 lá để hồi 1 máu (Sid Ketchum).`);
       } else break;
+    }
+  }
+
+  mollyDraw(p, card, response = null) {
+    const pi = this.idx(p.name);
+    if (pi === this.turn || this.ability(p) !== 'Molly Stark' || !['Bang', 'Missed', 'Beer'].includes(card.name)) return;
+    if (response) {
+      const draws = response.mollyDraws ??= new Map();
+      draws.set(pi, (draws.get(pi) || 0) + 1);
+    }
+    else this.give(p, 1);
+  }
+
+  finishMollyDraws(response) {
+    for (const [i, count] of response.mollyDraws || []) {
+      if (this.players[i].alive && !this.winner) this.give(this.players[i], count);
     }
   }
 
@@ -414,6 +546,7 @@ class Game {
     }
     const inFlight = [this.pending, ...this.queue];
     this.kill(pi, null);
+    if (pend?.type === 'duel' && cancel(pend)) this.finishMollyDraws(pend);
     // Victory clears pending choices; keep any revealed cards in the deck count.
     if (this.winner) for (const q of inFlight) this.toDiscard(...(q?.cards || []));
     else this.afterAction();
@@ -425,16 +558,17 @@ class Game {
     t.alive = false;
     t.hp = 0;
     this.addLog(`☠️ ${t.name} đã chết! Vai trò: ${t.role} (${ROLE_INFO[t.role].vi}).`);
-    const cards = [...t.hand, ...t.eq];
+    const looters = this.players.map((_, n) => this.players[(ti + 1 + n) % this.players.length])
+      .filter((p) => p.alive && this.ability(p) === 'Vulture Sam');
+    const cards = [...(looters.length > 1 ? shuffle(t.hand, this.rng) : t.hand), ...t.eq];
     t.hand = []; t.eq = [];
-    const vulture = this.players.find((p) => p.alive && p.char === 'Vulture Sam');
-    if (vulture && cards.length) {
-      vulture.hand.push(...cards);
-      this.addLog(`${vulture.name} nhặt hết bài của ${t.name} (Vulture Sam).`);
+    if (looters.length && cards.length) {
+      cards.forEach((card, i) => looters[i % looters.length].hand.push(card));
+      this.addLog(`${looters.map((p) => p.name).join(', ')} nhặt bài của ${t.name} (Vulture Sam).`);
     } else this.toDiscard(...cards);
 
-    if (this.checkWin()) return;
-    if (src != null && src !== ti && this.players[src].alive) {
+    const won = this.checkWin();
+    if (!won && src != null && src !== ti && this.players[src].alive) {
       const k = this.players[src];
       if (t.role === 'Outlaw') { this.give(k, 3); this.addLog(`${k.name} được thưởng 3 lá vì hạ một Outlaw.`); }
       if (t.role === 'Deputy' && k.role === 'Sheriff') {
@@ -442,6 +576,16 @@ class Game {
         k.hand = []; k.eq = [];
         this.addLog(`Sheriff ${k.name} lỡ tay giết Phó cảnh sát, phải bỏ toàn bộ bài!`);
       }
+    }
+    for (const [i, p] of this.players.entries()) {
+      if (!p.alive) continue;
+      const skill = this.ability(p);
+      if (skill === 'Greg Digger') {
+        const heal = Math.min(p.maxHp - p.hp, 2);
+        p.hp += heal;
+        this.stats[i].healed += heal;
+      }
+      if (skill === 'Herb Hunter') this.give(p, 2);
     }
   }
 
@@ -477,9 +621,14 @@ class Game {
     }
   }
 
+  finishResponse(response) {
+    this.finishMollyDraws(response);
+    this.nextPending();
+  }
+
   afterAction() {
     for (const p of this.players) {
-      if (p.alive && p.char === 'Suzy Lafayette' && p.hand.length === 0 && !this.winner) {
+      if (p.alive && this.ability(p) === 'Suzy Lafayette' && p.hand.length === 0 && !this.winner) {
         this.give(p, 1);
         this.addLog(`${p.name} hết bài, rút 1 lá (Suzy Lafayette).`);
       }
@@ -488,6 +637,50 @@ class Game {
   }
 
   // ---------- hành động của người chơi ----------
+  activeSkill(p) {
+    const skill = this.ability(p);
+    if (skill === 'Chuck Wengam' && p.hp > 1) return skill;
+    if (skill === 'Doc Holyday' && this.skillUses < 1 && p.hand.length >= 2) return skill;
+    if (skill === 'José Delgado' && this.skillUses < 2 && p.hand.some((card) => this.isBlue(card))) return skill;
+    return null;
+  }
+
+  useSkill(pi, p, a) {
+    const skill = this.activeSkill(p);
+    if (!skill) fail('Không thể dùng kỹ năng lúc này.');
+    if (skill === 'Chuck Wengam') {
+      p.hp--;
+      this.give(p, 2);
+      this.addLog(`${p.name} trả 1 máu để rút 2 lá.`);
+      return;
+    }
+    const ids = a.cardIds;
+    const required = skill === 'Doc Holyday' ? 2 : 1;
+    if (!Array.isArray(ids) || ids.length !== required || new Set(ids).size !== ids.length) fail(`Chọn đúng ${required} lá khác nhau.`);
+    const cards = ids.map((id) => p.hand.find((c) => c.id === id));
+    if (cards.some((c) => !c)) fail('Bạn không có lá bài này.');
+    const ti = this.idx(a.target), t = this.players[ti];
+    if (skill === 'Doc Holyday') {
+      if (!t?.alive || ti === pi || this.distance(pi, ti) > this.range(p)) fail('Chọn người khác trong tầm súng.');
+    } else if (!this.isBlue(cards[0])) fail('Chọn một lá viền xanh dương trên tay.');
+
+    this.toDiscard(...ids.map((id) => this.takeFromHand(p, id)));
+    for (const card of cards) this.recordPlay(pi, card, 'discard');
+    this.skillUses++;
+    if (skill === 'Doc Holyday') {
+      this.stats[ti].targeted++;
+      if (cards.every((c) => c.suit === 'D') && this.ignoresDiamonds(t)) {
+        this.addLog(`${t.name} miễn đòn của ${p.name} vì cả hai lá đều là Rô.`);
+        return;
+      }
+      this.pending = this.attackPrompt(pi, ti, 1);
+      this.addLog(`${p.name} bỏ 2 lá và bắn ${t.name} (${skill}).`);
+    } else {
+      this.give(p, 2);
+      this.addLog(`${p.name} bỏ 1 lá xanh dương và rút 2 lá (${skill}).`);
+    }
+  }
+
   act(name, a) {
     if (this.winner) fail('Ván đấu đã kết thúc.');
     const pi = this.idx(name);
@@ -502,7 +695,7 @@ class Game {
     }
 
     if (a.type === 'sid') {
-      if (p.char !== 'Sid Ketchum') fail('Chỉ Sid Ketchum mới dùng được.');
+      if (this.ability(p) !== 'Sid Ketchum') fail('Chỉ người có kỹ năng Sid Ketchum mới dùng được.');
       if (p.hp >= p.maxHp) fail('Bạn đang đầy máu.');
       const ids = a.cardIds || [];
       if (ids.length !== 2 || ids[0] === ids[1]) fail('Chọn đúng 2 lá.');
@@ -516,23 +709,23 @@ class Game {
     const pend = this.pending;
     if (pend) {
       if (pend.player !== pi) fail('Chưa đến lượt bạn phản hồi.');
-      const played = a.type === 'respond' ? p.hand.find((c) => c.id === a.cardId) : null;
       this.respond(pi, p, pend, a);
-      if (played && !p.hand.some((c) => c.id === played.id)) this.recordPlay(pi, played);
       return this.afterAction();
     }
 
     if (this.turn !== pi) fail('Chưa đến lượt của bạn.');
     if (this.phase !== 'play') fail('Không thể làm việc này lúc này.');
 
-    if (a.type === 'play') {
-      const played = p.hand.find((c) => c.id === a.cardId);
+    if (a.type === 'skill') {
+      this.useSkill(pi, p, a);
+    } else if (a.type === 'play' || a.type === 'activate') {
+      const played = (a.type === 'activate' ? p.eq : p.hand).find((c) => c.id === a.cardId);
       this.playCard(pi, p, a);
-      this.recordPlay(pi, played);
+      this.recordPlay(pi, played, a.type === 'activate' ? 'discard' : 'play');
     }
     else if (a.type === 'discard') {
       const ids = a.cardIds || [];
-      const excess = p.hand.length - p.hp;
+      const excess = p.hand.length - this.handLimit(p);
       if (excess <= 0) fail('Bạn không cần bỏ bài.');
       if (!ids.length || ids.length > excess) fail(`Chỉ cần bỏ tối đa ${excess} lá.`);
       if (new Set(ids).size !== ids.length || !ids.every((id) => p.hand.some((c) => c.id === id))) fail('Chọn các lá bài khác nhau đang có trên tay.');
@@ -541,7 +734,8 @@ class Game {
       for (const card of cards) this.recordPlay(pi, card, 'discard');
       this.addLog(`${p.name} bỏ ${cards.length} lá.`);
     } else if (a.type === 'endTurn') {
-      if (p.hand.length > p.hp) fail(`Bạn phải bỏ bớt ${p.hand.length - p.hp} lá trước khi kết thúc lượt.`);
+      const excess = p.hand.length - this.handLimit(p);
+      if (excess > 0) fail(`Bạn phải bỏ bớt ${excess} lá trước khi kết thúc lượt.`);
       this.addLog(`${p.name} kết thúc lượt.`);
       this.nextTurn();
     } else fail('Hành động không hợp lệ.');
@@ -569,11 +763,15 @@ class Game {
       let action = { type: 'take' };
       if (pend.type === 'check') action = { type: 'checkDraw' };
       if (pend.type === 'draw') action = { type: 'drawChoice', from: 'deck' };
+      if (pend.type === 'copyAbility') {
+        const choices = this.alive().filter((i) => i !== pend.player);
+        action = { type: 'copyAbility', target: this.players[choices[Math.floor(this.rng() * choices.length)]]?.name };
+      }
       if (pend.type === 'kit') action = { type: 'kit', cardIds: pend.cards.slice(0, 2).map((c) => c.id) };
       if (pend.type === 'store') action = { type: 'pick', cardId: pend.cards[0].id };
       this.act(p.name, action);
     } else {
-      const excess = p.hand.length - p.hp;
+      const excess = p.hand.length - this.handLimit(p);
       if (excess > 0) this.act(p.name, { type: 'discard', cardIds: p.hand.slice(0, excess).map((c) => c.id) });
       this.act(p.name, { type: 'endTurn' });
     }
@@ -581,13 +779,21 @@ class Game {
 
   respond(pi, p, pend, a) {
     switch (pend.type) {
+      case 'copyAbility': {
+        const target = this.players[this.idx(a.target)];
+        if (a.type !== 'copyAbility' || !target?.alive || target === p) fail('Chọn một nhân vật khác còn sống.');
+        p.copiedAbility = target.char;
+        this.addLog(`${p.name} sao chép kỹ năng ${target.char}.`);
+        this.beginDraw();
+        return;
+      }
       case 'check': {
         if (a.type !== 'checkDraw') fail('Hãy bấm vào chồng bài để rút kiểm tra.');
         return this.resolveCheck(pi, p, pend);
       }
       case 'draw': {
         if (a.type !== 'drawChoice' || !pend.options.includes(a.from)) fail('Lựa chọn không hợp lệ.');
-        if (p.char === 'Kit Carlson') {
+        if (this.ability(p) === 'Kit Carlson') {
           this.drawStageSeq = (this.drawStageSeq || 0) + 1;
           this.pending = { type: 'kit', player: pi, cards: this.draw(3), stage: this.drawStageSeq };
           return;
@@ -606,9 +812,17 @@ class Game {
           this.recordTransfer(p, [c], 'discard');
           this.give(p, 1);
           this.addLog(`${p.name} lấy ${cardStr(c)} từ chồng bài bỏ và rút 1 lá.`);
+        } else if (a.from === 'equipment') {
+          const ti = this.idx(a.target), target = this.players[ti];
+          const index = target?.alive ? target.eq.findIndex((c) => c.id === a.cardId) : -1;
+          if (index < 0) fail('Chọn một lá trang bị đang đặt trên bàn.');
+          const [c] = target.eq.splice(index, 1);
+          target.coolingGreen.delete(c.id);
+          p.hand.push(c);
+          this.recordTransfer(p, [c], ti, null, true);
+          this.addLog(`${p.name} lấy ${cardStr(c)} của ${target.name} (Pat Brennan).`);
         } else {
           this.normalDraw(p);
-          this.addLog(`${p.name} rút 2 lá.`);
           if (this.pending?.type === 'blackJack') return;
         }
         this.pending = null;
@@ -649,33 +863,43 @@ class Game {
           pend.barrels--;
           return this.askCheck(pi, 'Barrel', pend);
         } else if (a.type === 'respond') {
-          const c = p.hand.find((x) => x.id === a.cardId);
-          const ok = c && (c.name === 'Missed' || (c.name === 'Bang' && p.char === 'Calamity Janet'));
-          if (!ok) fail('Cần dùng lá Missed!.');
-          this.toDiscard(this.takeFromHand(p, c.id));
+          const c = this.dodgeCards(p).find((x) => x.id === a.cardId);
+          if (!c) fail('Lá này không thể dùng để né đòn.');
+          if (p.eq.includes(c)) {
+            p.eq.splice(p.eq.indexOf(c), 1);
+            this.toDiscard(c);
+            this.recordPlay(pi, c, 'discard');
+            this.give(p, CARD_INFO[c.name].draw);
+          } else {
+            this.toDiscard(this.takeFromHand(p, c.id));
+            this.recordPlay(pi, c);
+            this.mollyDraw(p, c, pend);
+          }
           pend.got++;
           this.stats[pi].dodged++;
-          this.addLog(`${p.name} dùng ${c.name === 'Missed' ? 'Missed!' : 'Bang! (như Missed!)'}.`);
+          this.addLog(`${p.name} dùng ${c.name === 'Bang' ? 'Bang! (như Missed!)' : c.name === 'Missed' ? 'Missed!' : c.name}.`);
         } else if (a.type === 'take') {
-          this.damage(pi, 1, pend.source);
-          return this.nextPending();
+          this.damage(pi, 1, pend.source, pend);
+          return this.finishResponse(pend);
         } else fail('Hành động không hợp lệ.');
-        if (pend.got >= pend.need) { this.addLog(`${p.name} đã né được!`); this.nextPending(); }
+        if (pend.got >= pend.need) { this.addLog(`${p.name} đã né được!`); this.finishResponse(pend); }
         return;
       }
       case 'indians':
       case 'duel': {
         if (a.type === 'respond') {
           const c = p.hand.find((x) => x.id === a.cardId);
-          const ok = c && (c.name === 'Bang' || (c.name === 'Missed' && p.char === 'Calamity Janet'));
+          const ok = c && (c.name === 'Bang' || (c.name === 'Missed' && this.ability(p) === 'Calamity Janet'));
           if (!ok) fail('Cần dùng lá Bang!.');
           this.toDiscard(this.takeFromHand(p, c.id));
+          this.recordPlay(pi, c);
+          this.mollyDraw(p, c, pend.type === 'duel' ? pend : null);
           this.addLog(`${p.name} bỏ một Bang!.`);
-          if (pend.type === 'duel') this.pending = { type: 'duel', player: pend.other, other: pi };
+          if (pend.type === 'duel') this.pending = { ...pend, player: pend.other, other: pi };
           else this.nextPending();
         } else if (a.type === 'take') {
-          this.damage(pi, 1, pend.type === 'duel' ? pend.other : pend.source);
-          this.nextPending();
+          this.damage(pi, 1, pend.type === 'duel' ? pend.other : pend.source, pend.type === 'duel' ? pend : null);
+          this.finishResponse(pend);
         } else fail('Hành động không hợp lệ.');
         return;
       }
@@ -684,11 +908,25 @@ class Game {
   }
 
   playCard(pi, p, a) {
-    const card = p.hand.find((c) => c.id === a.cardId);
+    const activate = a.type === 'activate';
+    const pile = activate ? p.eq : p.hand;
+    const card = pile.find((c) => c.id === a.cardId);
     if (!card) fail('Bạn không có lá bài này.');
     let name = card.name;
-    if (name === 'Missed' && p.char === 'Calamity Janet') name = 'Bang';
+    const skill = this.ability(p);
+    if (name === 'Missed' && skill === 'Calamity Janet') name = 'Bang';
     const info = CARD_INFO[card.name];
+    if (activate) {
+      if (info.type !== 'green' || !info.activate) fail('Lá này không dùng được trong lượt.');
+      if (p.coolingGreen.has(card.id)) fail('Lá này sẽ sẵn sàng ở lượt kế tiếp của bạn.');
+    } else if (info.type === 'green') {
+      if (this.hasEq(p, card.name)) fail(`Bạn đã có ${card.name}.`);
+      p.eq.push(this.takeFromHand(p, card.id));
+      p.coolingGreen.add(card.id);
+      this.stats[pi].equips++;
+      this.addLog(`${p.name} trang bị ${card.name}. Sẵn sàng từ lượt kế tiếp.`);
+      return;
+    }
 
     const needTarget = (cond) => {
       const ti = this.idx(a.target);
@@ -697,27 +935,38 @@ class Game {
       if (cond) cond(ti, t);
       return [ti, t];
     };
-    const use = () => { this.takeFromHand(p, card.id); };
+    const use = () => { pile.splice(pile.indexOf(card), 1); };
     const others = () => { const out = []; let j = this.nextAlive(pi); while (j !== pi) { out.push(j); j = this.nextAlive(j); } return out; };
 
-    switch (name) {
-      case 'Bang': {
-        if (this.bangsPlayed >= 1 && !this.unlimitedBang(p)) fail('Mỗi lượt chỉ được dùng 1 Bang!.');
-        const [ti, t] = needTarget((ti) => { if (this.distance(pi, ti) > this.range(p)) fail('Mục tiêu ngoài tầm súng.'); });
-        use(); this.toDiscard(card); this.bangsPlayed++;
-        this.stats[pi].bangs++; this.stats[ti].targeted++;
-        this.noteSheriffTarget(pi, ti, 'Bang!');
-        this.addLog(`💥 ${p.name} bắn ${t.name}!`);
-        this.pending = { type: 'bang', player: ti, source: pi, need: p.char === 'Slab the Killer' ? 2 : 1, got: 0, barrels: this.barrelCount(t) };
+    switch (info.effect || name) {
+      case 'Bang':
+      case 'attack': {
+        const regularBang = name === 'Bang';
+        if (regularBang && this.bangsPlayed >= 1 && !this.unlimitedBang(p)) fail('Mỗi lượt chỉ được dùng 1 Bang!.');
+        const range = regularBang || info.maxDistance === 'weapon' ? this.range(p) : (info.maxDistance ?? Infinity);
+        const [ti, t] = needTarget((ti) => { if (this.distance(pi, ti) > range) fail('Mục tiêu ngoài tầm bắn.'); });
+        use(); this.toDiscard(card);
+        this.stats[ti].targeted++;
+        if (regularBang) {
+          this.bangsPlayed++;
+          this.stats[pi].bangs++;
+          this.noteSheriffTarget(pi, ti, 'Bang!');
+        }
+        if (info.draw) this.give(p, info.draw);
+        if (this.ignoredCard(t, card)) return;
+        this.addLog(`💥 ${p.name} bắn ${t.name}${regularBang ? '' : ` bằng ${name}`}!`);
+        this.pending = this.attackPrompt(pi, ti, regularBang && skill === 'Slab the Killer' ? 2 : 1);
         return;
       }
       case 'Missed': return fail('Missed! chỉ dùng khi bị bắn.');
-      case 'Beer': {
-        if (this.alive().length <= 2) fail('Beer vô dụng khi chỉ còn 2 người.');
+      case 'Beer':
+      case 'heal': {
+        if (name === 'Beer' && this.alive().length <= 2) fail('Beer vô dụng khi chỉ còn 2 người.');
         if (p.hp >= p.maxHp) fail('Bạn đang đầy máu.');
-        use(); this.toDiscard(card); p.hp++;
-        this.stats[pi].healed++;
-        this.addLog(`🍺 ${p.name} uống Beer (+1 máu).`);
+        const heal = Math.min(p.maxHp - p.hp, name === 'Beer' ? this.beerHealing(p) : info.heal);
+        use(); this.toDiscard(card); p.hp += heal;
+        this.stats[pi].healed += heal;
+        this.addLog(name === 'Beer' ? `🍺 ${p.name} uống Beer (+${heal} máu).` : `${p.name} dùng ${name} (+${heal} máu).`);
         return;
       }
       case 'Saloon': {
@@ -730,9 +979,10 @@ class Game {
         return;
       }
       case 'Stagecoach':
-      case 'Wells Fargo': {
+      case 'Wells Fargo':
+      case 'draw': {
         use(); this.toDiscard(card);
-        const n = name === 'Stagecoach' ? 2 : 3;
+        const n = info.draw ?? (name === 'Stagecoach' ? 2 : 3);
         this.give(p, n);
         this.addLog(`${p.name} dùng ${name}, rút ${n} lá.`);
         return;
@@ -745,9 +995,12 @@ class Game {
         return;
       }
       case 'Panic':
+      case 'take':
+      case 'discard':
       case 'Cat Balou': {
-        const [pti, t] = needTarget((ti) => {
-          if (name === 'Panic' && this.distance(pi, ti) > 1) fail('Panic! chỉ dùng với người ở khoảng cách 1.');
+        const range = name === 'Panic' ? 1 : (info.maxDistance ?? Infinity);
+        const [ti, t] = needTarget((ti) => {
+          if (this.distance(pi, ti) > range) fail(`${name} chỉ dùng trong khoảng cách ${range}.`);
         });
         let taken;
         if (a.targetCard === 'hand') {
@@ -757,11 +1010,12 @@ class Game {
           if (!taken) fail('Hãy chọn một lá bài của người đó.');
         }
         use(); this.toDiscard(card);
-        this.stats[pti].targeted++;
-        this.noteSheriffTarget(pi, pti, name === 'Panic' ? 'Panic!' : 'Cat Balou');
+        this.stats[ti].targeted++;
+        if (name === 'Panic' || name === 'Cat Balou') this.noteSheriffTarget(pi, ti, name === 'Panic' ? 'Panic!' : name);
+        if (this.ignoredCard(t, card)) return;
         if (!taken) taken = t.hand.splice(Math.floor(this.rng() * t.hand.length), 1)[0];
-        else t.eq.splice(t.eq.indexOf(taken), 1);
-        if (name === 'Panic') { p.hand.push(taken); this.addLog(`😱 ${p.name} lấy ${a.targetCard === 'hand' ? '1 lá trên tay' : cardStr(taken)} của ${t.name}.`); }
+        else { t.eq.splice(t.eq.indexOf(taken), 1); t.coolingGreen.delete(taken.id); }
+        if (name === 'Panic' || info.effect === 'take') { p.hand.push(taken); this.addLog(`😱 ${p.name} lấy ${a.targetCard === 'hand' ? '1 lá trên tay' : cardStr(taken)} của ${t.name}.`); }
         else { this.toDiscard(taken); this.addLog(`💃 ${p.name} buộc ${t.name} bỏ ${cardStr(taken)}.`); }
         return;
       }
@@ -775,23 +1029,26 @@ class Game {
         return;
       }
       case 'Indians':
+      case 'attackAll':
       case 'Gatling': {
         use(); this.toDiscard(card);
-        this.stats[pi].mass++;
-        this.addLog(name === 'Indians' ? `🪶 ${p.name} thả thổ dân tấn công!` : `🔫 ${p.name} xả Gatling!`);
-        this.queue = others().map((j) => name === 'Indians'
+        if (name === 'Indians' || name === 'Gatling') this.stats[pi].mass++;
+        this.addLog(name === 'Indians' ? `🪶 ${p.name} thả thổ dân tấn công!` : `🔫 ${p.name} dùng ${name}!`);
+        this.queue = others().filter((j) => !this.ignoredCard(this.players[j], card)).map((j) => name === 'Indians'
           ? { type: 'indians', player: j, source: pi }
-          : { type: 'bang', player: j, source: pi, need: 1, got: 0, barrels: this.barrelCount(this.players[j]) });
+          : this.attackPrompt(pi, j, 1));
         this.nextPending();
         return;
       }
       case 'Jail': {
-        const [jti, t] = needTarget((ti, t) => {
+        const [ti, t] = needTarget((_, t) => {
           if (t.role === 'Sheriff') fail('Không thể bỏ tù Sheriff.');
           if (this.hasEq(t, 'Jail')) fail('Người này đã ở trong tù.');
         });
-        use(); t.eq.push(card);
-        this.stats[jti].targeted++;
+        use();
+        this.stats[ti].targeted++;
+        if (this.ignoredCard(t, card)) { this.toDiscard(card); return; }
+        t.eq.push(card);
         this.jailSeq = (this.jailSeq || 0) + 1;
         t.jailed = this.jailSeq; // hiện song sắt từ lúc bị đặt Jail đến khi rút kiểm tra
         this.addLog(`⛓️ ${p.name} bỏ tù ${t.name}.`);
@@ -921,6 +1178,7 @@ class Game {
       pending = { type: pend.type, player: pend.player };
       if (pend.type === 'character' && pend.player === me) pending.options = [...pend.options];
       if (pend.type === 'bang') Object.assign(pending, { source: pend.source, need: pend.need, got: pend.got, barrels: pend.barrels });
+      if (pend.type === 'bang' && pend.player === me) pending.responseCardIds = this.dodgeCards(this.players[me]).map((c) => c.id);
       if (pend.type === 'indians') pending.source = pend.source;
       if (pend.type === 'duel') pending.other = pend.other;
       if (pend.type === 'store') pending.cards = pend.cards;
@@ -935,8 +1193,12 @@ class Game {
     }
     return {
       players: this.players.map((p, i) => ({
-        name: p.name, char: p.char, hp: p.hp, maxHp: p.maxHp, alive: p.alive,
-        handCount: p.hand.length, eq: p.eq,
+        name: p.name, char: p.char, ability: this.ability(p), hp: p.hp, maxHp: p.maxHp, alive: p.alive,
+        handCount: p.hand.length,
+        eq: p.eq.map((c) => {
+          const disabled = !this.equipmentActive(p);
+          return CARD_INFO[c.name].type === 'green' ? { ...c, ready: !p.coolingGreen.has(c.id), disabled } : disabled ? { ...c, disabled } : c;
+        }),
         role: (p.role === 'Sheriff' || !p.alive || i === me || this.winner) ? p.role : null,
         distance: meAlive && p.alive ? this.distance(me, i) : null,
         winner: this.isWinner(p),
@@ -945,6 +1207,8 @@ class Game {
       })),
       me: me >= 0 ? {
         index: me, hand: this.players[me].hand, range: this.range(this.players[me]), unlimitedBang: this.unlimitedBang(this.players[me]),
+        handLimit: this.handLimit(this.players[me]),
+        activeSkill: !this.winner && me === this.turn && !pend && this.phase === 'play' ? this.activeSkill(this.players[me]) : null,
       } : null,
       turn: this.turn, phase: this.phase, bangsPlayed: this.bangsPlayed,
       deckCount: this.deck.length, discardTop: this.discard[this.discard.length - 1] || null,
@@ -962,4 +1226,4 @@ class Game {
   }
 }
 
-module.exports = { Game, GameError, CARD_INFO, CHAR_INFO, ROLE_INFO, SUIT_SYMBOL };
+module.exports = { Game, GameError, CARD_INFO, CHAR_INFO, ROLE_INFO, SUIT_SYMBOL, RULES_PREVIEW, greenCardCount: GREEN_CARDS.length };

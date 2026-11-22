@@ -307,6 +307,8 @@ body.eq-sm { --eq: 34px; } body.eq-md { --eq: 44px; } body.eq-lg { --eq: 56px; }
 .eqt { position: relative; width: var(--eqs); height: var(--eqs); flex-shrink: 0; border-radius: 7px; display: flex; flex-direction: column; align-items: center; justify-content: center;
   background: #eef4fa; border: 2px solid var(--blue); box-shadow: 0 3px 0 #1c3a57; cursor: help; transition: transform .12s; }
 .eqt:hover { transform: translateY(-3px) scale(1.1); z-index: 5; }
+.eqt.inactive { opacity: .5; }
+button.eqt[data-act="patDraw"] { cursor: pointer; outline: 2px solid var(--gold); }
 .eqt .ic { font-size: calc(var(--eqs) * .44); line-height: 1; }
 .eqt .nm { font-size: 8px; font-weight: 700; margin-top: 2px; max-width: calc(var(--eqs) - 4px); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ink); }
 body.eq-sm .eqt .nm { display: none; }
@@ -315,6 +317,8 @@ body.eq-lg .eqt .nm { font-size: 10px; }
   display: grid; place-items: center; color: #fff; background: var(--blue); border: 2px solid #fffaf0; }
 .eqt.gun { background: #f3ead9; border-color: #5c3d1e; box-shadow: 0 3px 0 #3a2410; } .eqt.gun .bd { background: #5c3d1e; }
 .eqt.horse { background: #eaf4e6; border-color: var(--green); box-shadow: 0 3px 0 #23481f; } .eqt.horse .bd { background: var(--green); }
+.eqt.green { background: #eaf4e6; border-color: var(--green); box-shadow: 0 3px 0 #23481f; }
+.eqt.green .bd { background: var(--green); }
 .eqt.jail { background: repeating-linear-gradient(90deg, #4a4f55 0 6px, #2c3035 6px 9px); border-color: #1b1d20; box-shadow: 0 3px 0 #111; }
 .eqt.jail .nm { color: #f3e3c3; }
 .eqt.dyn { background: #fbe3d6; border-color: var(--red); box-shadow: 0 3px 0 #6e1d17, 0 0 12px rgba(255,120,40,.8); animation: fuse 1s infinite; }
@@ -370,6 +374,7 @@ body.eq-lg .eqt .nm { font-size: 10px; }
 /* ---------- cards ---------- */
 .card { color: var(--ink); width: 84px; height: 112px; border-radius: 8px; background: #fffaf0; border: 3px solid #8b5a2b; padding: 4px; position: relative; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; cursor: default; user-select: none; transition: transform .12s, box-shadow .12s; box-shadow: 0 3px 6px rgba(0,0,0,.25); }
 .card.blue { border-color: var(--blue); background: #eef4fa; }
+.card.green { border-color: var(--green); background: #eaf4e6; }
 .card.gun { border-color: #5c3d1e; background: #f3ead9; }
 .card .corner { position: absolute; top: 3px; left: 5px; font-size: 12px; font-weight: 700; }
 .card .corner.red { color: var(--red); }
