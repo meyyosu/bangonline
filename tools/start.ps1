@@ -96,8 +96,9 @@ try {
     if ($stale -and -not $Restart) {
       Say 'Server đang chạy mã hoặc dữ liệu Dodge City cũ. Mở lại trình duyệt sẽ chưa áp dụng bản mới.' Yellow
       Say 'Khởi động lại sẽ mất các phòng/ván đang mở; tài khoản vẫn được giữ.' Yellow
-      $answer = Read-Host 'Nhập R để khởi động lại, hoặc Enter để giữ server đang chạy'
-      $Restart = $answer -eq 'R'
+      # Mặc định khởi động lại: server cũ không có thống kê/danh hiệu cuối ván và các luật mới.
+      $answer = Read-Host 'Nhấn Enter để khởi động lại server (nên chọn), hoặc nhập K để giữ server cũ'
+      $Restart = $answer -ne 'K'
     }
     if (-not $Restart) {
       Say "Server đang chạy ở cửa sổ khác: $localUrl" Green

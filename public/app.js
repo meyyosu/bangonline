@@ -470,11 +470,27 @@ function roomSettingsBody(form) {
   return body;
 }
 
+// Phát hiện server chạy bản cũ trước khi chơi, để ván không kết thúc mà thiếu danh hiệu/thống kê.
+// Server cũ không gửi r.server; server mới báo stale khi code trên ổ đĩa mới hơn code đang chạy.
+function serverOutdated(r) {
+  return !r.server?.features?.includes('endSummary') || !!r.server.stale;
+}
+
+function serverWarningHTML(r) {
+  if (!serverOutdated(r)) return '';
+  const isHost = r.host === ME;
+  return `<div class="server-warning" role="alert"><b>⚠️ Server đang chạy bản cũ</b>
+    <p>Ván chơi trên server này sẽ <b>không có danh hiệu và thống kê</b> cuối ván.</p>
+    <p>${isHost ? 'Bạn là host: hãy' : 'Nhắc host'} chạy lại <code>CHAY-GAME.bat</code> và nhấn <b>Enter</b> để khởi động lại server trước khi bắt đầu.
+    Khởi động lại sẽ đóng các phòng đang mở; mọi người chỉ cần vào lại.</p></div>`;
+}
+
 function renderWaiting() {
   const r = ROOM;
   const isHost = r.host === ME;
   const n = r.players.length;
   $('#mainArea').innerHTML = `
+    ${serverWarningHTML(r)}
     <div class="panel">
       <h2>Phòng chờ (${n}/7)</h2>
       <ul class="seat-list">
@@ -513,6 +529,7 @@ function renderWaiting() {
   $('#startBtn') && ($('#startBtn').onclick = run(async () => {
     const form = $('#settingsForm');
     if (form && !form.reportValidity()) return;
+    if (serverOutdated(ROOM) && !confirm('Server đang chạy bản cũ: ván này sẽ KHÔNG có danh hiệu và thống kê cuối ván.\n\nNên khởi động lại server (chạy lại CHAY-GAME.bat, nhấn Enter) trước.\n\nVẫn bắt đầu ván?')) return;
     // Save the visible settings even when the host starts without pressing Save.
     const settings = form ? roomSettingsBody(form) : {};
     await api(`/api/rooms/${r.code}/start`, settings);
@@ -1227,8 +1244,25 @@ function awardCardHTML(g, award) {
     ${row(award.ranks[0], 0)}${row(award.ranks[1], 1)}</div>`;
 }
 
+// Server chạy bản cũ (chưa khởi động lại sau khi cập nhật) sẽ không gửi g.summary:
+// báo rõ cho người chơi thay vì để màn Danh hiệu trống và bảng Thống kê toàn số 0.
+function resultMissingSummaryHTML(g, won, back, next) {
+  return `${resultHeaderHTML(g, won)}
+    <div class="result-missing" role="alert"><b>⚠️ Không có số liệu cuối ván</b>
+      <p>Server đang chạy bản cũ nên chưa gửi danh hiệu và thống kê.</p>
+      <p>Người làm host hãy chạy lại <code>CHAY-GAME.bat</code>, nhấn <b>Enter</b> để khởi động lại server, rồi mở ván mới.</p></div>
+    <div class="result-foot"><button type="button" class="btn ghost" data-step="${back[0]}">← ${back[1]}</button><span></span>${next}</div>`;
+}
+
+function resultFinalButtonsHTML() {
+  return `<button type="button" class="btn ghost" data-close>Xem bàn chơi</button>
+    ${ROOM.host === ME ? '<button type="button" class="result-continue small" data-reset><span aria-hidden="true">🔁</span> Về phòng chờ</button>' : '<span class="st-wait">Chờ chủ phòng mở ván mới…</span>'}`;
+}
+
 function resultAwardsHTML(g, won) {
-  const awards = g.summary?.awards || [];
+  if (!g.summary) return resultMissingSummaryHTML(g, won, ['result', 'Kết quả'], '<button type="button" class="result-continue small" data-step="stats"><span aria-hidden="true">✺</span> Tiếp tục</button>');
+  // Bỏ qua danh hiệu lạ nếu server và giao diện lệch phiên bản, tránh lỗi làm hỏng cả màn.
+  const awards = (g.summary.awards || []).filter((a) => AWARD_INFO[a.id]);
   const mine = awards.filter((a) => a.ranks.some((r) => r.players.includes(ME))).length;
   return `${resultHeaderHTML(g, won)}
     <div class="aw-bar"><span>Bạn lên bục <b>${mine}</b>/${awards.length} danh hiệu</span>
@@ -1239,7 +1273,8 @@ function resultAwardsHTML(g, won) {
 }
 
 function resultStatsHTML(g, won) {
-  const sum = g.summary || { stats: [], turns: 0 };
+  if (!g.summary) return resultMissingSummaryHTML(g, won, ['awards', 'Danh hiệu'], resultFinalButtonsHTML());
+  const sum = g.summary;
   const byName = Object.fromEntries(sum.stats.map((s) => [s.name, s]));
   const rows = [...g.players].sort((a, b) => b.winner - a.winner);
   const best = Object.fromEntries(STAT_COLUMNS.map(([k]) => [k, Math.max(0, ...sum.stats.map((s) => s[k]))]));
@@ -1262,8 +1297,7 @@ function resultStatsHTML(g, won) {
       <tbody>${body}</tbody></table></div>
       <div class="st-note">Ô tô vàng = cao nhất ván · Rút kiểm tra = số lần thành công / số lần rút (Barrel, Jail, Dynamite)</div></div>
     <div class="result-foot"><button type="button" class="btn ghost" data-step="awards">← Danh hiệu</button><span></span>
-      <button type="button" class="btn ghost" data-close>Xem bàn chơi</button>
-      ${ROOM.host === ME ? '<button type="button" class="result-continue small" data-reset><span aria-hidden="true">🔁</span> Về phòng chờ</button>' : '<span class="st-wait">Chờ chủ phòng mở ván mới…</span>'}</div>`;
+      ${resultFinalButtonsHTML()}</div>`;
 }
 
 function resultMainHTML(g, won, team) {
