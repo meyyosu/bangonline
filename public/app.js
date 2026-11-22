@@ -293,12 +293,15 @@ function showLobby() {
   app.innerHTML = `
     <div class="lobby">
       <div class="panel">
+        ${META.rulesPreview ? '<p><b>Bản thử cơ chế</b></p>' : ''}
         <h2>Tạo phòng</h2>
         <form id="createForm">
           <label>Tên phòng</label><input type="text" name="name" placeholder="Phòng của ${esc(ME)}" maxlength="40">
           <label for="createPassword">Mật khẩu phòng (không bắt buộc)</label><input id="createPassword" type="password" name="password" maxlength="64" autocomplete="new-password">
           ${characterFields()}
           ${timerField()}
+          <label><input type="checkbox" name="dodgeCity" aria-describedby="dodgeCityDetails" ${META.greenCardCount ? '' : 'disabled'}> Bản mở rộng: Dodge City</label>
+          <p class="muted" id="dodgeCityDetails">${META.greenCardCount ? `Thêm ${META.greenCardCount} lá viền xanh lá vào bộ bài của phòng.` : 'Máy chủ chưa nạp dữ liệu lá viền xanh lá.'}</p>
           <button class="btn" style="width:100%;margin-top:10px">🎲 Tạo phòng mới</button>
         </form>
         <h2 style="margin-top:22px">Vào bằng mã</h2>
@@ -316,7 +319,7 @@ function showLobby() {
   $('#createForm').onsubmit = run(async (e) => {
     e.preventDefault();
     const f = new FormData(e.target);
-    const r = await api('/api/rooms', { name: f.get('name'), password: f.get('password'), turnSeconds: Number(f.get('turnSeconds')), characterChoices: Number(f.get('characterChoices')), characterSeconds: Number(f.get('characterSeconds')) });
+    const r = await api('/api/rooms', { name: f.get('name'), password: f.get('password'), turnSeconds: Number(f.get('turnSeconds')), characterChoices: Number(f.get('characterChoices')), characterSeconds: Number(f.get('characterSeconds')), dodgeCity: f.has('dodgeCity') });
     enterRoom(r.code);
   });
   $('#joinForm').onsubmit = run(async (e) => {
@@ -334,7 +337,7 @@ function showLobby() {
     list.innerHTML = d.rooms.map((r) => `
       <div class="room-item">
         <div>
-          <div><b>${esc(r.name)}</b> <span class="code">${r.code}</span> ${r.hasPassword ? '🔒' : ''}</div>
+          <div><b>${esc(r.name)}</b> <span class="code">${r.code}</span> ${r.hasPassword ? '🔒' : ''} ${r.dodgeCity ? '· Dodge City' : ''}</div>
           <div class="muted">Chủ phòng: ${esc(r.host)} · ${r.players.length}/7 người · ${r.turnSeconds ? r.turnSeconds + ' giây/lượt' : 'Không giới hạn giờ'}</div>
         </div>
         <div class="row">
@@ -359,7 +362,7 @@ function enterRoom(code) {
   app.innerHTML = `
     <div class="room">
       <div class="room-head">
-        <div class="row"><h2 id="roomName"></h2><span class="code">${code}</span>
+        <div class="row"><h2 id="roomName"></h2><span class="code">${code}</span>${META.rulesPreview ? '<span>Bản thử cơ chế</span>' : ''}
           <button class="btn ghost small" id="copyLink">📋 Copy link mời</button>${settingsMenuHTML()}</div>
         <div class="row" id="roomBtns"></div>
       </div>
@@ -481,6 +484,7 @@ function renderWaiting() {
       </ul>
       <div class="room-settings">
         <h3>Cài đặt phòng</h3>
+        ${r.dodgeCity ? '<p>Bản mở rộng: Dodge City</p>' : ''}
         <p>${r.hasPassword ? '🔒 Có mật khẩu' : '🔓 Không có mật khẩu'} · ${r.turnSeconds ? r.turnSeconds + ' giây/lượt' : 'Không giới hạn thời gian'}</p>
         <p>Chọn 1 trong ${r.characterChoices} nhân vật · ${r.characterSeconds ? r.characterSeconds + ' giây/người để chọn' : 'Không giới hạn giờ chọn nhân vật'}</p>
         ${isHost ? `<form id="settingsForm">
@@ -544,7 +548,8 @@ function updateClock() {
   });
   if (p && pauseSeconds === 0) { ui.pauseNotification?.close(); ui.pauseNotification = null; }
   document.querySelectorAll('[data-draw-clock]').forEach((el) => { el.textContent = p?.frozen ? 'Đang tạm dừng' : `${seconds} giây`; });
-  const drawLabel = g?.pending?.type === 'blackJack' ? 'Black Jack lật bài' : g?.pending?.type === 'kit' ? 'Chọn 2 lá' : `Rút bài (tự động sau ${t?.seconds || 5} giây)`;
+  const drawLabels = { blackJack: 'Black Jack lật bài', kit: 'Chọn 2 lá', copyAbility: 'Chọn kỹ năng' };
+  const drawLabel = drawLabels[g?.pending?.type] || `Rút bài (tự động sau ${t?.seconds || 5} giây)`;
   const text = p?.frozen ? '⏸ Ván chơi tạm dừng · Đồng hồ lượt được giữ nguyên' : t ? `⏱ ${name} · ${t.character ? 'Chọn nhân vật' : t.draw ? drawLabel : t.response ? 'Phản hồi' : 'Lượt chơi'}: ${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`
     : `⏱ ${g?.phase === 'character' ? 'Chọn nhân vật' : 'Lượt chơi'}: không giới hạn`;
   document.querySelectorAll('[data-room-clock]').forEach((el) => {
@@ -575,11 +580,15 @@ function discardStackHTML(g) {
 }
 // Thẻ trang bị vuông: màu theo loại, huy hiệu góc = tầm bắn (súng) hoặc ±khoảng cách (ngựa/ống ngắm)
 const EQ_KIND = { Mustang: ['horse', '+1'], Scope: ['horse', '−1'], Jail: ['jail', ''], Dynamite: ['dyn', ''] };
-function eqTileHTML(c, extra = '') {
+function eqTileHTML(c, extra = '', owner = null) {
   const info = cardInfo(c);
-  const [kind, badge] = info.type === 'gun' ? ['gun', String(info.range)] : (EQ_KIND[c.name] || ['', '']);
-  return `<div class="eqt ${kind} ${extra}" data-eq="${c.id}" ${tooltipAttrs(c.name, info.desc)}>
-    <span class="ic">${info.icon}</span><span class="nm">${esc(c.name)}</span>${badge ? `<span class="bd">${badge}</span>` : ''}</div>`;
+  const [kind, badge] = info.type === 'green' ? ['green', c.ready ? '✓' : '⏳']
+    : info.type === 'gun' ? ['gun', String(info.range)] : (EQ_KIND[c.name] || ['', '']);
+  const tag = owner === null ? 'div' : 'button';
+  const action = owner === null ? '' : `type="button" data-act="patDraw" data-owner="${esc(owner)}" aria-label="Lấy ${esc(c.name)} của ${esc(owner)}"`;
+  const desc = c.disabled ? `${info.desc} Đang bị Belle Star vô hiệu hóa.` : info.desc;
+  return `<${tag} class="eqt ${kind} ${extra}${c.disabled ? ' inactive' : ''}" ${action} data-eq="${c.id}" ${tooltipAttrs(c.name, desc)}>
+    <span class="ic">${info.icon}</span><span class="nm">${esc(c.name)}</span>${badge ? `<span class="bd">${badge}</span>` : ''}</${tag}>`;
 }
 // Thanh máu bằng viên đạn: đạn đồng = máu còn, vỏ đạn xám = máu đã mất
 function bulletSVG(full, h) {
@@ -673,8 +682,13 @@ function jailBarsHTML(p) {
   return `<div class="jail-bars ${slam ? 'slam' : ''}" aria-hidden="true"></div>`;
 }
 
+const abilityOf = (p) => p.ability ?? p.char;
+const discardExcess = (g, p) => g.me.hand.length - (g.me.handLimit ?? p.hp);
+const docTarget = (p, g) => p.alive && p.name !== ME && p.distance <= g.me.range;
+const blueCard = (c) => ['blue', 'gun'].includes(cardInfo(c).type);
+
 function effectiveName(c, me) {
-  if (me.char === 'Calamity Janet' && c.name === 'Missed') return 'Bang';
+  if (abilityOf(me) === 'Calamity Janet' && c.name === 'Missed') return 'Bang';
   return c.name;
 }
 
@@ -682,14 +696,26 @@ function effectiveName(c, me) {
 function targetFilter(card, g, meP) {
   const name = effectiveName(card, meP);
   const others = (p) => p.alive && p.name !== ME;
-  switch (name) {
+  const info = cardInfo(card);
+  switch (card.ready ? info.effect : name) {
     case 'Bang': return (p) => others(p) && p.distance <= g.me.range;
+    case 'attack': {
+      const range = info.maxDistance === 'weapon' ? g.me.range : (info.maxDistance ?? Infinity);
+      return (p) => others(p) && p.distance <= range;
+    }
+    case 'take':
+    case 'discard': return (p) => others(p) && p.distance <= (info.maxDistance ?? Infinity) && (p.handCount > 0 || p.eq.length > 0);
     case 'Panic': return (p) => others(p) && p.distance <= 1 && (p.handCount > 0 || p.eq.length > 0);
     case 'Cat Balou': return (p) => others(p) && (p.handCount > 0 || p.eq.length > 0);
     case 'Duel': return others;
     case 'Jail': return (p) => others(p) && p.role !== 'Sheriff' && !p.eq.some((c) => c.name === 'Jail');
     default: return null;
   }
+}
+
+function targetingCard(g, meP) {
+  const cards = ui.mode.activate ? meP.eq : g.me.hand;
+  return cards.find((c) => c.id === ui.mode.cardId);
 }
 
 // ---------- chọn nhân vật (trước khi vào trận) ----------
@@ -752,13 +778,15 @@ function renderGame() {
   const myTurn = g.turn === meIdx && !g.winner;
   const myPrompt = pend && pend.player === meIdx;
   const canPlay = myTurn && !pend && g.phase === 'play' && meP.alive;
+  const patDraw = myPrompt && pend.type === 'draw' && pend.options.includes('equipment');
 
   // validate mode
   if (ui.mode?.kind === 'target' && !canPlay) ui.mode = null;
   if (ui.mode && ui.mode.kind !== 'target') {
     const hand = g.me.hand.map((c) => c.id);
-    if (ui.mode.kind === 'discard' && (!canPlay || g.me.hand.length <= meP.hp)) ui.mode = null;
-    if (ui.mode?.kind === 'sid' && (!meP.alive || meP.hp >= meP.maxHp)) ui.mode = null;
+    if (ui.mode.kind === 'discard' && (!canPlay || discardExcess(g, meP) <= 0)) ui.mode = null;
+    if (ui.mode?.kind === 'sid' && (!meP.alive || meP.hp >= meP.maxHp || abilityOf(meP) !== 'Sid Ketchum')) ui.mode = null;
+    if (ui.mode?.kind === 'skill' && (!canPlay || g.me.activeSkill !== ui.mode.skill)) ui.mode = null;
     if (ui.mode && ui.mode.kind !== 'kit') ui.selected = ui.selected.filter((id) => hand.includes(id));
     if (ui.mode?.kind === 'kit' && !(myPrompt && pend.type === 'kit')) ui.mode = null;
   }
@@ -767,13 +795,14 @@ function renderGame() {
 
   let tfilter = null;
   if (ui.mode?.kind === 'target') {
-    const card = g.me.hand.find((c) => c.id === ui.mode.cardId);
+    const card = targetingCard(g, meP);
     tfilter = card ? targetFilter(card, g, meP) : null;
-    if (!tfilter) ui.mode = null;
+    if (!tfilter || !g.players.some(tfilter)) { ui.mode = null; tfilter = null; }
   }
   if (myPrompt && pend.type === 'draw' && pend.options.includes('player')) {
     tfilter = (p) => p.alive && p.name !== ME && p.handCount > 0;
   }
+  if (ui.mode?.kind === 'skill' && ui.mode.skill === 'Doc Holyday' && ui.selected.length === 2) tfilter = (p) => docTarget(p, g);
 
   // Ghế quanh bàn tròn: mình ở đáy bàn, người sau mình ngồi bên trái, cứ thế theo chiều kim đồng hồ
   const n = g.players.length;
@@ -802,14 +831,14 @@ function renderGame() {
     const dist = isMe || p.distance == null ? ''
       : `<span class="dist ${inRange ? 'in' : ''}" ${tooltipAttrs('Khoảng cách từ bạn', 'Khoảng cách để kiểm tra mục tiêu có nằm trong tầm của thẻ bài hay không.' + (inRange ? ' Trong tầm bắn.' : ''))}>${p.alive ? 'cách ' + p.distance : '☠️'}</span>`;
     const checking = pend?.type === 'check' && pend.player === i ? pend.kind : null;
-    const frame = p.eq.length ? `<div class="eqframe">${p.eq.map((c) => eqTileHTML(c, c.name === checking ? 'checking' : '')).join('')}</div>` : '';
+    const frame = p.eq.length ? `<div class="eqframe">${p.eq.map((c) => eqTileHTML(c, c.name === checking ? 'checking' : '', patDraw && p.alive ? p.name : null)).join('')}</div>` : '';
     return `<div class="player ${cls}" data-player="${esc(p.name)}" style="left:${x.toFixed(2)}%;top:${y.toFixed(2)}%">
       ${frame}${dist}
       <div class="av">${playerAvatarHTML(p)}${jailBarsHTML(p)}
         ${handFanHTML(p.handCount)}${roleBadge(p)}</div>
       <div class="plate"><span class="dot ${ROOM.online.includes(p.name) ? 'on' : ''}"></span>${g.turn === i && !g.winner ? '⭐ ' : ''}${esc(p.name)}${isMe ? ' (bạn)' : ''}</div>
       ${hpBarHTML(p)}
-      <span class="pchar" ${tooltipAttrs(p.char, ch.desc)}>${esc(p.char)}</span>
+      <span class="pchar" ${tooltipAttrs(p.char, ch.desc)}>${esc(p.char)}${p.char === 'Vera Custer' && p.ability ? ` · ${esc(p.ability)}` : ''}</span>
     </div>`;
   }).join('');
 
@@ -837,7 +866,7 @@ function renderGame() {
         <div class="me-head">
           <div class="idcard" ${tooltipAttrs(ROLE_VI[meP.role], role.goal)}><span class="role ${meP.role}" style="margin:0">${ROLE_VI[meP.role]}</span> <b>Vai trò của bạn (bí mật)</b>
             <div style="margin-top:4px">${esc(role.goal)}</div></div>
-          <div class="idcard" ${tooltipAttrs(meP.char, ch.desc)}><b>${esc(meP.char)}</b> — ${esc(ch.desc)}</div>
+          <div class="idcard" ${tooltipAttrs(meP.char, ch.desc)}><b>${esc(meP.char)}</b> — ${esc(ch.desc)}${meP.char === 'Vera Custer' && meP.ability ? `<div>Kỹ năng hiện tại: <b>${esc(meP.ability)}</b> — ${esc(META.chars[meP.ability].desc)}</div>` : ''}</div>
           <div class="idcard"><div class="mehp">${hpBarHTML(meP, 26)}</div>
             <div class="muted">Tầm bắn: ${g.me.range}${g.me.unlimitedBang ? ' · Bang! không giới hạn' : ''}${meP.jailed ? ' · ⛓️ Đang bị giam' : ''}</div></div>
           <div class="idcard myeq"><b>Trang bị</b>
@@ -1007,10 +1036,11 @@ function isClickable(c, g, meP) {
   const pend = g.pending;
   if (!meP.alive || g.winner) return false;
   if (ui.mode && ['discard', 'sid'].includes(ui.mode.kind)) return true;
+  if (ui.mode?.kind === 'skill') return ui.mode.skill === 'Doc Holyday' || blueCard(c);
   if (pend && pend.player === g.me.index) {
     const n = c.name;
-    if (pend.type === 'bang') return n === 'Missed' || (n === 'Bang' && meP.char === 'Calamity Janet');
-    if (pend.type === 'indians' || pend.type === 'duel') return n === 'Bang' || (n === 'Missed' && meP.char === 'Calamity Janet');
+    if (pend.type === 'bang') return pend.responseCardIds?.includes(c.id) ?? (n === 'Missed' || (n === 'Bang' && abilityOf(meP) === 'Calamity Janet'));
+    if (pend.type === 'indians' || pend.type === 'duel') return n === 'Bang' || (n === 'Missed' && abilityOf(meP) === 'Calamity Janet');
     return false;
   }
   if (g.turn !== g.me.index || pend || g.phase !== 'play') return false;
@@ -1018,7 +1048,7 @@ function isClickable(c, g, meP) {
   if (name === 'Missed') return false;
   if (name === 'Bang' && g.bangsPlayed >= 1 && !g.me.unlimitedBang) return false;
   if (name === 'Beer' && (meP.hp >= meP.maxHp || g.players.filter((p) => p.alive).length <= 2)) return false;
-  if (['Barrel', 'Mustang', 'Scope', 'Dynamite'].includes(c.name) && meP.eq.some((e) => e.name === c.name)) return false;
+  if ((cardInfo(c).type === 'green' || ['Barrel', 'Mustang', 'Scope', 'Dynamite'].includes(c.name)) && meP.eq.some((e) => e.name === c.name)) return false;
   const tf = targetFilter(c, g, meP);
   if (tf && !g.players.some(tf)) return false;
   return true;
@@ -1029,12 +1059,12 @@ function promptHTML(g, meIdx, meP) {
   const P = (i) => `<b>${esc(g.players[i].name)}</b>`;
   if (g.winner) return '<h4>Ván đấu đã kết thúc.</h4><div class="muted">Xem kết quả ở trên.</div>';
   if (ui.mode?.kind === 'target') {
-    const c = g.me.hand.find((x) => x.id === ui.mode.cardId);
+    const c = targetingCard(g, meP);
     return `<h4>🎯 Chọn mục tiêu cho ${esc(c?.name)}</h4><div class="muted">Bấm vào người chơi có viền vàng nhấp nháy.</div>
       <div class="row"><button class="btn secondary small" data-act="cancel">Huỷ</button></div>`;
   }
   if (ui.mode?.kind === 'discard') {
-    const ex = g.me.hand.length - meP.hp;
+    const ex = discardExcess(g, meP);
     return `<h4>🗑️ Chọn ${ex} lá để bỏ</h4><div class="muted">Đã chọn ${ui.selected.length}/${ex}.</div>
       <div class="row"><button class="btn" data-act="confirmDiscard" ${ui.selected.length ? '' : 'disabled'}>Bỏ các lá đã chọn</button>
       <button class="btn secondary small" data-act="cancel">Huỷ</button></div>`;
@@ -1042,6 +1072,14 @@ function promptHTML(g, meIdx, meP) {
   if (ui.mode?.kind === 'sid') {
     return `<h4>Sid Ketchum: chọn 2 lá để bỏ và hồi 1 máu</h4><div class="muted">Đã chọn ${ui.selected.length}/2.</div>
       <div class="row"><button class="btn" data-act="confirmSid" ${ui.selected.length === 2 ? '' : 'disabled'}>Xác nhận</button>
+      <button class="btn secondary small" data-act="cancel">Huỷ</button></div>`;
+  }
+  if (ui.mode?.kind === 'skill') {
+    const doc = ui.mode.skill === 'Doc Holyday';
+    const ready = ui.selected.length === (doc ? 2 : 1);
+    const step = doc ? (ready ? 'Chọn người chơi đang sáng để bắn' : `Chọn 2 lá để bỏ (${ui.selected.length}/2)`) : 'Chọn 1 lá viền xanh dương để bỏ';
+    return `<h4>${esc(ui.mode.skill)} · ${step}</h4><div class="row">
+      ${!doc && ready ? '<button class="btn" data-act="confirmSkill">Bỏ lá và rút 2 lá</button>' : ''}
       <button class="btn secondary small" data-act="cancel">Huỷ</button></div>`;
   }
   if (!pend) {
@@ -1053,12 +1091,17 @@ function promptHTML(g, meIdx, meP) {
   }
   const mine = pend.player === meIdx;
   switch (pend.type) {
+    case 'copyAbility':
+      if (!mine) return `<h4>${P(pend.player)} đang chọn kỹ năng để sao chép…</h4>`;
+      return `<h4>Vera Custer · Chọn kỹ năng để sao chép</h4><div class="row">
+        ${g.players.filter((p, i) => p.alive && i !== meIdx).map((p) => `<button class="btn small" data-act="copyAbility" data-owner="${esc(p.name)}" ${tooltipAttrs(p.char, META.chars[p.char].desc)}>${esc(p.char)} · ${esc(p.name)}</button>`).join('')}</div>`;
     case 'bang': {
       const left = pend.need - pend.got;
       if (!mine) return `<h4>💥 ${P(pend.source)} bắn ${P(pend.player)}!</h4><div class="muted">Đang chờ ${P(pend.player)} phản ứng…</div>`;
       return `<h4>💥 ${P(pend.source)} bắn bạn!</h4>
-        <div>Cần thêm <b>${left}</b> Missed! để né${pend.need > 1 ? ' (Slab the Killer)' : ''}. Bấm lá Missed! trên tay${meP.char === 'Calamity Janet' ? ' (hoặc Bang!)' : ''}.</div>
+        <div>Cần né thêm <b>${left}</b> lần${pend.need > 1 ? ' (Slab the Killer)' : ''}. Chọn lá đang sáng hoặc trang bị có thể dùng.</div>
         <div class="row">${pend.barrels > 0 ? `<button class="btn blue" data-act="barrel">🛢️ Dùng Barrel (${pend.barrels})</button>` : ''}
+        ${meP.eq.filter((c) => pend.responseCardIds?.includes(c.id)).map((c) => `<button class="btn green" data-act="respondEquipment" data-eqid="${c.id}">Dùng ${esc(c.name)}</button>`).join('')}
         <button class="btn secondary" data-act="take">Chịu mất 1 máu</button></div>`;
     }
     case 'indians':
@@ -1074,7 +1117,7 @@ function promptHTML(g, meIdx, meP) {
         <div class="row" id="storeCards">${pend.cards.map((c) => cardHTML(c, 'small ' + (mine ? 'playable' : ''))).join('')}</div>`;
     case 'check': {
       const ci = CHECK_INFO[pend.kind] || CHECK_INFO.Barrel;
-      const luck = g.players[pend.player].char === 'Lucky Duke' ? ' (Lucky Duke lật 2 lá, lấy lá có lợi)' : '';
+      const luck = abilityOf(g.players[pend.player]) === 'Lucky Duke' ? ' (Lucky Duke lật 2 lá, lấy lá có lợi)' : '';
       if (!mine) return `<h4>${ci.icon} ${P(pend.player)} đang rút kiểm tra ${esc(pend.kind)}…</h4><div class="muted">${ci.need}${luck}.</div>`;
       return `<h4>${ci.icon} Rút kiểm tra ${esc(pend.kind)}</h4><div>${ci.need}${luck}. Bấm vào <b>chồng bài đang sáng</b> để rút.</div>
         <div class="row"><button class="btn" data-act="checkDraw">🃏 Rút bài</button></div>`;
@@ -1086,9 +1129,10 @@ function promptHTML(g, meIdx, meP) {
       return `<h4>Black Jack đang lật lá thứ hai trong 3 giây</h4><p>${pend.red ? 'Lá Cơ hoặc Rô: sẽ rút thêm 1 lá sau khi thu lá này về tay.' : 'Lá Bích hoặc Chuồn: thu lá này về tay rồi bắt đầu lượt.'}</p>`;
     case 'draw': {
       if (!mine) return `<h4>${P(pend.player)} đang chọn cách rút bài…</h4>`;
-      const seconds = ['Jesse Jones', 'Pedro Ramirez'].includes(meP.char) ? 20 : 5;
+      const seconds = ['Jesse Jones', 'Pedro Ramirez', 'Pat Brennan'].includes(abilityOf(meP)) ? 20 : 5;
       const source = pend.options.includes('player') ? ' Hoặc bấm trực tiếp người chơi có bài đang sáng để lấy 1 lá từ tay họ và rút thêm 1 lá.'
-        : pend.options.includes('discard') ? ' Hoặc bấm trực tiếp chồng bài bỏ đang sáng để lấy lá trên cùng và rút thêm 1 lá.' : '';
+        : pend.options.includes('discard') ? ' Hoặc bấm trực tiếp chồng bài bỏ đang sáng để lấy lá trên cùng và rút thêm 1 lá.'
+          : pend.options.includes('equipment') ? ' Hoặc bấm một lá trang bị đang sáng trên bàn để lấy vào tay.' : '';
       return `<h4>Rút bài đầu lượt</h4><p>Bấm chồng bài để rút.${source} Sau ${seconds} giây sẽ tự rút. Đồng hồ lượt bắt đầu khi rút xong.</p>`;
     }
   }
@@ -1099,12 +1143,23 @@ function actionsHTML(g, meP, canPlay) {
   if (!meP.alive || g.winner) return '';
   const out = [];
   if (canPlay && !ui.mode) {
-    const excess = g.me.hand.length - meP.hp;
+    for (const c of meP.eq) {
+      if (!c.ready || !cardInfo(c).activate) continue;
+      if (cardInfo(c).effect === 'heal' && meP.hp >= meP.maxHp) continue;
+      const filter = targetFilter(c, g, meP);
+      if (filter && !g.players.some(filter)) continue;
+      out.push(`<button class="btn green" data-act="activate" data-eqid="${c.id}">Dùng ${esc(c.name)}</button>`);
+    }
+    if (g.me.activeSkill && (g.me.activeSkill !== 'Doc Holyday' || g.players.some((p) => docTarget(p, g)))) {
+      const label = g.me.activeSkill === 'Chuck Wengam' ? 'Trả 1 máu để rút 2 lá' : `Dùng kỹ năng ${g.me.activeSkill}`;
+      out.push(`<button class="btn blue" data-act="skill">${esc(label)}</button>`);
+    }
+    const excess = discardExcess(g, meP);
     if (excess > 0) out.push(`<button class="btn" data-act="discardMode">🗑️ Bỏ bớt ${excess} lá rồi kết thúc</button>`);
     else out.push('<button class="btn green" data-act="endTurn">✅ Kết thúc lượt</button>');
   }
-  if (meP.char === 'Sid Ketchum' && meP.hp < meP.maxHp && g.me.hand.length >= 2 && !ui.mode) out.push('<button class="btn blue" data-act="sidMode">Dùng kỹ năng Sid (bỏ 2 lá, +1 máu)</button>');
-  out.push(`<span class="muted">Máu ${meP.hp}/${meP.maxHp} · ${g.me.hand.length} lá trên tay (tối đa giữ ${meP.hp} lá khi hết lượt)</span>`);
+  if (abilityOf(meP) === 'Sid Ketchum' && meP.hp < meP.maxHp && g.me.hand.length >= 2 && !ui.mode) out.push('<button class="btn blue" data-act="sidMode">Dùng kỹ năng Sid (bỏ 2 lá, +1 máu)</button>');
+  out.push(`<span class="muted">Máu ${meP.hp}/${meP.maxHp} · ${g.me.hand.length} lá trên tay (tối đa giữ ${g.me.handLimit ?? meP.hp} lá khi hết lượt)</span>`);
   return out.join('');
 }
 
@@ -1196,7 +1251,7 @@ function showPlayedCards(g, previous, handOrigins = {}) {
 
 function animatePlayedCard(card, origin, action, player) {
   if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
-  const equipment = action.kind !== 'discard' && ['blue', 'gun'].includes(cardInfo(card).type);
+  const equipment = action.kind !== 'discard' && ['blue', 'gun', 'green'].includes(cardInfo(card).type);
   const recipient = card.name === 'Jail' ? action.target : player;
   const seat = [...document.querySelectorAll('.player[data-player]')].find((el) => el.dataset.player === recipient);
   const target = equipment ? seat?.querySelector(`[data-eq="${card.id}"]`) || seat?.querySelector('.eqframe') || seat?.querySelector('.av')
@@ -1229,14 +1284,16 @@ function bindGame(g, meIdx, meP, canPlay, myPrompt) {
   main.querySelectorAll('#hand .card').forEach((el) => el.onclick = run(async () => {
     const id = Number(el.dataset.card);
     const c = g.me.hand.find((x) => x.id === id);
-    if (ui.mode && ['discard', 'sid'].includes(ui.mode.kind)) {
-      const max = ui.mode.kind === 'sid' ? 2 : g.me.hand.length - meP.hp;
+    if (ui.mode && ['discard', 'sid', 'skill'].includes(ui.mode.kind)) {
+      if (!isClickable(c, g, meP)) return;
+      const max = ui.mode.kind === 'discard' ? discardExcess(g, meP) : ui.mode.skill === 'José Delgado' ? 1 : 2;
       if (ui.selected.includes(id)) ui.selected = ui.selected.filter((x) => x !== id);
       else if (ui.selected.length < max) ui.selected.push(id);
+      else if (max === 1 && ui.mode.skill === 'José Delgado') ui.selected = [id];
       return renderGame();
     }
     if (myPrompt && ['bang', 'indians', 'duel'].includes(pend.type)) {
-      if (!isClickable(c, g, meP)) return toast(pend.type === 'bang' ? 'Cần lá Missed! để né.' : 'Cần lá Bang!.');
+      if (!isClickable(c, g, meP)) return toast(pend.type === 'bang' ? 'Lá này không thể dùng để né đòn.' : 'Cần lá Bang!.');
       return sendAction({ type: 'respond', cardId: id });
     }
     if (!canPlay) return toast(myPrompt ? 'Hãy xử lý yêu cầu ở giữa bàn trước.' : 'Chưa đến lượt bạn.');
@@ -1259,18 +1316,26 @@ function bindGame(g, meIdx, meP, canPlay, myPrompt) {
       if (!target?.alive || target.name === ME || !target.handCount) return;
       return sendAction({ type: 'drawChoice', from: 'player', target: target.name });
     }
+    if (ui.mode?.kind === 'skill' && ui.mode.skill === 'Doc Holyday' && ui.selected.length === 2) {
+      const target = g.players.find((p) => p.name === el.dataset.player);
+      if (!docTarget(target, g)) return;
+      const cardIds = ui.selected;
+      ui.mode = null; ui.selected = [];
+      return sendAction({ type: 'skill', cardIds, target: target.name });
+    }
     if (ui.mode?.kind !== 'target') return;
     const p = g.players.find((x) => x.name === el.dataset.player);
-    const card = g.me.hand.find((x) => x.id === ui.mode.cardId);
-    const tf = targetFilter(card, g, meP);
+    const card = targetingCard(g, meP);
+    const tf = card && targetFilter(card, g, meP);
     if (!tf || !tf(p)) return toast('Không chọn được người này.');
     const nm = effectiveName(card, meP);
-    if (nm === 'Panic' || nm === 'Cat Balou') {
-      if (!p.eq.length) { ui.mode = null; return sendAction({ type: 'play', cardId: card.id, target: p.name, targetCard: 'hand' }); }
-      return chooseTargetCard(card, p);
+    const type = ui.mode.activate ? 'activate' : 'play';
+    if (nm === 'Panic' || nm === 'Cat Balou' || ['take', 'discard'].includes(cardInfo(card).effect)) {
+      if (!p.eq.length) { ui.mode = null; return sendAction({ type, cardId: card.id, target: p.name, targetCard: 'hand' }); }
+      return chooseTargetCard(card, p, type);
     }
     ui.mode = null;
-    await sendAction({ type: 'play', cardId: card.id, target: p.name });
+    await sendAction({ type, cardId: card.id, target: p.name });
   }));
 
   const deckEl = main.querySelector('#deck.ready');
@@ -1293,16 +1358,29 @@ function bindGame(g, meIdx, meP, canPlay, myPrompt) {
     renderGame();
   });
 
-  main.querySelectorAll('[data-act]').forEach((el) => el.onclick = run(async () => {
+  main.querySelectorAll('[data-act]').forEach((el) => el.onclick = run(async (event) => {
     const act = el.dataset.act;
     if (act === 'cancel') { ui.mode = null; ui.selected = []; return renderGame(); }
     if (act === 'discardMode') { ui.mode = { kind: 'discard' }; ui.selected = []; return renderGame(); }
     if (act === 'sidMode') { ui.mode = { kind: 'sid' }; ui.selected = []; return renderGame(); }
+    if (act === 'skill') {
+      if (g.me.activeSkill === 'Chuck Wengam') return sendAction({ type: 'skill' });
+      ui.mode = { kind: 'skill', skill: g.me.activeSkill }; ui.selected = [];
+      return renderGame();
+    }
+    if (act === 'confirmSkill') {
+      const cardIds = ui.selected; ui.mode = null; ui.selected = [];
+      return sendAction({ type: 'skill', cardIds });
+    }
+    if (act === 'copyAbility') return sendAction({ type: 'copyAbility', target: el.dataset.owner });
+    if (act === 'patDraw') {
+      event.stopPropagation();
+      return sendAction({ type: 'drawChoice', from: 'equipment', target: el.dataset.owner, cardId: Number(el.dataset.eq) });
+    }
     if (act === 'confirmDiscard') {
       const ids = ui.selected; ui.mode = null; ui.selected = [];
       await sendAction({ type: 'discard', cardIds: ids });
-      const hp = meP.hp;
-      if (g.me.hand.length - ids.length <= hp) await sendAction({ type: 'endTurn' });
+      if (discardExcess(g, meP) <= ids.length) await sendAction({ type: 'endTurn' });
       return;
     }
     if (act === 'confirmSid') { const ids = ui.selected; ui.mode = null; ui.selected = []; return sendAction({ type: 'sid', cardIds: ids }); }
@@ -1310,17 +1388,30 @@ function bindGame(g, meIdx, meP, canPlay, myPrompt) {
     if (act === 'endTurn') return sendAction({ type: 'endTurn' });
     if (act === 'take') return sendAction({ type: 'take' });
     if (act === 'barrel') return sendAction({ type: 'barrel' });
+    if (act === 'respondEquipment') return sendAction({ type: 'respond', cardId: Number(el.dataset.eqid) });
+    if (act === 'activate') {
+      const cardId = Number(el.dataset.eqid);
+      const card = meP.eq.find((c) => c.id === cardId);
+      if (targetFilter(card, g, meP)) {
+        ui.mode = { kind: 'target', cardId, activate: true };
+        return renderGame();
+      }
+      return sendAction({ type: 'activate', cardId });
+    }
     if (act === 'checkDraw') return sendAction({ type: 'checkDraw' });
     if (act === 'draw') return sendAction({ type: 'drawChoice', from: el.dataset.from, target: $('#drawTarget')?.value });
   }));
 }
 
-function chooseTargetCard(card, p) {
+function chooseTargetCard(card, p, type) {
   const modal = $('#modal');
   modal.innerHTML = `<div class="panel"><h3>${esc(card.name)}: chọn lá của ${esc(p.name)}</h3>
     <div class="row">
       ${p.handCount ? `<button class="btn" data-tc="hand">🂠 1 lá ngẫu nhiên trên tay (${p.handCount})</button>` : ''}
-      ${p.eq.map((c) => `<button class="btn blue" data-tc="${c.id}" ${tooltipAttrs(c.name, cardInfo(c).desc)}>${cardInfo(c).icon} ${esc(c.name)}</button>`).join('')}
+      ${p.eq.map((c) => {
+        const info = cardInfo(c);
+        return `<button class="btn ${info.type === 'green' ? 'green' : 'blue'}" data-tc="${c.id}" ${tooltipAttrs(c.name, info.desc)}>${info.icon} ${esc(c.name)}</button>`;
+      }).join('')}
     </div>
     <div class="row" style="margin-top:14px"><button class="btn secondary small" data-tc="cancel">Huỷ</button></div></div>`;
   modal.classList.remove('hidden');
@@ -1328,7 +1419,7 @@ function chooseTargetCard(card, p) {
     modal.classList.add('hidden');
     if (b.dataset.tc === 'cancel') return;
     ui.mode = null;
-    await sendAction({ type: 'play', cardId: card.id, target: p.name, targetCard: b.dataset.tc === 'hand' ? 'hand' : Number(b.dataset.tc) });
+    await sendAction({ type, cardId: card.id, target: p.name, targetCard: b.dataset.tc === 'hand' ? 'hand' : Number(b.dataset.tc) });
   }));
 }
 

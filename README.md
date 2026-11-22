@@ -26,6 +26,36 @@ node server.js          # hoặc: npm start
 
 Mở http://localhost:3000. Đổi cổng bằng `PORT=8080 node server.js`.
 
+### Chạy bản thử cơ chế trên Windows
+
+Trong một cửa sổ PowerShell riêng tại thư mục dự án, chạy:
+
+```powershell
+$env:BANG_RULES_PREVIEW = '1'
+$env:PORT = '3001'
+$env:BANG_GREEN_CARDS_FILE = (Resolve-Path .\green-cards.json).Path
+node server.js
+```
+
+Mở [127.0.0.1:3001](http://127.0.0.1:3001) trên máy này và đăng ký tài khoản thử. Dùng bốn hồ sơ trình duyệt riêng để tạo và vào cùng một phòng. Có thể đặt số lựa chọn nhân vật thành **1** để vào ván ngay. Tài khoản và phiên đăng nhập của bản thử được lưu riêng.
+
+### Nạp bộ lá viền xanh lá
+
+Trước khi khởi động server, đặt `$env:BANG_GREEN_CARDS_FILE` thành đường dẫn tới `green-cards.json` hoặc tệp dữ liệu tương thích. Khi dữ liệu đã nạp, ô **Bản mở rộng: Dodge City** ở mục **Tạo phòng** có thể được chọn. Phòng bật bản mở rộng dùng 94 lá và danh sách 31 nhân vật. Phòng mặc định dùng 80 lá và 16 nhân vật.
+
+Tệp JSON là một mảng gồm 13 loại lá, tổng cộng 14 bản. Mỗi loại có `name` (tên riêng không trùng lá gốc), `effect` và `copies`. Mỗi phần tử trong `copies` có `suit` (`S`, `H`, `D` hoặc `C`) và `rank` (chuỗi từ `2` đến `10`, hoặc `J`, `Q`, `K`, `A`).
+
+| `effect` | Tham số có thể đặt |
+| --- | --- |
+| `draw` | `draw` từ 1 đến 3, mặc định 1 |
+| `dodge` | `draw` từ 0 đến 3, mặc định 0 |
+| `attack` | `maxDistance` giới hạn khoảng cách, hoặc `"weapon"` để dùng tầm súng. `draw` từ 0 đến 3, mặc định 0 |
+| `attackAll` | Tấn công lần lượt tất cả người khác |
+| `take`, `discard` | `maxDistance` giới hạn khoảng cách |
+| `heal` | `heal` từ 1 đến 2, mặc định 1 |
+
+Khi dùng khoảng cách cố định, `maxDistance` nhận giá trị từ 1 đến 7. Bỏ trường này để chọn mục tiêu ở mọi khoảng cách. Lá xanh lá sẵn sàng từ đầu lượt tiếp theo của người đặt, rồi được bỏ sau khi dùng.
+
 ## Chơi với bạn bè
 
 - **Cùng mạng Wi-Fi/LAN:** bạn bè mở `http://<IP-máy-bạn>:3000` (xem IP bằng `ipconfig` trên Windows hoặc `ifconfig`/`ip a` trên macOS/Linux).
