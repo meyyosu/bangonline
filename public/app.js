@@ -101,6 +101,7 @@ const run = (fn) => async (...a) => { try { await fn(...a); } catch (e) { toast(
 function closeStreams() {
   lobbyES?.close(); roomES?.close(); lobbyES = roomES = null;
   clearPauseUI();
+  clearMatchResult();
 }
 
 // ---------- tạm dừng và thông báo desktop ----------
@@ -451,8 +452,10 @@ function renderRoom() {
 
   $('#logPanel').style.display = g ? '' : 'none';
   renderPause();
+  if (!g?.winner) clearMatchResult();
   if (!g) return renderWaiting();
   renderGame();
+  renderMatchResult(g);
   updateClock();
 }
 
@@ -612,6 +615,13 @@ const CHAR_ICON = {
   'Jourdonnais': '👴', 'Kit Carlson': '🧓', 'Lucky Duke': '🍀', 'Paul Regret': '👨', 'Pedro Ramirez': '👱',
   'Rose Doolan': '🌹', 'Sid Ketchum': '👦', 'Slab the Killer': '😠', 'Suzy Lafayette': '🎀', 'Vulture Sam': '🦅', 'Willy the Kid': '🤠',
 };
+
+// Bàn chơi và màn hình kết quả dùng chung avatar theo nhân vật/trạng thái.
+function playerAvatarHTML(player) {
+  const icon = player.alive ? (CHAR_ICON[player.char] || '🤠') : '💀';
+  const label = `${player.char || 'Cao bồi'}${player.alive ? '' : ' · Đã bị hạ'}`;
+  return `<span class="character-avatar" role="img" aria-label="${esc(label)}">${icon}</span>`;
+}
 
 // ---------- cài đặt hiển thị (lưu trên máy từng người) ----------
 const EQ_SIZES = { sm: 'Nhỏ', md: 'Vừa', lg: 'To' };
@@ -795,7 +805,7 @@ function renderGame() {
     const frame = p.eq.length ? `<div class="eqframe">${p.eq.map((c) => eqTileHTML(c, c.name === checking ? 'checking' : '')).join('')}</div>` : '';
     return `<div class="player ${cls}" data-player="${esc(p.name)}" style="left:${x.toFixed(2)}%;top:${y.toFixed(2)}%">
       ${frame}${dist}
-      <div class="av">${p.alive ? (CHAR_ICON[p.char] || '🤠') : '💀'}${jailBarsHTML(p)}
+      <div class="av">${playerAvatarHTML(p)}${jailBarsHTML(p)}
         ${handFanHTML(p.handCount)}${roleBadge(p)}</div>
       <div class="plate"><span class="dot ${ROOM.online.includes(p.name) ? 'on' : ''}"></span>${g.turn === i && !g.winner ? '⭐ ' : ''}${esc(p.name)}${isMe ? ' (bạn)' : ''}</div>
       ${hpBarHTML(p)}
@@ -1105,6 +1115,58 @@ function winnerHTML(g) {
   return `<div class="panel winner-banner"><div style="font-size:40px">${iWon ? '🏆' : '💀'}</div>
     <h3>${names[g.winner]} chiến thắng!</h3><div>${winners}</div>
     <div class="muted" style="margin-top:6px">${iWon ? 'Chúc mừng, cao bồi!' : 'Lần sau may mắn hơn nhé.'} ${ROOM.host === ME ? 'Bấm “Về phòng chờ” để chơi ván mới.' : 'Chờ chủ phòng mở ván mới.'}</div></div>`;
+}
+
+// Kết quả dùng cờ winner do server tính, kể cả đồng đội đã bị loại.
+function clearMatchResult() {
+  $('#matchResult')?.remove();
+  document.body.classList.remove('match-result-open');
+  ui.resultDismissed = false;
+}
+
+function resultFaction(role) {
+  return role === 'Sheriff' || role === 'Deputy' ? 'law' : role;
+}
+
+
+function renderMatchResult(g) {
+  if (!g.winner || ui.resultDismissed || $('#matchResult')) return;
+  const me = g.players.find((p) => p.name === ME);
+  const won = !!me?.winner;
+  const team = g.players.filter((p) => me ? resultFaction(p.role) === resultFaction(me.role) : p.winner);
+  const names = { Sheriff: 'Sheriff & Deputy', Outlaw: 'Outlaw', Renegade: 'Renegade' };
+  // Đóng lựa chọn bài còn mở khi server vừa xác định thắng cuộc.
+  $('#modal').classList.add('hidden');
+  $('#modal').innerHTML = '';
+  const dialog = document.createElement('dialog');
+  dialog.id = 'matchResult';
+  dialog.className = `match-result ${won ? 'result-victory' : 'result-defeat'}`;
+  dialog.setAttribute('aria-labelledby', 'resultHeadline');
+  dialog.setAttribute('aria-describedby', 'resultSummary');
+  dialog.innerHTML = `<div class="result-frame">
+    <h2 id="resultHeadline" class="result-headline">${won ? 'CHIẾN THẮNG' : 'THUA CUỘC'}</h2>
+    <div class="result-emblem" aria-hidden="true"><span></span><img src="/result-revolvers.svg" alt=""><span></span></div>
+    <p id="resultSummary" class="result-summary">Phe ${names[g.winner]} chiến thắng!</p>
+    <div class="result-team">${team.map((p) => `<div class="result-member ${p.name === ME ? 'result-you' : ''}">
+      <div class="result-portrait"><div class="result-medallion"><div class="result-avatar role-${p.role.toLowerCase()}">
+        ${playerAvatarHTML(p)}${!p.alive ? '<div class="result-eliminated"><span>ĐÃ BỊ HẠ</span></div>' : ''}
+      </div></div><span class="result-role role-${p.role.toLowerCase()}">${esc(p.role)}</span></div>
+      <div class="result-player"><span title="${esc(p.name)}">${esc(p.name)}</span>${p.name === ME ? '<b>Bạn</b>' : ''}</div>
+      <div class="result-character">${esc(p.char)}</div>
+    </div>`).join('')}</div>
+    <button type="button" class="result-continue" autofocus><span aria-hidden="true">✺</span> Tiếp tục</button>
+  </div>`;
+  const dismiss = () => {
+    ui.resultDismissed = true;
+    dialog.remove();
+    document.body.classList.remove('match-result-open');
+    ($('#resetBtn') || $('#leaveBtn'))?.focus();
+  };
+  dialog.querySelector('.result-continue').onclick = dismiss;
+  dialog.oncancel = (event) => { event.preventDefault(); dismiss(); };
+  document.body.appendChild(dialog);
+  document.body.classList.add('match-result-open');
+  dialog.showModal();
 }
 
 const sendAction = (action) => api(`/api/rooms/${ROOM.code}/action`, { action });
