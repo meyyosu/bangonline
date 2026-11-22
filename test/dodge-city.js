@@ -255,6 +255,7 @@ test('Molly Stark gets no replacement until both dodges against Slab are resolve
     assert.equal(molly.hand.length, before, outcome);
     assert.ok(molly.hand.includes(onTop), outcome);
     assert.equal(molly.hp, outcome === 'take damage' ? hp - 1 : hp, outcome);
+    assert.equal(g.stats[g.idx(molly.name)].dodged, second || outcome === 'Barrel' ? 2 : 1, outcome);
     assertDeck(g);
   }
 });
@@ -298,6 +299,7 @@ test('Tequila Joe uses +2 Beer both normally and in lethal damage', () => {
   deal(g, p, 'Beer');
   g.damage(g.idx(p.name), 1, g.idx(adjacent.name));
   assert.equal(p.hp, 2);
+  assert.equal(g.stats[g.idx(p.name)].healed, 4);
   assertDeck(g);
 });
 

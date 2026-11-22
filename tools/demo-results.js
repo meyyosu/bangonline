@@ -12,6 +12,23 @@ const game = new Game(names);
 game.players.forEach((p, i) => { p.name = names[i]; p.role = roles[i]; p.char = chars[i]; });
 game.pending = null;
 game.phase = 'play';
+// Số liệu mẫu cho màn Danh hiệu / Thống kê (cố định để mỗi lần mở demo giống nhau)
+let seed = 42;
+const rnd = (n) => { seed = (seed * 1664525 + 1013904223) % 4294967296; return Math.floor((seed / 4294967296) * (n + 1)); };
+game.turnNumber = 31;
+game.startedAt = Date.now() - 38 * 60000;
+game.endedAt = Date.now();
+game.stats.forEach((s, i) => {
+  Object.assign(s, {
+    bangs: rnd(14), dealt: rnd(8), taken: 1 + rnd(5), kills: rnd(2), dodged: rnd(5), healed: rnd(4),
+    mass: rnd(3), equips: rnd(6), targeted: rnd(14), checks: 2 + rnd(8),
+  });
+  s.checksOk = rnd(s.checks);
+  s.checkExpected = s.checks * 0.3;
+  s.bestTurn = Math.min(s.dealt, 1 + rnd(3)); s.bestTurnAt = 1 + rnd(30);
+  if (i === 2) { s.friendly = 2; s.friendlyTo = { 1: 2 }; }
+});
+game.bandits = [{ i: 3, turn: 2, via: 'Bang!' }, { i: 4, turn: 4, via: 'Cat Balou' }];
 const samples = {};
 for (const winner of ['Sheriff', 'Outlaw', 'Renegade']) {
   game.winner = winner;

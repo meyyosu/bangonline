@@ -77,7 +77,7 @@ Cách chơi: mỗi người tự đăng ký tài khoản → chủ phòng bấm 
 - Bấm **Bật thông báo Windows** để cấp quyền thông báo desktop với hai nút **Nhất trí** / **Từ chối** khi trình duyệt hỗ trợ; bấm nội dung thông báo để quay lại game. Tính năng này cần quyền thông báo và HTTPS hoặc localhost; khi chơi qua địa chỉ LAN/Radmin HTTP vẫn có cửa sổ biểu quyết trong game.
 - Chat trong phòng, nhật ký diễn biến ván đấu, chấm xanh báo ai đang online
 - Bàn chơi tròn với ghế theo thứ tự người chơi, bài và trang bị hiển thị quanh bàn; có thể thu gọn chat và đổi cỡ thẻ trang bị.
-- Khi có đội thắng, màn hình kết quả toàn màn hình tự hiện với tiêu đề chiến thắng/thua cuộc theo người chơi, vai trò và nhân vật của đồng đội (kể cả người đã bị loại). Bấm **Tiếp tục** để xem lại bàn chơi; chủ phòng bấm **Về phòng chờ** để chuẩn bị ván mới.
+- Khi có đội thắng, màn hình kết quả toàn màn hình tự hiện với tiêu đề chiến thắng/thua cuộc theo người chơi, vai trò và nhân vật của đồng đội (kể cả người đã bị loại). Bấm **Tiếp tục** để xem màn **Danh hiệu** (12 danh hiệu, mỗi cái có 🥇 top 1 và 🥈 top 2), bấm tiếp để xem **Thống kê** chi tiết từng người, rồi bấm **Xem bàn chơi** để xem lại bàn; chủ phòng bấm **Về phòng chờ** để chuẩn bị ván mới.
 - Tất cả người chơi đều thấy lá vừa đánh/phản hồi bay từ tay người đánh ra bài bỏ; lá trang bị bay tới khu vực trang bị của người nhận. Mục tiêu có thể chọn được đánh dấu bằng viền avatar vàng nhấp nháy.
 - Các lá bỏ bớt cuối lượt bay lần lượt từ tay xuống bài bỏ cho cả bàn cùng thấy, kể cả khi server tự bỏ do hết giờ. Lá xanh/súng bị bỏ cũng đi xuống bài bỏ.
 - Countdown hiện ở đầu phòng và ngay khu vực chơi/chọn nhân vật. Bấm bắt đầu sẽ lưu luôn cài đặt đang hiển thị trong phòng chờ.
