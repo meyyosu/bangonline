@@ -4,15 +4,19 @@ const http = require('http');
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
-const { Game, GameError, CARD_INFO, CHAR_INFO, ROLE_INFO } = require('./game');
+const { Game, GameError, CARD_INFO, CHAR_INFO, ROLE_INFO, RULES_PREVIEW, greenCardCount } = require('./game');
 const { syncTimer, tickTimer } = require('./room-timer');
 const { pauseAction, finishPause, pauseView } = require('./room-pause');
 
 const PORT = Number(process.env.PORT) || 3000;
-const DATA_DIR = path.join(__dirname, 'data');
+const DATA_DIR = path.join(__dirname, 'data', RULES_PREVIEW ? 'preview' : '');
+const sessionCookie = RULES_PREVIEW ? 'bang_preview_sid' : 'sid';
+const sessionPattern = new RegExp('(?:^|;\\s*)' + sessionCookie + '=([a-f0-9]+)');
 const PUBLIC_DIR = path.join(__dirname, 'public');
 const RUNTIME_FILES = ['server.js', 'game.js', 'room-timer.js', 'room-pause.js'];
 const runtimeRevision = crypto.createHash('sha256').update(Buffer.concat(RUNTIME_FILES.map((file) => fs.readFileSync(path.join(__dirname, file))))).digest('hex');
+const greenCardsRevision = greenCardCount > 0 && process.env.BANG_GREEN_CARDS_FILE
+  ? crypto.createHash('sha256').update(fs.readFileSync(process.env.BANG_GREEN_CARDS_FILE)).digest('hex') : null;
 const startedAt = new Date().toISOString();
 const USERS_FILE = path.join(DATA_DIR, 'users.json');
 const SESSIONS_FILE = path.join(DATA_DIR, 'sessions.json');
@@ -39,7 +43,7 @@ function newCode() {
 }
 
 function roomSummary(r) {
-  return { code: r.code, name: r.name, host: r.host, players: r.players, status: r.status, max: 7, hasPassword: !!r.passwordHash, turnSeconds: r.turnSeconds, characterChoices: r.characterChoices, characterSeconds: r.characterSeconds };
+  return { code: r.code, name: r.name, host: r.host, players: r.players, status: r.status, max: 7, hasPassword: !!r.passwordHash, turnSeconds: r.turnSeconds, characterChoices: r.characterChoices, characterSeconds: r.characterSeconds, dodgeCity: r.dodgeCity };
 }
 
 function roomView(r, user) {
@@ -116,7 +120,7 @@ function readBody(req) {
 }
 
 function getUser(req) {
-  const m = /(?:^|;\s*)sid=([a-f0-9]+)/.exec(req.headers.cookie || '');
+  const m = sessionPattern.exec(req.headers.cookie || '');
   const key = m && sessions[m[1]];
   return key && users[key] ? users[key].name : null;
 }
@@ -139,7 +143,7 @@ function serveStatic(req, res, pathname) {
 const server = http.createServer(async (req, res) => {
   const { pathname } = new URL(req.url, 'http://x');
   if (req.method === 'GET' && pathname === '/api/health') {
-    return send(res, 200, { app: 'bang-online', pid: process.pid, revision: runtimeRevision, startedAt });
+    return send(res, 200, { app: 'bang-online', pid: process.pid, revision: runtimeRevision, greenCardsRevision, greenCardCount, startedAt });
   }
   if (!pathname.startsWith('/api/')) return serveStatic(req, res, pathname);
 
@@ -149,7 +153,7 @@ const server = http.createServer(async (req, res) => {
 
   try {
     // ----- tài khoản -----
-    if (pathname === '/api/meta') return send(res, 200, { cards: CARD_INFO, chars: CHAR_INFO, roles: ROLE_INFO });
+    if (pathname === '/api/meta') return send(res, 200, { cards: CARD_INFO, chars: CHAR_INFO, roles: ROLE_INFO, rulesPreview: RULES_PREVIEW, greenCardCount });
     if (pathname === '/api/me') return send(res, 200, { user, room: user ? findRoomOf(user)?.code || null : null });
 
     if (method === 'POST' && (pathname === '/api/register' || pathname === '/api/login')) {
@@ -172,12 +176,12 @@ const server = http.createServer(async (req, res) => {
       const token = crypto.randomBytes(24).toString('hex');
       sessions[token] = key;
       save(SESSIONS_FILE, sessions);
-      return send(res, 200, { user: users[key].name }, { 'Set-Cookie': `sid=${token}; HttpOnly; Path=/; Max-Age=2592000; SameSite=Lax` });
+      return send(res, 200, { user: users[key].name }, { 'Set-Cookie': `${sessionCookie}=${token}; HttpOnly; Path=/; Max-Age=2592000; SameSite=Lax` });
     }
     if (method === 'POST' && pathname === '/api/logout') {
-      const m = /(?:^|;\s*)sid=([a-f0-9]+)/.exec(req.headers.cookie || '');
+      const m = sessionPattern.exec(req.headers.cookie || '');
       if (m) { delete sessions[m[1]]; save(SESSIONS_FILE, sessions); }
-      return send(res, 200, { ok: true }, { 'Set-Cookie': 'sid=; Path=/; Max-Age=0' });
+      return send(res, 200, { ok: true }, { 'Set-Cookie': `${sessionCookie}=; Path=/; Max-Age=0` });
     }
 
     if (!user) return err(res, 'Bạn cần đăng nhập.', 401);
@@ -193,12 +197,15 @@ const server = http.createServer(async (req, res) => {
     if (method === 'POST' && pathname === '/api/rooms') {
       if (findRoomOf(user)) return err(res, 'Bạn đang ở trong một phòng khác.');
       const body = await readBody(req);
+      if (body.dodgeCity !== undefined && typeof body.dodgeCity !== 'boolean') return err(res, 'Tuỳ chọn Dodge City phải là bật hoặc tắt.');
+      if (body.dodgeCity && !greenCardCount) return err(res, 'Máy chủ chưa nạp dữ liệu lá xanh lá.');
       const { name } = body;
       const code = newCode();
       const r = { code, name: String(name || `Phòng của ${user}`).slice(0, 40), host: user, players: [user], status: 'waiting', game: null, chat: [] };
       r.turnSeconds = 60;
       r.characterChoices = 3;
       r.characterSeconds = 60;
+      r.dodgeCity = body.dodgeCity === true;
       updateSettings(r, body);
       rooms.set(code, r);
       broadcastLobby();
@@ -263,7 +270,7 @@ const server = http.createServer(async (req, res) => {
         if (r.players.length < 4) return err(res, 'Cần ít nhất 4 người để chơi Bang!.');
         updateSettings(r, body);
         r.pause = null; r.clock = null;
-        r.game = new Game(r.players, { characterChoices: r.characterChoices });
+        r.game = new Game(r.players, { characterChoices: r.characterChoices, dodgeCity: r.dodgeCity });
         r.status = 'playing';
         r.chat.push({ system: true, text: 'Ván đấu bắt đầu!' });
       } else if (sub === 'reset') {
@@ -312,4 +319,6 @@ setInterval(() => {
   for (const set of roomClients.values()) for (const c of set) c.res.write(': ping\n\n');
 }, 25000);
 
-server.listen(PORT, () => console.log(`🤠 Bang! Online đang chạy tại http://localhost:${PORT}`));
+server.listen(PORT, RULES_PREVIEW ? '127.0.0.1' : undefined, () => {
+  console.log(`🤠 Bang! Online đang chạy tại http://${RULES_PREVIEW ? '127.0.0.1' : 'localhost'}:${PORT}`);
+});
