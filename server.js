@@ -15,6 +15,8 @@ const sessionPattern = new RegExp('(?:^|;\\s*)' + sessionCookie + '=([a-f0-9]+)'
 const PUBLIC_DIR = path.join(__dirname, 'public');
 const RUNTIME_FILES = ['server.js', 'game.js', 'room-timer.js', 'room-pause.js'];
 const runtimeRevision = crypto.createHash('sha256').update(Buffer.concat(RUNTIME_FILES.map((file) => fs.readFileSync(path.join(__dirname, file))))).digest('hex');
+const greenCardsRevision = greenCardCount > 0 && process.env.BANG_GREEN_CARDS_FILE
+  ? crypto.createHash('sha256').update(fs.readFileSync(process.env.BANG_GREEN_CARDS_FILE)).digest('hex') : null;
 const startedAt = new Date().toISOString();
 const USERS_FILE = path.join(DATA_DIR, 'users.json');
 const SESSIONS_FILE = path.join(DATA_DIR, 'sessions.json');
@@ -141,7 +143,7 @@ function serveStatic(req, res, pathname) {
 const server = http.createServer(async (req, res) => {
   const { pathname } = new URL(req.url, 'http://x');
   if (req.method === 'GET' && pathname === '/api/health') {
-    return send(res, 200, { app: 'bang-online', pid: process.pid, revision: runtimeRevision, startedAt });
+    return send(res, 200, { app: 'bang-online', pid: process.pid, revision: runtimeRevision, greenCardsRevision, greenCardCount, startedAt });
   }
   if (!pathname.startsWith('/api/')) return serveStatic(req, res, pathname);
 

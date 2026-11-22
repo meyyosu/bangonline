@@ -65,6 +65,15 @@ try {
   $major = & $node -p 'parseInt(process.versions.node)'
   if ($LASTEXITCODE -ne 0 -or [int]$major -lt 18) { throw 'Game cần Node.js 18 trở lên.' }
   Say "Node.js: $node" Green
+  if (-not $env:BANG_GREEN_CARDS_FILE) {
+    $env:BANG_GREEN_CARDS_FILE = Join-Path $root 'green-cards.json'
+  }
+  $env:BANG_GREEN_CARDS_FILE = (Resolve-Path -LiteralPath $env:BANG_GREEN_CARDS_FILE -ErrorAction Stop).Path
+  $greenCardsRevision = & $node -e "console.log(require('crypto').createHash('sha256').update(require('fs').readFileSync(process.env.BANG_GREEN_CARDS_FILE)).digest('hex'));"
+  if ($LASTEXITCODE -ne 0) { throw 'Không đọc được dữ liệu Dodge City.' }
+  $greenCardCount = & $node -e "const g=require('./game'); if(g.greenCardCount!==14){console.error('Ma game chua ho tro Dodge City hoac chua nap du 14 la.');process.exit(1);} console.log(g.greenCardCount);"
+  if ($LASTEXITCODE -ne 0) { throw 'Game chưa nạp đủ 14 lá Dodge City. Hãy kiểm tra mã game và tệp dữ liệu.' }
+  Say "Dữ liệu Dodge City: $env:BANG_GREEN_CARDS_FILE" Green
   $revision = & $node -e "const fs=require('fs'),crypto=require('crypto'); console.log(crypto.createHash('sha256').update(Buffer.concat(['server.js','game.js','room-timer.js','room-pause.js'].map(f=>fs.readFileSync(f)))).digest('hex'));"
   if ($LASTEXITCODE -ne 0) { throw 'Không đọc được mã nguồn game trong thư mục hiện tại.' }
 
@@ -78,13 +87,14 @@ try {
     Say "PID giữ cổng: $listenerId"
     Say "Server Bang đang chạy: $([bool]$isBang)"
     Say "Server đã nạp mã mới nhất: $([bool]($health -and $health.revision -eq $revision))"
+    Say "Server đã nạp dữ liệu Dodge City mới nhất: $([bool]($health -and $health.greenCardsRevision -eq $greenCardsRevision -and $health.greenCardCount -eq 14))"
     exit 0
   }
   if ($listenerId -or $health -or $meta) {
     if (-not $isBang) { throw "Cổng $Port đang được chương trình khác sử dụng. Game chưa được khởi động." }
-    $stale = -not $health -or $health.revision -ne $revision
+    $stale = -not $health -or $health.revision -ne $revision -or $health.greenCardsRevision -ne $greenCardsRevision -or $health.greenCardCount -ne 14
     if ($stale -and -not $Restart) {
-      Say 'Server đang chạy bản cũ. Mở lại trình duyệt sẽ chưa áp dụng luật mới.' Yellow
+      Say 'Server đang chạy mã hoặc dữ liệu Dodge City cũ. Mở lại trình duyệt sẽ chưa áp dụng bản mới.' Yellow
       Say 'Khởi động lại sẽ mất các phòng/ván đang mở; tài khoản vẫn được giữ.' Yellow
       $answer = Read-Host 'Nhập R để khởi động lại, hoặc Enter để giữ server đang chạy'
       $Restart = $answer -eq 'R'
@@ -137,11 +147,12 @@ try {
     $process.Refresh()
     if ($process.HasExited) { throw "Server vừa khởi động đã dừng (mã lỗi $($process.ExitCode)). Xem thông báo Node.js phía trên." }
     $running = Read-JsonUrl "$localUrl/api/health"
-    if ($running.pid -eq $process.Id -and $running.revision -eq $revision) { $ready = $true; break }
+    if ($running.pid -eq $process.Id -and $running.revision -eq $revision -and $running.greenCardsRevision -eq $greenCardsRevision -and $running.greenCardCount -eq 14) { $ready = $true; break }
     Start-Sleep -Milliseconds 250
   }
   if (-not $ready) { throw 'Server chưa sẵn sàng. Không mở lại nhầm server cũ.' }
   Say "Đã nạp mã mới nhất. PID $($process.Id)." Green
+  Say 'Đã nạp dữ liệu Dodge City. Có thể bật bản mở rộng khi tạo phòng.' Green
   Open-Game $shareUrl
   $process.WaitForExit()
   Say "Server đã dừng. Mã thoát: $($process.ExitCode)." Yellow

@@ -10,6 +10,7 @@ Giải nén rồi bấm đúp **`CHAY-GAME.bat`**. Script sẽ tự:
 1. Tải Node.js bản portable vào thư mục `node/` (chỉ lần đầu, cần Internet). Không cài gì vào hệ thống.
 2. Mở cổng 3000 trên tường lửa (chỉ lần đầu; khi Windows hỏi quyền Administrator thì bấm **Yes**).
 3. Tìm IP Radmin VPN (26.x.x.x), copy link cho bạn bè vào clipboard và mở trình duyệt.
+4. Tự nạp dữ liệu Dodge City từ `green-cards.json` để có thể bật bản mở rộng khi tạo phòng.
 
 Giữ cửa sổ đen mở trong lúc chơi; đóng nó là tắt server. Bạn bè chỉ cần mở link bằng trình duyệt, không phải cài gì.
 
@@ -41,7 +42,7 @@ Mở [127.0.0.1:3001](http://127.0.0.1:3001) trên máy này và đăng ký tài
 
 ### Nạp bộ lá viền xanh lá
 
-Trước khi khởi động server, đặt `$env:BANG_GREEN_CARDS_FILE` thành đường dẫn tới `green-cards.json` hoặc tệp dữ liệu tương thích. Khi dữ liệu đã nạp, ô **Bản mở rộng: Dodge City** ở mục **Tạo phòng** có thể được chọn. Phòng bật bản mở rộng dùng 94 lá và danh sách 31 nhân vật. Phòng mặc định dùng 80 lá và 16 nhân vật.
+Khi chạy `CHAY-GAME.bat`, launcher tự nạp `green-cards.json` trong thư mục game, không cần đặt biến môi trường. Nếu đã đặt `$env:BANG_GREEN_CARDS_FILE`, launcher dùng tệp đó thay cho dữ liệu mặc định. Khi chạy thủ công bằng `node server.js`, đặt biến này thành đường dẫn tới `green-cards.json` hoặc tệp dữ liệu tương thích trước khi khởi động. Launcher cũng phát hiện server đang chạy chưa nạp dữ liệu hoặc còn dùng dữ liệu cũ và hỏi khởi động lại. Khi dữ liệu đã nạp, ô **Bản mở rộng: Dodge City** ở mục **Tạo phòng** có thể được chọn. Phòng bật bản mở rộng dùng 94 lá và danh sách 31 nhân vật. Phòng mặc định dùng 80 lá và 16 nhân vật.
 
 Tệp JSON là một mảng gồm 13 loại lá, tổng cộng 14 bản. Mỗi loại có `name` (tên riêng không trùng lá gốc), `effect` và `copies`. Mỗi phần tử trong `copies` có `suit` (`S`, `H`, `D` hoặc `C`) và `rank` (chuỗi từ `2` đến `10`, hoặc `J`, `Q`, `K`, `A`).
 
