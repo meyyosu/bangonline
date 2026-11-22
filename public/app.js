@@ -1129,22 +1129,91 @@ function resultFaction(role) {
 }
 
 
-function renderMatchResult(g) {
-  if (!g.winner || ui.resultDismissed || $('#matchResult')) return;
-  const me = g.players.find((p) => p.name === ME);
-  const won = !!me?.winner;
-  const team = g.players.filter((p) => me ? resultFaction(p.role) === resultFaction(me.role) : p.winner);
+// 12 danh hiệu cuối ván: id → [biểu tượng, tên, mô tả, loại]. glory = vinh danh, tease = chọc ghẹo.
+const AWARD_INFO = {
+  gunslinger: ['🔫', 'Tay súng nóng nhất', 'Bắn nhiều Bang! nhất', 'glory'],
+  damage: ['💥', 'Kẻ gây tổn thương', 'Gây nhiều sát thương nhất', 'glory'],
+  mass: ['🏹', 'Đại đại đi', 'Đánh nhiều Gatling + Indians! nhất', 'glory'],
+  schemer: ['🧠', 'Kẻ ủ mưu', 'Gây nhiều sát thương nhất trong 1 lượt', 'glory'],
+  saloon: ['🍺', 'Khách quen Saloon', 'Hồi nhiều máu nhất bằng Beer / Saloon', 'glory'],
+  bandit: ['🏴‍☠️', 'Tướng cướp', 'Outlaw đầu tiên nhắm vào Sheriff (Bang!, Panic!, Cat Balou, Duel, Jesse Jones)', 'glory'],
+  rich: ['💰', 'Nhà giàu', 'Đặt nhiều lá trang bị nhất', 'glory'],
+  popular: ['💘', 'Ai cũng quý bạn', 'Bị nhắm nhiều nhất (Bang!, Panic!, Cat Balou, Duel, Jail)', 'tease'],
+  lucky: ['🍀', 'Nhân phẩm tốt', 'Rút kiểm tra may hơn kỳ vọng nhiều nhất (từ 3 lần)', 'glory'],
+  unlucky: ['🐕', 'Sống chó', 'Rút kiểm tra xui hơn kỳ vọng nhiều nhất (từ 3 lần)', 'tease'],
+  friendlyFire: ['🤦', 'Bắn nhầm đồng đội', 'Gây nhiều sát thương nhất cho người cùng phe', 'tease'],
+  passenger: ['🪑', 'Có tham dự', 'Người phe thắng gây ít sát thương nhất', 'tease'],
+};
+const RESULT_STEPS = [['result', 'Kết quả'], ['awards', 'Danh hiệu'], ['stats', 'Thống kê']];
+const STAT_COLUMNS = [
+  ['bangs', 'Bang! bắn'], ['dealt', 'Sát thương gây'], ['taken', 'Máu mất'], ['kills', 'Hạ gục'],
+  ['dodged', 'Né được'], ['healed', 'Hồi máu'], ['equips', 'Trang bị'], ['targeted', 'Bị nhắm'],
+];
+
+function resultHeaderHTML(g, won) {
   const names = { Sheriff: 'Sheriff & Deputy', Outlaw: 'Outlaw', Renegade: 'Renegade' };
-  // Đóng lựa chọn bài còn mở khi server vừa xác định thắng cuộc.
-  $('#modal').classList.add('hidden');
-  $('#modal').innerHTML = '';
-  const dialog = document.createElement('dialog');
-  dialog.id = 'matchResult';
-  dialog.className = `match-result ${won ? 'result-victory' : 'result-defeat'}`;
-  dialog.setAttribute('aria-labelledby', 'resultHeadline');
-  dialog.setAttribute('aria-describedby', 'resultSummary');
-  dialog.innerHTML = `<div class="result-frame">
-    <h2 id="resultHeadline" class="result-headline">${won ? 'CHIẾN THẮNG' : 'THUA CUỘC'}</h2>
+  const nav = RESULT_STEPS.map(([k, l], i) => `<button type="button" data-step="${k}" class="${ui.resultStep === k ? 'on' : ''}"><span>${i + 1}</span>${l}</button>`).join('');
+  return `<p class="result-mini">Phe ${names[g.winner]} chiến thắng · ${won ? 'Bạn đã thắng' : 'Bạn đã thua'}</p>
+    <nav class="result-steps" aria-label="Màn kết quả">${nav}</nav>`;
+}
+
+function awardCardHTML(g, award) {
+  const [icon, title, desc, kind] = AWARD_INFO[award.id];
+  const roleOf = (name) => g.players.find((p) => p.name === name)?.role;
+  const mine = award.ranks[0]?.players.includes(ME);
+  const row = (rank, i) => {
+    if (!rank) return `<div class="aw-rank r${i + 1} none"><span class="aw-medal">${i ? '🥈' : '🥇'}</span><span class="aw-who">— không có ai —</span></div>`;
+    const who = rank.players.map((n) => `<span class="aw-name ${n === ME ? 'aw-me' : ''}"><b>${esc(n)}</b>${n === ME ? ' <i>(bạn)</i>' : ''}${rank.players.length === 1 ? ` <span class="aw-role role-${roleOf(n).toLowerCase()}">${esc(roleOf(n))}</span>` : ''}</span>`).join('');
+    return `<div class="aw-rank r${i + 1} ${rank.players.includes(ME) ? 'aw-mine' : ''}"><span class="aw-medal">${i ? '🥈' : '🥇'}</span>
+      <span class="aw-who">${who}</span><span class="aw-val">${esc(rank.value)}${rank.sub ? `<small>${esc(rank.sub)}</small>` : ''}</span></div>`;
+  };
+  return `<div class="aw-card ${kind} ${mine ? 'mine' : ''}">${mine ? '<span class="aw-you">Bạn!</span>' : ''}
+    <div class="aw-head"><span class="aw-icon">${icon}</span><div><div class="aw-title">${title}</div><div class="aw-desc">${desc}</div></div></div>
+    ${row(award.ranks[0], 0)}${row(award.ranks[1], 1)}</div>`;
+}
+
+function resultAwardsHTML(g, won) {
+  const awards = g.summary?.awards || [];
+  const mine = awards.filter((a) => a.ranks.some((r) => r.players.includes(ME))).length;
+  return `${resultHeaderHTML(g, won)}
+    <div class="aw-bar"><span>Bạn lên bục <b>${mine}</b>/${awards.length} danh hiệu</span>
+      <span class="aw-legend"><span><i class="glory"></i>Vinh danh</span><span><i class="tease"></i>Chọc ghẹo</span></span></div>
+    <div class="aw-grid">${awards.map((a) => awardCardHTML(g, a)).join('')}</div>
+    <div class="result-foot"><button type="button" class="btn ghost" data-step="result">← Kết quả</button><span></span>
+      <button type="button" class="result-continue small" data-step="stats"><span aria-hidden="true">✺</span> Tiếp tục</button></div>`;
+}
+
+function resultStatsHTML(g, won) {
+  const sum = g.summary || { stats: [], turns: 0 };
+  const byName = Object.fromEntries(sum.stats.map((s) => [s.name, s]));
+  const rows = [...g.players].sort((a, b) => b.winner - a.winner);
+  const best = Object.fromEntries(STAT_COLUMNS.map(([k]) => [k, Math.max(0, ...sum.stats.map((s) => s[k]))]));
+  const total = (k) => sum.stats.reduce((n, s) => n + s[k], 0);
+  const kpi = (v, l) => `<div class="st-kpi"><b>${v}</b>${l}</div>`;
+  const body = rows.map((p) => {
+    const s = byName[p.name] || {};
+    return `<tr class="${p.winner ? 'win' : 'lose'} ${p.name === ME ? 'st-me' : ''}">
+      <td><div class="st-player"><span class="st-av">${p.alive ? playerAvatarHTML(p) : '💀'}</span>
+        <div><b>${esc(p.name)}</b>${p.name === ME ? ' <i>(bạn)</i>' : ''}<small>${esc(p.char || '')}</small></div></div></td>
+      <td><span class="aw-role role-${p.role.toLowerCase()}">${esc(p.role)}</span></td>
+      <td><span class="st-res ${p.winner ? 'w' : 'l'}">${p.winner ? 'Thắng' : 'Thua'}</span></td>
+      ${STAT_COLUMNS.map(([k]) => `<td><span class="${best[k] > 0 && s[k] === best[k] ? 'st-best' : ''}">${s[k] ?? 0}</span></td>`).join('')}
+      <td>${s.checksOk ?? 0}/${s.checks ?? 0}</td></tr>`;
+  }).join('');
+  return `${resultHeaderHTML(g, won)}
+    <div class="st-kpis">${kpi(sum.turns, 'lượt chơi')}${kpi(sum.minutes ? `${sum.minutes}′` : '—', 'thời gian')}${kpi(total('bangs'), 'phát Bang! cả bàn')}${kpi(total('taken'), 'máu đã đổ')}</div>
+    <div class="st-panel"><div class="st-scroll"><table class="st-table">
+      <thead><tr><th>Người chơi</th><th>Vai trò</th><th>Kết quả</th>${STAT_COLUMNS.map(([, l]) => `<th>${l}</th>`).join('')}<th>Rút kiểm tra</th></tr></thead>
+      <tbody>${body}</tbody></table></div>
+      <div class="st-note">Ô tô vàng = cao nhất ván · Rút kiểm tra = số lần thành công / số lần rút (Barrel, Jail, Dynamite)</div></div>
+    <div class="result-foot"><button type="button" class="btn ghost" data-step="awards">← Danh hiệu</button><span></span>
+      <button type="button" class="btn ghost" data-close>Xem bàn chơi</button>
+      ${ROOM.host === ME ? '<button type="button" class="result-continue small" data-reset><span aria-hidden="true">🔁</span> Về phòng chờ</button>' : '<span class="st-wait">Chờ chủ phòng mở ván mới…</span>'}</div>`;
+}
+
+function resultMainHTML(g, won, team) {
+  const names = { Sheriff: 'Sheriff & Deputy', Outlaw: 'Outlaw', Renegade: 'Renegade' };
+  return `<h2 id="resultHeadline" class="result-headline">${won ? 'CHIẾN THẮNG' : 'THUA CUỘC'}</h2>
     <div class="result-emblem" aria-hidden="true"><span></span><img src="/result-revolvers.svg" alt=""><span></span></div>
     <p id="resultSummary" class="result-summary">Phe ${names[g.winner]} chiến thắng!</p>
     <div class="result-team">${team.map((p) => `<div class="result-member ${p.name === ME ? 'result-you' : ''}">
@@ -1154,19 +1223,74 @@ function renderMatchResult(g) {
       <div class="result-player"><span title="${esc(p.name)}">${esc(p.name)}</span>${p.name === ME ? '<b>Bạn</b>' : ''}</div>
       <div class="result-character">${esc(p.char)}</div>
     </div>`).join('')}</div>
-    <button type="button" class="result-continue" autofocus><span aria-hidden="true">✺</span> Tiếp tục</button>
-  </div>`;
+    <button type="button" class="result-continue" data-step="awards"><span aria-hidden="true">✺</span> Tiếp tục</button>`;
+}
+
+// Desktop: thu nhỏ cả màn (zoom) cho vừa chiều cao cửa sổ, không bao giờ phải cuộn.
+// Màn hẹp (điện thoại) thì giữ cỡ chữ bình thường và cho cuộn.
+function fitMatchResult(dialog) {
+  const body = dialog.querySelector('.result-body');
+  if (!body) return;
+  body.style.zoom = '';
+  if (innerWidth < 900) return;
+  const frame = body.parentElement;
+  const px = (el, prop) => parseFloat(getComputedStyle(el)[prop]) || 0;
+  const avail = dialog.clientHeight - px(dialog, 'paddingTop') - px(dialog, 'paddingBottom')
+    - px(frame, 'paddingTop') - px(frame, 'paddingBottom') - px(frame, 'borderTopWidth') - px(frame, 'borderBottomWidth');
+  let zoom = 1;
+  for (let k = 0; k < 4; k++) {
+    const need = body.getBoundingClientRect().height;
+    if (need <= avail + 1) break;
+    zoom = Math.max(0.45, zoom * (avail / need) - 0.005);
+    body.style.zoom = zoom;
+  }
+}
+
+// Màn kết thúc: ① Kết quả → Tiếp tục → ② Danh hiệu → Tiếp tục → ③ Thống kê
+function renderMatchResult(g) {
+  if (!g.winner || ui.resultDismissed || $('#matchResult')) return;
+  const me = g.players.find((p) => p.name === ME);
+  const won = !!me?.winner;
+  const team = g.players.filter((p) => me ? resultFaction(p.role) === resultFaction(me.role) : p.winner);
+  // Đóng lựa chọn bài còn mở khi server vừa xác định thắng cuộc.
+  $('#modal').classList.add('hidden');
+  $('#modal').innerHTML = '';
+  const dialog = document.createElement('dialog');
+  dialog.id = 'matchResult';
+  dialog.className = `match-result ${won ? 'result-victory' : 'result-defeat'}`;
+  dialog.setAttribute('aria-labelledby', 'resultHeadline');
+  dialog.setAttribute('aria-describedby', 'resultSummary');
+  const refit = () => fitMatchResult(dialog);
+  const resizeWatch = new ResizeObserver(refit); // co giãn lại mỗi khi cửa sổ đổi cỡ
   const dismiss = () => {
     ui.resultDismissed = true;
+    resizeWatch.disconnect();
     dialog.remove();
     document.body.classList.remove('match-result-open');
     ($('#resetBtn') || $('#leaveBtn'))?.focus();
   };
-  dialog.querySelector('.result-continue').onclick = dismiss;
+  const show = (step) => {
+    ui.resultStep = step;
+    dialog.dataset.step = step;
+    const html = step === 'awards' ? resultAwardsHTML(g, won) : step === 'stats' ? resultStatsHTML(g, won) : resultMainHTML(g, won, team);
+    dialog.innerHTML = `<div class="result-frame step-${step}"><div class="result-body">${html}</div></div>`;
+    dialog.scrollTop = 0;
+    dialog.querySelectorAll('[data-step]').forEach((b) => { b.onclick = () => show(b.dataset.step); });
+    const close = dialog.querySelector('[data-close]');
+    if (close) close.onclick = dismiss;
+    const reset = dialog.querySelector('[data-reset]');
+    if (reset) reset.onclick = () => { dismiss(); $('#resetBtn')?.click(); };
+    (dialog.querySelector('.result-continue') || dialog.querySelector('[data-close]'))?.focus();
+    fitMatchResult(dialog);
+  };
   dialog.oncancel = (event) => { event.preventDefault(); dismiss(); };
   document.body.appendChild(dialog);
   document.body.classList.add('match-result-open');
+  show('result');
   dialog.showModal();
+  fitMatchResult(dialog);
+  resizeWatch.observe(dialog);
+  document.fonts?.ready.then(refit); // font tải xong có thể làm chữ cao hơn
 }
 
 const sendAction = (action) => api(`/api/rooms/${ROOM.code}/action`, { action });
