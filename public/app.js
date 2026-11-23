@@ -574,8 +574,37 @@ function updateClock() {
     el.textContent = text;
     el.classList.toggle('urgent', !p?.frozen && !!t && seconds <= 10);
   });
+  updateTurnRing();
 }
 setInterval(updateClock, 250);
+
+// Vòng đếm ngược quanh avatar người mà đồng hồ đang đếm (ROOM.timer.player).
+// Vòng chạy bằng CSS animation; mỗi lần vẽ lại bàn thì tính lại số giây còn lại theo hạn của server.
+const RING_URGENT = 10, RING_FINAL = 4;
+const timerLeft = (t) => (t.deadline - Date.now() - (ui.serverOffset || 0)) / 1000;
+function renderTurnRing() {
+  const t = ROOM?.timer, g = ROOM?.game;
+  if (!t || !g || g.winner || ROOM.pause?.frozen) return;
+  const p = g.players[t.player];
+  const seat = p && $(`.player[data-player="${CSS.escape(p.name)}"]`);
+  if (!seat) return;
+  const ring = document.createElement('div');
+  ring.className = 'turn-ring';
+  ring.style.setProperty('--ring-total', t.seconds);
+  ring.style.setProperty('--ring-left', Math.max(0, timerLeft(t)).toFixed(2));
+  seat.classList.add('ticking');
+  seat.querySelector('.av').appendChild(ring);
+  updateTurnRing();
+}
+// Nhấp nháy khi gần hết (gọi trong updateClock, mỗi 250ms)
+function updateTurnRing() {
+  const seat = $('.player.ticking');
+  if (!seat) return;
+  const t = ROOM?.timer;
+  const left = t && !ROOM.pause?.frozen ? timerLeft(t) : Infinity;
+  seat.classList.toggle('urgent', left <= RING_URGENT);
+  seat.classList.toggle('final', left <= RING_FINAL);
+}
 
 // ---------- bàn chơi ----------
 const cardInfo = (c) => META.cards[c.name];
@@ -908,8 +937,167 @@ function renderGame() {
 
   bindGame(g, meIdx, meP, canPlay, myPrompt);
   animateDrawStage(g);
+  renderMassPopup(g);
+  renderStorePopup(g);
+  renderTurnRing();
   showCheckReveal(g);
   updateClock();
+}
+
+// ---------- pop-up đánh chung (Indians / Gatling) ----------
+// Hiện giữa bàn: lá đã đánh ➜ mỗi người bị nhắm một cột (tên + cách phản hồi). Xong hết thì thu gọn rồi tự ẩn.
+const MASS_MINI_MS = 2500, MASS_HIDE_MS = 5000;
+const massDone = (g, m) => m.targets.every((t) => t.res || !g.players[t.i].alive);
+function massResHTML(r, dead, flip) {
+  const f = flip ? ' flip' : '';
+  if (r?.card) return cardHTML(r.card, 'mp-res ok' + f);
+  if (r?.barrel) return `<div class="mp-res barrel ok${f}"><div class="ic">🛢️</div>Barrel<br>né được</div>`;
+  if (r?.dead || dead) return `<div class="mp-res dead${f}"><div class="ic">💀</div>Bị hạ</div>`;
+  if (r?.hurt) return `<div class="mp-res hurt${f}"><div class="big">−${r.hurt}</div>máu</div>`;
+  return '<div class="mp-res wait">chờ…</div>';
+}
+const massSum = (r, dead) => r?.card ? cardInfo(r.card).icon : r?.barrel ? '🛢️' : r?.dead || dead ? '💀' : r?.hurt ? `−${r.hurt}❤` : '…';
+
+function renderMassPopup(g) {
+  $('.mass-pop:not(.store-pop):not(.out)')?.remove();
+  const m = g.mass, arena = $('.arena');
+  if (!m || !arena || g.winner || centerPopupKind(g) !== 'mass') return;
+  let st = ui.mass;
+  if (st?.key !== `${m.seq}:${m.t0}`) {
+    // Vào phòng khi lá đánh chung đã xong từ trước thì không hiện lại
+    const age = Date.now() + (ui.serverOffset || 0) - m.t;
+    clearTimeout(st?.timer);
+    st = ui.mass = { key: `${m.seq}:${m.t0}`, seen: new Set(), mini: false, hidden: massDone(g, m) && age > MASS_MINI_MS, enter: true };
+  }
+  if (st.hidden) return;
+  if (massDone(g, m) && !st.timer) {
+    st.timer = setTimeout(() => {
+      st.mini = true;
+      if (ui.mass === st && ROOM?.game) renderMassPopup(ROOM.game);
+      st.timer = setTimeout(() => hideMassPopup(st), MASS_HIDE_MS);
+    }, MASS_MINI_MS);
+  }
+  const by = g.players[m.by];
+  const active = g.pending ? m.targets.find((t) => !t.res && g.players[t.i].alive) : null;
+  const fresh = m.targets.filter((t) => (t.res || !g.players[t.i].alive) && !st.seen.has(t.i));
+  // Lúc có người đang rút kiểm tra (Barrel) thì thu gọn để lộ chồng bài
+  const mini = st.mini || g.pending?.type === 'check';
+  const el = document.createElement('div');
+  el.className = `mass-pop${mini ? ' mini' : ''}${st.enter ? ' enter' : ''}`;
+  el.setAttribute('role', 'status');
+  el.title = mini ? 'Bấm để mở rộng' : 'Bấm để thu gọn';
+  el.innerHTML = `
+    <div class="mp-src"><div class="who"><span class="mini-ic">${cardInfo(m.card).icon} </span>${esc(by.name)}</div>${cardHTML(m.card)}</div>
+    <div class="mp-arrow">➜</div>
+    <div class="mp-targets">${m.targets.map((t) => {
+      const p = g.players[t.i], dead = !p.alive && !t.res, mine = t.i === g.me?.index;
+      return `<div class="mp-col${mine ? ' mine' : ''}${t === active ? ' active' : ''}">
+        <div class="mp-name" title="${esc(p.name)}" data-sum="${massSum(t.res, dead)}">${mine ? 'Bạn' : esc(p.name)}</div>
+        <div class="mp-slot">${massResHTML(t.res, dead, fresh.includes(t) && !st.enter)}</div></div>`;
+    }).join('')}</div>
+    <button type="button" class="mp-close" title="Đóng" aria-label="Đóng">✕</button>`;
+  el.onclick = (e) => {
+    if (e.target.closest('.mp-close')) return hideMassPopup(st);
+    clearTimeout(st.timer); st.timer = 'manual'; // đã bấm thì giữ nguyên cho tới khi tự đóng
+    st.mini = !mini;
+    renderMassPopup(ROOM.game);
+  };
+  arena.appendChild(el);
+  if (!st.enter) {
+    for (const t of fresh) {
+      if (t.res?.hurt || t.res?.dead) $(`.player[data-player="${CSS.escape(g.players[t.i].name)}"]`)?.classList.add('mp-hit');
+    }
+  }
+  for (const t of fresh) st.seen.add(t.i);
+  st.enter = false;
+}
+function hideMassPopup(st) {
+  clearTimeout(st.timer);
+  st.hidden = true;
+  const el = $('.mass-pop:not(.store-pop)');
+  if (!el || ui.mass !== st) return;
+  el.classList.add('out');
+  el.addEventListener('animationend', () => el.remove(), { once: true });
+  setTimeout(() => el.remove(), 600); // phòng khi tắt hiệu ứng
+}
+
+// Pop-up Indians/Gatling và General Store dùng chung chỗ giữa bàn: chỉ hiện cái đang diễn ra / mới nhất
+function centerPopupKind(g) {
+  if (g.pending?.type === 'store') return 'store';
+  if (g.mass && !massDone(g, g.mass)) return 'mass';
+  return (g.store?.t || 0) > (g.mass?.t || 0) ? 'store' : 'mass';
+}
+
+// ---------- pop-up General Store ----------
+// Mỗi người một cột theo thứ tự chọn (tên + lá đã lấy); hàng dưới là lá còn trên quầy, tới lượt mình thì bấm để lấy.
+function renderStorePopup(g) {
+  $('.store-pop:not(.out)')?.remove();
+  const s = g.store, arena = $('.arena');
+  if (!s || !arena || g.winner || centerPopupKind(g) !== 'store') return;
+  const picking = g.pending?.type === 'store' ? g.pending.player : null;
+  const myTurn = picking != null && picking === g.me?.index;
+  let st = ui.store;
+  if (st?.key !== `${s.seq}:${s.t0}`) {
+    const age = Date.now() + (ui.serverOffset || 0) - s.t;
+    clearTimeout(st?.timer);
+    st = ui.store = { key: `${s.seq}:${s.t0}`, seen: new Set(), mini: false, hidden: picking == null && age > MASS_MINI_MS, enter: true };
+  }
+  if (myTurn) { st.hidden = false; st.mini = false; } // tới lượt mình thì luôn mở để chọn được
+  if (st.hidden) return;
+  if (picking == null && !st.timer) {
+    st.timer = setTimeout(() => {
+      st.mini = true;
+      if (ui.store === st && ROOM?.game) renderStorePopup(ROOM.game);
+      st.timer = setTimeout(() => hideStorePopup(st), MASS_HIDE_MS);
+    }, MASS_MINI_MS);
+  }
+  const pickOf = (id) => s.picks.find((x) => x.card.id === id);
+  const pickBy = (i) => s.picks.find((x) => x.i === i);
+  const remaining = picking == null ? [] : s.revealed.filter((c) => !pickOf(c.id));
+  const fresh = s.picks.filter((x) => !st.seen.has(x.card.id));
+  const mini = st.mini;
+  const el = document.createElement('div');
+  el.className = `mass-pop store-pop${mini ? ' mini' : ''}${st.enter ? ' enter' : ''}${myTurn ? ' my-turn' : ''}`;
+  el.setAttribute('role', 'status');
+  el.title = myTurn ? 'Tới lượt bạn: bấm 1 lá trên quầy' : mini ? 'Bấm để mở rộng' : 'Bấm để thu gọn';
+  el.innerHTML = `
+    <div class="mp-src"><div class="who"><span class="mini-ic">${cardInfo(s.card).icon} </span>${esc(g.players[s.by].name)}</div>${cardHTML(s.card)}</div>
+    <div class="mp-arrow">➜</div>
+    <div class="sp-right">
+      <div class="mp-targets">${s.order.map((i) => {
+        const p = g.players[i], pk = pickBy(i), now = i === picking, mine = i === g.me?.index;
+        const gone = !pk && !now && !p.alive;
+        const slot = pk ? cardHTML(pk.card, 'mp-res ok' + (fresh.includes(pk) && !st.enter ? ' flip' : ''))
+          : gone ? '<div class="mp-res dead"><div class="ic">💀</div></div>'
+          : `<div class="mp-res wait">${now ? 'đang<br>chọn…' : picking == null ? '—' : 'chờ…'}</div>`;
+        return `<div class="mp-col${mine ? ' mine' : ''}${now ? ' active' : ''}">
+          <div class="mp-name" title="${esc(p.name)}" data-sum="${pk ? cardInfo(pk.card).icon : now ? '…' : ''}">${mine ? 'Bạn' : esc(p.name)}</div>
+          <div class="mp-slot">${slot}</div></div>`;
+      }).join('')}</div>
+      ${remaining.length ? `<div class="sp-left"><span>${myTurn ? '👉 Bấm 1 lá để lấy' : 'Còn trên quầy'}</span>${remaining.map((c) => cardHTML(c, 'sp-tiny' + (myTurn ? ' sp-pickable' : ''))).join('')}</div>` : ''}
+    </div>
+    ${myTurn ? '' : '<button type="button" class="mp-close" title="Đóng" aria-label="Đóng">✕</button>'}`;
+  el.onclick = (e) => {
+    if (e.target.closest('.mp-close')) return hideStorePopup(st);
+    const pick = e.target.closest('.sp-pickable');
+    if (pick) return run(() => sendAction({ type: 'pick', cardId: Number(pick.dataset.card) }))();
+    if (myTurn) return;
+    clearTimeout(st.timer); st.timer = 'manual';
+    st.mini = !mini;
+    renderStorePopup(ROOM.game);
+  };
+  arena.appendChild(el);
+  for (const x of fresh) st.seen.add(x.card.id);
+  st.enter = false;
+}
+function hideStorePopup(st) {
+  clearTimeout(st.timer);
+  st.hidden = true;
+  const el = $('.store-pop');
+  if (!el || ui.store !== st) return;
+  el.classList.add('out');
+  el.addEventListener('animationend', () => el.remove(), { once: true });
+  setTimeout(() => el.remove(), 600);
 }
 
 function drawStageHTML(g) {
@@ -1130,8 +1318,9 @@ function promptHTML(g, meIdx, meP) {
       return `<h4>🤠 Đấu súng với ${P(pend.other)}!</h4><div>Bỏ 1 lá Bang! để tiếp tục, hoặc chịu thua mất 1 máu.</div>
         <div class="row"><button class="btn secondary" data-act="take">Chịu thua (mất 1 máu)</button></div>`;
     case 'store':
-      return `<h4>🏪 General Store — ${mine ? 'chọn 1 lá:' : `đang chờ ${P(pend.player)} chọn…`}</h4>
-        <div class="row" id="storeCards">${pend.cards.map((c) => cardHTML(c, 'small ' + (mine ? 'playable' : ''))).join('')}</div>`;
+      // Các lá nằm trên pop-up giữa bàn (renderStorePopup)
+      return mine ? '<h4>🏪 General Store — tới lượt bạn!</h4><div>Bấm 1 lá trên <b>quầy giữa bàn</b> để lấy.</div>'
+        : `<h4>🏪 General Store</h4><div class="muted">Đang chờ ${P(pend.player)} chọn…</div>`;
     case 'check': {
       const ci = CHECK_INFO[pend.kind] || CHECK_INFO.Barrel;
       const luck = abilityOf(g.players[pend.player]) === 'Lucky Duke' ? ' (Lucky Duke lật 2 lá, lấy lá có lợi)' : '';
@@ -1504,10 +1693,6 @@ function bindGame(g, meIdx, meP, canPlay, myPrompt) {
   const discardEl = main.querySelector('#discardPile.draw-source');
   if (discardEl) discardEl.onclick = run(() => sendAction({ type: 'drawChoice', from: 'discard' }));
 
-  main.querySelectorAll('#storeCards .card').forEach((el) => el.onclick = run(async () => {
-    if (!myPrompt) return;
-    await sendAction({ type: 'pick', cardId: Number(el.dataset.card) });
-  }));
   main.querySelectorAll('#kitCards .kit-choice').forEach((el) => el.onclick = () => {
     if (!myPrompt || pend.type !== 'kit') return;
     const id = Number(el.dataset.kitId);

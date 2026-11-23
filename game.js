@@ -429,7 +429,7 @@ class Game {
     // Barrel: rút xong thì quay lại phát Bang! đang chờ
     const bang = pend.resume;
     if (this.check(p, (c) => c.suit === 'H', 'Barrel')) { bang.got++; this.stats[pi].dodged++; }
-    if (bang.got >= bang.need) { this.addLog(`${p.name} đã né được!`); return this.finishResponse(bang); }
+    if (bang.got >= bang.need) { this.addLog(`${p.name} đã né được!`); this.noteMass(bang, { barrel: true }); return this.finishResponse(bang); }
     this.pending = bang;
   }
 
@@ -610,6 +610,17 @@ class Game {
     if (!this.winner) return false;
     if (this.winner === 'Sheriff') return p.role === 'Sheriff' || p.role === 'Deputy';
     return p.role === this.winner;
+  }
+
+  // Ghi cách một người phản hồi lá đánh chung (Indians/Gatling) để giao diện hiện pop-up kết quả
+  noteMass(pend, res) {
+    const m = this.mass;
+    if (!m || !pend?.mass || pend.mass !== m.seq) return;
+    const t = m.targets.find((x) => x.i === pend.player);
+    if (!t || t.res) return;
+    if (res.hurt && !this.players[pend.player].alive) res = { dead: true };
+    t.res = res;
+    m.t = Date.now();
   }
 
   // ---------- hàng đợi phản hồi ----------
@@ -851,6 +862,7 @@ class Game {
         const c = pend.cards.splice(i, 1)[0];
         p.hand.push(c);
         this.addLog(`${p.name} chọn ${cardStr(c)} ở General Store.`);
+        if (this.store) { this.store.picks.push({ i: pi, card: c }); this.store.t = Date.now(); }
         pend.order.shift();
         while (pend.order.length && !this.players[pend.order[0]].alive) pend.order.shift();
         if (pend.cards.length && pend.order.length) pend.player = pend.order[0];
@@ -878,8 +890,10 @@ class Game {
           pend.got++;
           this.stats[pi].dodged++;
           this.addLog(`${p.name} dùng ${c.name === 'Bang' ? 'Bang! (như Missed!)' : c.name === 'Missed' ? 'Missed!' : c.name}.`);
+          if (pend.got >= pend.need) this.noteMass(pend, { card: c });
         } else if (a.type === 'take') {
           this.damage(pi, 1, pend.source, pend);
+          this.noteMass(pend, { hurt: 1 });
           return this.finishResponse(pend);
         } else fail('Hành động không hợp lệ.');
         if (pend.got >= pend.need) { this.addLog(`${p.name} đã né được!`); this.finishResponse(pend); }
@@ -895,10 +909,12 @@ class Game {
           this.recordPlay(pi, c);
           this.mollyDraw(p, c, pend.type === 'duel' ? pend : null);
           this.addLog(`${p.name} bỏ một Bang!.`);
+          this.noteMass(pend, { card: c });
           if (pend.type === 'duel') this.pending = { ...pend, player: pend.other, other: pi };
           else this.nextPending();
         } else if (a.type === 'take') {
           this.damage(pi, 1, pend.type === 'duel' ? pend.other : pend.source, pend.type === 'duel' ? pend : null);
+          this.noteMass(pend, { hurt: 1 });
           this.finishResponse(pend);
         } else fail('Hành động không hợp lệ.');
         return;
@@ -991,6 +1007,9 @@ class Game {
         use(); this.toDiscard(card);
         const order = [pi, ...others()];
         this.pending = { type: 'store', player: pi, order, cards: this.draw(order.length) };
+        // Lịch sử chọn (công khai) cho pop-up General Store
+        this.storeSeq = (this.storeSeq || 0) + 1;
+        this.store = { seq: this.storeSeq, by: pi, card, order: [...order], revealed: [...this.pending.cards], picks: [], t: Date.now(), t0: Date.now() };
         this.addLog(`🏪 ${p.name} mở General Store.`);
         return;
       }
@@ -1034,9 +1053,12 @@ class Game {
         use(); this.toDiscard(card);
         if (name === 'Indians' || name === 'Gatling') this.stats[pi].mass++;
         this.addLog(name === 'Indians' ? `🪶 ${p.name} thả thổ dân tấn công!` : `🔫 ${p.name} dùng ${name}!`);
-        this.queue = others().filter((j) => !this.ignoredCard(this.players[j], card)).map((j) => name === 'Indians'
-          ? { type: 'indians', player: j, source: pi }
-          : this.attackPrompt(pi, j, 1));
+        const targets = others().filter((j) => !this.ignoredCard(this.players[j], card));
+        this.massSeq = (this.massSeq || 0) + 1;
+        this.mass = { seq: this.massSeq, by: pi, card, targets: targets.map((i) => ({ i, res: null })), t: Date.now(), t0: Date.now() };
+        this.queue = targets.map((j) => name === 'Indians'
+          ? { type: 'indians', player: j, source: pi, mass: this.massSeq }
+          : { ...this.attackPrompt(pi, j, 1), mass: this.massSeq });
         this.nextPending();
         return;
       }
@@ -1215,6 +1237,8 @@ class Game {
       discardRecent: this.discard.slice(-3), // [cũ nhất, ..., trên cùng]
       pending, log: this.log.slice(-60), winner: this.winner,
       summary: this.winner ? this.summary() : null, // thống kê + danh hiệu, chỉ có khi ván đã xong
+      store: this.store ? { ...this.store, order: [...this.store.order], revealed: [...this.store.revealed], picks: this.store.picks.map((x) => ({ ...x })) } : null, // General Store gần nhất cho pop-up
+      mass: this.mass ? { ...this.mass, targets: this.mass.targets.map((t) => ({ ...t })) } : null, // lá đánh chung gần nhất + kết quả từng người (công khai) cho pop-up
       lastCheck: this.lastCheck || null, // lá rút kiểm tra gần nhất (đã công khai ở chồng bài bỏ)
       plays: (this.plays || []).map((event) => ({ ...event })),
       transfers: (this.transfers || []).map((event) => ({

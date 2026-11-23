@@ -623,3 +623,135 @@ body.match-result-open { overflow: hidden; }
   .result-headline { animation: none; }
   .result-continue { transition: none; }
 }
+
+/* ---------- pop-up đánh chung (Indians / Gatling) ----------
+   Nằm giữa .arena (che chồng bài trong lúc giải quyết), không phủ tối bàn; bấm để thu gọn/mở rộng. */
+.mass-pop {
+  --ty: -50%; position: absolute; left: 50%; top: 50%; transform: translate(-50%, var(--ty));
+  z-index: 20; max-width: calc(100% - 16px);
+  display: flex; align-items: stretch; gap: 6px;
+  padding: 8px;
+  background: rgba(43,26,16,.95); border: 2px solid var(--gold); border-radius: 12px;
+  box-shadow: 0 10px 30px rgba(0,0,0,.6);
+  color: var(--paper); cursor: pointer;
+}
+.mass-pop.enter { animation: mpIn .35s cubic-bezier(.2,1.4,.4,1); }
+.mass-pop.out { animation: mpOut .35s ease-in forwards; }
+@keyframes mpIn { from { opacity: 0; transform: translate(-50%, var(--ty)) scale(.85); } }
+@keyframes mpOut { to { opacity: 0; transform: translate(-50%, var(--ty)) scale(.85); } }
+
+.mp-src { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px; }
+.mp-src .who { font-size: 11px; font-weight: 700; color: var(--gold); max-width: 60px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mass-pop .mp-src .card { width: 50px; height: 68px; padding: 2px; border-width: 2px; }
+.mass-pop .mp-src .card .icon { font-size: 20px; }
+.mass-pop .mp-src .card .cname { font-size: 9px; margin-top: 2px; }
+.mass-pop .mp-src .card .corner { font-size: 9px; top: 1px; left: 3px; }
+.mp-arrow { align-self: center; font-size: 16px; color: var(--gold); padding-top: 16px; }
+
+.mp-targets { display: flex; gap: 4px; }
+.mp-col { width: 50px; display: flex; flex-direction: column; align-items: center; gap: 5px; }
+.mp-name { width: 100%; padding: 2px; border-radius: 6px; background: rgba(244,228,193,.12); font-size: 10px; font-weight: 700; text-align: center; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.mp-col.mine .mp-name { background: var(--gold); color: var(--ink); }
+.mp-slot { width: 46px; height: 62px; perspective: 400px; border-radius: 7px; }
+.mp-col.active .mp-slot { outline: 2px solid var(--gold); outline-offset: 2px; }
+.mp-res { width: 100%; height: 100%; border-radius: 7px; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; font-size: 10px; font-weight: 700; line-height: 1.15; }
+.mp-res.flip { animation: mpFlip .35s ease-out; }
+@keyframes mpFlip { from { transform: rotateY(90deg); } }
+.mass-pop .mp-res.card { padding: 2px; border-width: 2px; cursor: default; }
+.mass-pop .mp-res.card .icon { font-size: 18px; }
+.mass-pop .mp-res.card .cname { font-size: 9px; margin-top: 2px; }
+.mass-pop .mp-res.card .corner { font-size: 9px; top: 1px; left: 3px; }
+.mp-res .ic { font-size: 20px; }
+.mp-res.hurt { background: #5c1712; border: 2px solid #e0402f; color: #ffd9d2; }
+.mp-res.hurt .big { font-size: 20px; font-family: 'Rye', serif; color: #ff7b6b; }
+.mp-res.dead { background: #111; border: 2px solid #666; color: #ccc; }
+.mp-res.barrel { background: #eef4fa; border: 2px solid var(--blue); color: var(--ink); }
+.mp-res.ok { box-shadow: 0 0 0 2px #4caf50, 0 0 10px rgba(76,175,80,.6); }
+.mp-res.wait { border: 2px dashed rgba(244,228,193,.35); color: rgba(244,228,193,.6); }
+
+.mp-close { position: absolute; top: -10px; right: -10px; width: 22px; height: 22px; padding: 0; border-radius: 50%; border: 2px solid var(--gold); background: var(--wood); color: var(--paper); cursor: pointer; font-size: 11px; line-height: 1; }
+
+/* thu gọn: một dải nhỏ, dời lên mép trên mặt bàn để lộ chồng bài */
+.mass-pop.mini { --ty: -100%; top: calc(50% - 46px); max-width: min(420px, calc(100% - 16px)); padding: 5px 28px 5px 10px; gap: 6px; align-items: center; cursor: pointer; flex-wrap: wrap; justify-content: center; }
+.mass-pop.mini .mp-src .card, .mass-pop.mini .mp-slot, .mass-pop.mini .mp-arrow { display: none; }
+.mass-pop.mini .mp-src .who { max-width: 150px; }
+.mass-pop.mini .mp-targets { flex-wrap: wrap; justify-content: center; }
+.mass-pop.mini .mp-col { width: auto; }
+.mass-pop.mini .mp-name { padding: 2px 6px; font-size: 11px; }
+.mass-pop.mini .mp-name::after { content: ' ' attr(data-sum); }
+.mini-ic { display: none; }
+.mass-pop.mini .mini-ic { display: inline; }
+
+/* đánh dấu ghế đang bị pop-up nói tới */
+.player.mp-hit .av { animation: mpHit .5s 2; }
+@keyframes mpHit { 50% { filter: drop-shadow(0 0 10px #e0402f) brightness(1.3); } }
+
+@media (max-width: 900px) {
+  .mp-col { width: 42px; } .mp-slot { width: 38px; height: 52px; }
+  .mass-pop .mp-res.card .cname, .mass-pop .mp-src .card .cname { display: none; }
+  .mass-pop .mp-src .card { width: 40px; height: 54px; }
+}
+@media (prefers-reduced-motion: reduce) { .mass-pop, .mp-res, .player.mp-hit .av { animation: none !important; } }
+
+/* ---------- vòng đếm ngược quanh avatar người đang có đồng hồ ----------
+   Vòng cạn dần theo chiều kim đồng hồ từ đỉnh (nửa phải hết trước, rồi tới nửa trái).
+   Chạy bằng CSS: JS chỉ đặt --ring-total (tổng giây) và --ring-left (số giây còn lại lúc vẽ). */
+@property --ring { syntax: '<number>'; inherits: false; initial-value: 1; }
+
+.player.ticking .av { box-shadow: 0 0 0 4px rgba(42,22,10,.9), 0 0 22px rgba(217,164,65,.7); }
+.turn-ring {
+  position: absolute; inset: -8px; border-radius: 50%; pointer-events: none; z-index: 1;
+  /* phần vàng = thời gian còn lại; phần tối = đã trôi qua */
+  background: conic-gradient(rgba(42,22,10,.85) 0 calc((1 - var(--ring)) * 360deg), var(--ring-color, var(--gold)) 0);
+  -webkit-mask: radial-gradient(farthest-side, transparent calc(100% - 5px), #000 calc(100% - 5px));
+  mask: radial-gradient(farthest-side, transparent calc(100% - 5px), #000 calc(100% - 5px));
+  animation:
+    ringDrain calc(var(--ring-total) * 1s) linear forwards,
+    ringColor calc(var(--ring-total) * 1s) linear forwards;
+  animation-delay: calc((var(--ring-left) - var(--ring-total)) * 1s);
+}
+@keyframes ringDrain { from { --ring: 1; } to { --ring: 0; } }
+/* đổi dần sang cam rồi đỏ ở phần cuối */
+@keyframes ringColor {
+  0%, 60% { --ring-color: var(--gold); }
+  85% { --ring-color: #f08a24; }
+  100% { --ring-color: #e0402f; }
+}
+@property --ring-color { syntax: '<color>'; inherits: false; initial-value: #d9a441; }
+
+/* ≤ 10 giây: nhấp nháy, càng gần hết càng nhanh */
+.player.ticking.urgent .turn-ring { filter: drop-shadow(0 0 6px #e0402f); }
+.player.ticking.urgent .av { animation: ringBlink .6s ease-in-out infinite; }
+.player.ticking.urgent.final .av { animation-duration: .3s; }
+@keyframes ringBlink {
+  0%, 100% { box-shadow: 0 0 0 4px rgba(42,22,10,.9), 0 0 10px rgba(224,64,47,.5); }
+  50% { box-shadow: 0 0 0 4px rgba(42,22,10,.9), 0 0 30px 6px rgba(224,64,47,.95); }
+}
+.player.ticking.urgent .turn-ring { animation-name: ringDrain, ringColor, ringFlash; animation-duration: calc(var(--ring-total) * 1s), calc(var(--ring-total) * 1s), .6s; animation-iteration-count: 1, 1, infinite; animation-timing-function: linear, linear, ease-in-out; animation-delay: calc((var(--ring-left) - var(--ring-total)) * 1s), calc((var(--ring-left) - var(--ring-total)) * 1s), 0s; animation-fill-mode: forwards, forwards, none; }
+.player.ticking.urgent.final .turn-ring { animation-duration: calc(var(--ring-total) * 1s), calc(var(--ring-total) * 1s), .3s; }
+@keyframes ringFlash { 50% { opacity: .25; } }
+
+@media (prefers-reduced-motion: reduce) {
+  .player.ticking.urgent .av { animation: none; }
+  .player.ticking.urgent .turn-ring { animation-name: ringDrain, ringColor; animation-duration: calc(var(--ring-total) * 1s); animation-iteration-count: 1; }
+}
+
+/* ---------- pop-up General Store (dùng chung khung .mass-pop ở trên) ---------- */
+.store-pop .sp-right { display: flex; flex-direction: column; gap: 6px; justify-content: center; }
+.store-pop.my-turn { border-color: #ffd666; box-shadow: 0 0 0 2px rgba(255,214,102,.35), 0 10px 30px rgba(0,0,0,.6); cursor: default; }
+.store-pop .sp-left { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; justify-content: center; font-size: 10px; color: var(--paper2); }
+.store-pop .sp-left > span { margin-right: 4px; }
+.store-pop.my-turn .sp-left > span { color: #ffd666; font-weight: 700; font-size: 11px; }
+.store-pop .card.sp-tiny { width: 36px; height: 50px; padding: 1px; border-width: 2px; }
+.store-pop .card.sp-tiny .icon { font-size: 15px; }
+.store-pop .card.sp-tiny .cname, .store-pop .card.sp-tiny .range { display: none; }
+.store-pop .card.sp-tiny .corner { font-size: 8px; top: 0; left: 2px; }
+.store-pop.my-turn .card.sp-tiny { width: 46px; height: 62px; }
+.store-pop.my-turn .card.sp-tiny .icon { font-size: 18px; }
+.store-pop.my-turn .card.sp-tiny .cname { display: block; font-size: 8px; margin-top: 2px; }
+.store-pop .card.sp-pickable { cursor: pointer; animation: spGlow 1.1s ease-in-out infinite; }
+.store-pop .card.sp-pickable:hover { transform: translateY(-4px); }
+@keyframes spGlow { 50% { box-shadow: 0 0 0 2px #ffd666, 0 0 14px rgba(255,214,102,.9); } }
+.store-pop .mp-res.wait { font-size: 9px; }
+@media (prefers-reduced-motion: reduce) { .store-pop .card.sp-pickable { animation: none; box-shadow: 0 0 0 2px #ffd666; } }
+.mass-pop.mini .sp-left { display: none; }
