@@ -14,11 +14,21 @@
 <body>
   <header class="topbar">
     <div class="brand">BANG! <span>Online</span></div>
-    <div id="userbox"></div>
+    <div class="topbar-actions">
+      <div id="userbox"></div>
+      <div class="sound-control" id="soundControl">
+        <button class="btn ghost small" type="button" id="soundToggle" aria-label="Chỉnh âm lượng" aria-expanded="false" aria-controls="soundPanel">🔊</button>
+        <div class="sound-panel" id="soundPanel" hidden>
+          <label for="soundVolume">Âm lượng <output id="soundValue" for="soundVolume">65%</output></label>
+          <input type="range" id="soundVolume" min="0" max="100" value="65">
+        </div>
+      </div>
+    </div>
   </header>
   <main id="app"><div class="loading">Đang tải…</div></main>
   <div id="modal" class="modal hidden"></div>
   <div id="toasts"></div>
+  <script src="/sounds.js"></script>
   <script src="/app.js"></script>
 </body>
 </html>

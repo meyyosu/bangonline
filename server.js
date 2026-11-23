@@ -4,7 +4,7 @@ const http = require('http');
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
-const { Game, GameError, CARD_INFO, CHAR_INFO, ROLE_INFO, RULES_PREVIEW, greenCardCount } = require('./game');
+const { Game, GameError, CARD_INFO, CHAR_INFO, ROLE_INFO, RULES_PREVIEW, greenCardCount, dodgeCityCardCount, dodgeCityRevision } = require('./game');
 const { syncTimer, tickTimer } = require('./room-timer');
 const { pauseAction, finishPause, pauseView } = require('./room-pause');
 
@@ -13,6 +13,13 @@ const DATA_DIR = path.join(__dirname, 'data', RULES_PREVIEW ? 'preview' : '');
 const sessionCookie = RULES_PREVIEW ? 'bang_preview_sid' : 'sid';
 const sessionPattern = new RegExp('(?:^|;\\s*)' + sessionCookie + '=([a-f0-9]+)');
 const PUBLIC_DIR = path.join(__dirname, 'public');
+const SOUNDS_DIR = path.join(__dirname, 'data', 'sounds');
+const SOUND_FILES = new Set([
+  'bangload.mp3', 'bangsound1.mp3', 'bangsound2.mp3', 'catbalou1.mp3', 'duelo1.mp3',
+  'dynamitearmed.mp3', 'dynamiteexploded.mp3', 'equipment1.mp3', 'gatling.mp3', 'generalstore1.mp3',
+  'howitzer1.mp3', 'indian1.mp3', 'missedsound1.mp3', 'mustang1.mp3', 'outlawkilled1.mp3',
+  'playereliminated.mp3', 'playerjoin.mp3', 'prison1.mp3', 'prisonfree.mp3', 'punch1.mp3', 'yourturn1.mp3',
+]);
 const RUNTIME_FILES = ['server.js', 'game.js', 'power.js', 'room-timer.js', 'room-pause.js'];
 const readRevision = () => crypto.createHash('sha256').update(Buffer.concat(RUNTIME_FILES.map((file) => fs.readFileSync(path.join(__dirname, file))))).digest('hex');
 const runtimeRevision = readRevision();
@@ -24,8 +31,6 @@ let codeChanged = false;
 setInterval(() => {
   try { codeChanged = readRevision() !== runtimeRevision; } catch { codeChanged = true; }
 }, Number(process.env.BANG_CODE_CHECK_MS) || 10000).unref();
-const greenCardsRevision = greenCardCount > 0 && process.env.BANG_GREEN_CARDS_FILE
-  ? crypto.createHash('sha256').update(fs.readFileSync(process.env.BANG_GREEN_CARDS_FILE)).digest('hex') : null;
 const startedAt = new Date().toISOString();
 const USERS_FILE = path.join(DATA_DIR, 'users.json');
 const SESSIONS_FILE = path.join(DATA_DIR, 'sessions.json');
@@ -150,11 +155,22 @@ function serveStatic(req, res, pathname) {
   });
 }
 
+function serveSound(req, res, name) {
+  if (req.method !== 'GET' && req.method !== 'HEAD') return err(res, 'Method not allowed', 405);
+  if (!SOUND_FILES.has(name)) return err(res, 'Not found', 404);
+  fs.readFile(path.join(SOUNDS_DIR, name), (error, data) => {
+    if (error) return err(res, 'Not found', 404);
+    res.writeHead(200, { 'Content-Type': 'audio/mpeg', 'Content-Length': data.length });
+    res.end(req.method === 'HEAD' ? undefined : data);
+  });
+}
+
 const server = http.createServer(async (req, res) => {
   const { pathname } = new URL(req.url, 'http://x');
   if (req.method === 'GET' && pathname === '/api/health') {
-    return send(res, 200, { app: 'bang-online', pid: process.pid, revision: runtimeRevision, greenCardsRevision, greenCardCount, startedAt });
+    return send(res, 200, { app: 'bang-online', pid: process.pid, revision: runtimeRevision, greenCardsRevision: dodgeCityRevision, greenCardCount, dodgeCityCardCount, startedAt });
   }
+  if (pathname.startsWith('/sounds/')) return serveSound(req, res, pathname.slice('/sounds/'.length));
   if (!pathname.startsWith('/api/')) return serveStatic(req, res, pathname);
 
   const user = getUser(req);
@@ -163,7 +179,7 @@ const server = http.createServer(async (req, res) => {
 
   try {
     // ----- tài khoản -----
-    if (pathname === '/api/meta') return send(res, 200, { cards: CARD_INFO, chars: CHAR_INFO, roles: ROLE_INFO, rulesPreview: RULES_PREVIEW, greenCardCount });
+    if (pathname === '/api/meta') return send(res, 200, { cards: CARD_INFO, chars: CHAR_INFO, roles: ROLE_INFO, rulesPreview: RULES_PREVIEW, greenCardCount, dodgeCityCardCount });
     if (pathname === '/api/me') return send(res, 200, { user, room: user ? findRoomOf(user)?.code || null : null });
 
     if (method === 'POST' && (pathname === '/api/register' || pathname === '/api/login')) {
@@ -208,7 +224,7 @@ const server = http.createServer(async (req, res) => {
       if (findRoomOf(user)) return err(res, 'Bạn đang ở trong một phòng khác.');
       const body = await readBody(req);
       if (body.dodgeCity !== undefined && typeof body.dodgeCity !== 'boolean') return err(res, 'Tuỳ chọn Dodge City phải là bật hoặc tắt.');
-      if (body.dodgeCity && !greenCardCount) return err(res, 'Máy chủ chưa nạp dữ liệu lá xanh lá.');
+      if (body.dodgeCity && !dodgeCityCardCount) return err(res, 'Máy chủ chưa nạp dữ liệu Dodge City.');
       const { name } = body;
       const code = newCode();
       const r = { code, name: String(name || `Phòng của ${user}`).slice(0, 40), host: user, players: [user], status: 'waiting', game: null, chat: [] };

@@ -10,7 +10,7 @@ Giải nén rồi bấm đúp **`CHAY-GAME.bat`**. Script sẽ tự:
 1. Tải Node.js bản portable vào thư mục `node/` (chỉ lần đầu, cần Internet). Không cài gì vào hệ thống.
 2. Mở cổng 3000 trên tường lửa (chỉ lần đầu; khi Windows hỏi quyền Administrator thì bấm **Yes**).
 3. Tìm IP Radmin VPN (26.x.x.x), copy link cho bạn bè vào clipboard và mở trình duyệt.
-4. Tự nạp dữ liệu Dodge City từ `green-cards.json` để có thể bật bản mở rộng khi tạo phòng.
+4. Tự nạp dữ liệu Dodge City từ `dodge-city.json` để có thể bật bản mở rộng khi tạo phòng.
 
 Giữ cửa sổ đen mở trong lúc chơi; đóng nó là tắt server. Bạn bè chỉ cần mở link bằng trình duyệt, không phải cài gì.
 
@@ -34,17 +34,18 @@ Trong một cửa sổ PowerShell riêng tại thư mục dự án, chạy:
 ```powershell
 $env:BANG_RULES_PREVIEW = '1'
 $env:PORT = '3001'
-$env:BANG_GREEN_CARDS_FILE = (Resolve-Path .\green-cards.json).Path
 node server.js
 ```
 
 Mở [127.0.0.1:3001](http://127.0.0.1:3001) trên máy này và đăng ký tài khoản thử. Dùng bốn hồ sơ trình duyệt riêng để tạo và vào cùng một phòng. Có thể đặt số lựa chọn nhân vật thành **1** để vào ván ngay. Tài khoản và phiên đăng nhập của bản thử được lưu riêng.
 
-### Nạp bộ lá viền xanh lá
+### Bật Dodge City
 
-Khi chạy `CHAY-GAME.bat`, launcher tự nạp `green-cards.json` trong thư mục game, không cần đặt biến môi trường. Nếu đã đặt `$env:BANG_GREEN_CARDS_FILE`, launcher dùng tệp đó thay cho dữ liệu mặc định. Khi chạy thủ công bằng `node server.js`, đặt biến này thành đường dẫn tới `green-cards.json` hoặc tệp dữ liệu tương thích trước khi khởi động. Launcher cũng phát hiện server đang chạy chưa nạp dữ liệu hoặc còn dùng dữ liệu cũ và hỏi khởi động lại. Khi dữ liệu đã nạp, ô **Bản mở rộng: Dodge City** ở mục **Tạo phòng** có thể được chọn. Phòng bật bản mở rộng dùng 94 lá và danh sách 31 nhân vật. Phòng mặc định dùng 80 lá và 16 nhân vật.
+`CHAY-GAME.bat` và `node server.js` đều tự nạp `dodge-city.json` trong thư mục game. Chủ phòng tích **Bản mở rộng: Dodge City** ở mục **Tạo phòng** để dùng 114 lá và danh sách 31 nhân vật. Phòng mặc định dùng 80 lá và 16 nhân vật. Launcher phát hiện server còn dùng dữ liệu cũ và hỏi khởi động lại.
 
-Tệp JSON là một mảng gồm 13 loại lá, tổng cộng 14 bản. Mỗi loại có `name` (tên riêng không trùng lá gốc), `effect` và `copies`. Mỗi phần tử trong `copies` có `suit` (`S`, `H`, `D` hoặc `C`) và `rank` (chuỗi từ `2` đến `10`, hoặc `J`, `Q`, `K`, `A`).
+Để thử dữ liệu riêng, có thể đặt `$env:BANG_DODGE_CITY_FILE` thành đường dẫn tới tệp JSON. Biến `$env:BANG_GREEN_CARDS_FILE` vẫn được hỗ trợ cho dữ liệu cũ.
+
+Tệp JSON là một mảng khai báo từng loại lá. Mỗi loại có `name` và `copies`. Mỗi phần tử trong `copies` có `suit` (`S`, `H`, `D` hoặc `C`) và `rank` (chuỗi từ `2` đến `10`, hoặc `J`, `Q`, `K`, `A`). Với lá đã có trong bộ gốc, chỉ khai báo `name` và `copies`; những bản trùng cả tên, hạng và chất được bỏ qua. Với loại mới, thêm `effect` và `type` nếu viền là `brown` hoặc `blue`. Màu mặc định là `green` và tệp cần giữ đủ 13 loại, 14 lá viền xanh lá. Lá viền nâu cần bỏ thêm bài dùng `discardCost: true`.
 
 | `effect` | Tham số có thể đặt |
 | --- | --- |
@@ -53,7 +54,10 @@ Tệp JSON là một mảng gồm 13 loại lá, tổng cộng 14 bản. Mỗi l
 | `attack` | `maxDistance` giới hạn khoảng cách, hoặc `"weapon"` để dùng tầm súng. `draw` từ 0 đến 3, mặc định 0 |
 | `attackAll` | Tấn công lần lượt tất cả người khác |
 | `take`, `discard` | `maxDistance` giới hạn khoảng cách |
+| `discardAll` | Chọn một lá để bỏ từ từng người chơi khác có bài |
 | `heal` | `heal` từ 1 đến 2, mặc định 1 |
+| `healOther` | Hồi 1 máu cho một người chơi khác |
+| `distanceIn`, `distanceOut` | Trang bị viền xanh dương làm mục tiêu gần hơn hoặc khiến người khác thấy bạn xa hơn 1 |
 
 Khi dùng khoảng cách cố định, `maxDistance` nhận giá trị từ 1 đến 7. Bỏ trường này để chọn mục tiêu ở mọi khoảng cách. Lá xanh lá sẵn sàng từ đầu lượt tiếp theo của người đặt, rồi được bỏ sau khi dùng.
 
@@ -66,6 +70,8 @@ Khi dùng khoảng cách cố định, `maxDistance` nhận giá trị từ 1 đ
 Cách chơi: mỗi người tự đăng ký tài khoản → chủ phòng bấm **Tạo phòng** → bấm **Copy link mời** gửi cho bạn bè (hoặc gửi mã 4 ký tự) → đủ 4–7 người thì chủ phòng bấm **Bắt đầu ván**.
 
 ## Tính năng
+
+- Biểu tượng loa ở góc trên bên phải mở thanh âm lượng. Mức 0 tắt tiếng. Trình duyệt nhớ mức đã chọn và bắt đầu phát sau khi bạn tương tác với trang. Server lấy các tệp MP3 dùng trong game từ `data/sounds`.
 
 - Rút bài đầu lượt bằng cách bấm chồng bài. Sau 5 giây không rút, server tự rút từ bộ bài kể cả khi tắt timer lượt hoặc mất kết nối; riêng Jesse Jones/Pedro Ramirez có 20 giây. Jesse bấm trực tiếp người chơi có bài đang sáng; Pedro bấm trực tiếp bài bỏ để dùng kỹ năng, không cần menu. Kit Carlson xem 3 lá giữa bàn và có 20 giây chọn 2 lá về tay, lá còn lại bay về bộ bài; người khác chỉ thấy 3 lá úp. Black Jack lật công khai lá thứ hai giữa bàn trong 3 giây rồi thu về tay; nếu là Cơ/Rô sẽ rút thêm 1 lá với animation. Timer lượt bắt đầu sau khi hoàn tất bước rút/chọn/lật bài. Animation thể hiện đúng nguồn và đích; bài bí mật chỉ hiện mặt cho người nhận.
 - Đăng ký/đăng nhập (mật khẩu được băm bằng scrypt, lưu trong `data/users.json`)
@@ -105,4 +111,4 @@ data/            Tự tạo khi chạy: users.json, sessions.json
 
 ## Phát triển tiếp
 
-Một vài ý tưởng: thêm bản mở rộng (Dodge City…), thêm hiệu ứng âm thanh, lưu phòng vào file để không mất khi khởi động lại.
+Một vài ý tưởng: thêm các bản mở rộng khác, lưu phòng vào file để không mất khi khởi động lại.
