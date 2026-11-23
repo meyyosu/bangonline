@@ -2,6 +2,7 @@
 // Logic luật chơi Bang! (bản gốc): 80 lá bài, 16 nhân vật, 4 vai trò.
 
 const { readFileSync } = require('node:fs');
+const power = require('./power'); // sức mạnh & cán cân cho tab Diễn biến / Đóng góp
 
 const RANKS = { J: 11, Q: 12, K: 13, A: 14 };
 const rankVal = (r) => RANKS[r] || Number(r);
@@ -255,11 +256,40 @@ class Game {
     this.startedAt = Date.now();
     for (const p of this.players) p.hand.push(...this.draw(p.hp));
     this.addLog(`Ván đấu bắt đầu! Sheriff là ${this.players[this.turn].name}.`);
+    // Dòng thời gian cán cân: mốc đầu ván (sức mạnh mỗi phe lúc này là chuẩn để so) rồi mỗi hành động một điểm
+    this.timeline = [];
+    this.tlLog = [];
+    power.balance(this, CARD_INFO);
+    this.tlStart = this.players.map((p, i) => this.powerState(i));
     this.startTurn();
   }
 
+  // ---------- dòng thời gian cán cân (tab Diễn biến / Đóng góp) ----------
+  powerState(i) {
+    const p = this.players[i];
+    return [p.hp, p.alive ? 1 : 0, Math.round(power.strength(this, i, CARD_INFO) * 10) / 10, p.eq.map((c) => c.name).join('|')];
+  }
+  // Ai được ghi công cho hành động sắp làm: phản hồi khi bị tấn công → người tấn công; Duel → đối thủ;
+  // rút kiểm tra Dynamite/Jail → không ai (-1, "Số phận"); còn lại → chính người làm.
+  creditFor(pi) {
+    const pend = this.pending;
+    if (!pend || pend.player !== pi) return pi;
+    if (pend.type === 'check') return pend.kind === 'Barrel' && pend.resume ? (pend.resume.source ?? -1) : -1;
+    if (pend.type === 'duel') return pend.other ?? pi;
+    if (pend.source != null && pend.source !== pi) return pend.source;
+    return pi;
+  }
+  recordTimeline(credit) {
+    if (!this.timeline || this.phase === 'character') return;
+    this.timeline.push({
+      t: this.turnNumber || 0, r: this.roundNumber || 0, o: this.turn, a: credit,
+      b: Math.round(power.balance(this, CARD_INFO) * 1000) / 1000,
+      ps: this.players.map((_, i) => this.powerState(i)), log: this.tlLog.splice(0),
+    });
+  }
+
   // ---------- tiện ích ----------
-  addLog(msg) { this.log.push(msg); if (this.log.length > 150) this.log.shift(); }
+  addLog(msg) { this.log.push(msg); if (this.log.length > 150) this.log.shift(); if (this.tlLog) this.tlLog.push(msg); }
   idx(name) { return this.players.findIndex((p) => p.name === name); }
   alive() { return this.players.map((p, i) => i).filter((i) => this.players[i].alive); }
   nextAlive(i) {
@@ -709,7 +739,14 @@ class Game {
     }
   }
 
+  // Mọi hành động đi qua đây: làm xong (không lỗi) thì ghi một điểm cán cân
   act(name, a) {
+    const credit = this.creditFor(this.idx(name));
+    this.doAct(name, a);
+    this.recordTimeline(credit);
+  }
+
+  doAct(name, a) {
     if (this.winner) fail('Ván đấu đã kết thúc.');
     const pi = this.idx(name);
     if (pi < 0) fail('Bạn không tham gia ván này.');
@@ -779,7 +816,8 @@ class Game {
       if (pend.red) this.give(p, 1);
       this.pending = null;
       this.phase = 'play';
-      return this.afterAction();
+      this.afterAction();
+      return this.recordTimeline(this.idx(p.name));
     }
     if (this.phase === 'character') {
       this.addLog(`⏱ ${p.name} hết giờ chọn nhân vật, tự động chọn ngẫu nhiên.`);
@@ -1169,10 +1207,27 @@ class Game {
         return {
           name: p.name, bangs: s.bangs, dealt: s.dealt, taken: s.taken, kills: s.kills, dodged: s.dodged,
           healed: s.healed, mass: s.mass, equips: s.equips, targeted: s.targeted,
-          checks: s.checks, checksOk: s.checksOk,
+          checks: s.checks, checksOk: s.checksOk, turns: s.ownTurns,
         };
       }),
       awards: this.awards(),
+      timeline: this.compactTimeline(),
+    };
+  }
+
+  // Gửi cho màn kết thúc: trạng thái từng người chỉ giữ ở điểm cuối mỗi lượt (đủ để tính "tác động" của lượt),
+  // bỏ các dòng log thủ tục cho nhẹ.
+  compactTimeline() {
+    if (!this.timeline?.length) return null;
+    const boring = /^(— |.+ rút \d+ lá\.$|.+ kết thúc lượt\.$|.+ đã chọn |Chồng bài đã được xáo)/;
+    const T = this.timeline;
+    return {
+      start: this.tlStart,
+      pts: T.map((p, k) => ({
+        t: p.t, r: p.r, o: p.o, a: p.a, b: p.b,
+        log: p.log.filter((l) => !boring.test(l)),
+        ...(k === T.length - 1 || T[k + 1].t !== p.t ? { ps: p.ps } : {}),
+      })),
     };
   }
 

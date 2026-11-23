@@ -92,6 +92,11 @@ main { padding: 6px 8px; }
 .store-pop.my-turn .card.sp-tiny .cname { font-size: 9px; }
 .store-pop .card.sp-pickable:hover { transform: none; }
 
+/* ---------- màn kết thúc: thanh 5 bước gọn lại cho vừa màn hẹp ---------- */
+.result-steps { max-width: 100%; flex-wrap: wrap; justify-content: center; }
+.result-steps button { padding: 6px 4px; font-size: 11px; gap: 4px; white-space: nowrap; letter-spacing: -.2px; }
+.result-steps button span { display: none; }
+
 /* ---------- màn kết thúc: danh hiệu ----------
    Dòng phụ dài (vd. "mạng của BongMaThungLung") không được kéo thẻ rộng quá màn hình */
 .aw-grid { grid-template-columns: minmax(0, 1fr); }
