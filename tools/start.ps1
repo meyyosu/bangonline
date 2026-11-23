@@ -74,7 +74,7 @@ try {
   $greenCardCount = & $node -e "const g=require('./game'); if(g.greenCardCount!==14){console.error('Ma game chua ho tro Dodge City hoac chua nap du 14 la.');process.exit(1);} console.log(g.greenCardCount);"
   if ($LASTEXITCODE -ne 0) { throw 'Game chưa nạp đủ 14 lá Dodge City. Hãy kiểm tra mã game và tệp dữ liệu.' }
   Say "Dữ liệu Dodge City: $env:BANG_GREEN_CARDS_FILE" Green
-  $revision = & $node -e "const fs=require('fs'),crypto=require('crypto'); console.log(crypto.createHash('sha256').update(Buffer.concat(['server.js','game.js','room-timer.js','room-pause.js'].map(f=>fs.readFileSync(f)))).digest('hex'));"
+  $revision = & $node -e "const fs=require('fs'),crypto=require('crypto'); console.log(crypto.createHash('sha256').update(Buffer.concat(['server.js','game.js','power.js','room-timer.js','room-pause.js'].map(f=>fs.readFileSync(f)))).digest('hex'));"
   if ($LASTEXITCODE -ne 0) { throw 'Không đọc được mã nguồn game trong thư mục hiện tại.' }
 
   $localUrl = "http://127.0.0.1:$Port"

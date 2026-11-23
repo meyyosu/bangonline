@@ -363,7 +363,7 @@ test('forfeiting resolves choices and advances past departed players without los
 test('room API protects settings and passwords, supports reconnect and games', async () => {
   // Isolate generated accounts and sessions from the user's server data.
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'bang-settings-'));
-  for (const file of ['server.js', 'game.js', 'room-timer.js', 'room-pause.js']) fs.copyFileSync(path.join(__dirname, '..', file), path.join(dir, file));
+  for (const file of ['server.js', 'game.js', 'power.js', 'room-timer.js', 'room-pause.js']) fs.copyFileSync(path.join(__dirname, '..', file), path.join(dir, file));
   const probe = net.createServer();
   await new Promise((resolve) => probe.listen(0, '127.0.0.1', resolve));
   const port = probe.address().port;
@@ -520,7 +520,7 @@ test('room API protects settings and passwords, supports reconnect and games', a
 test('room view warns when the code on disk is newer than the running server', async () => {
   // Bản sao riêng để sửa game.js mà không đụng vào mã thật.
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'bang-stale-'));
-  for (const file of ['server.js', 'game.js', 'room-timer.js', 'room-pause.js']) fs.copyFileSync(path.join(__dirname, '..', file), path.join(dir, file));
+  for (const file of ['server.js', 'game.js', 'power.js', 'room-timer.js', 'room-pause.js']) fs.copyFileSync(path.join(__dirname, '..', file), path.join(dir, file));
   const probe = net.createServer();
   await new Promise((resolve) => probe.listen(0, '127.0.0.1', resolve));
   const port = probe.address().port;
