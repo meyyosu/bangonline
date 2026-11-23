@@ -2,6 +2,8 @@
 // Logic luật chơi Bang! (bản gốc): 80 lá bài, 16 nhân vật, 4 vai trò.
 
 const { readFileSync } = require('node:fs');
+const { createHash } = require('node:crypto');
+const { join } = require('node:path');
 
 const RANKS = { J: 11, Q: 12, K: 13, A: 14 };
 const rankVal = (r) => RANKS[r] || Number(r);
@@ -52,7 +54,7 @@ const CHAR_INFO = {
 };
 
 const DODGE_CITY_CHAR_INFO = {
-  'Apache Kid': { hp: 3, desc: 'Miễn hiệu ứng lá Rô của người khác đánh vào bạn, trừ Duel.' },
+  'Apache Kid': { hp: 3, desc: 'Miễn nhiễm với các lá chất Rô do người khác đánh vào bạn. Kỹ năng này tạm thời vô hiệu khi đang trong Duel (Đấu súng).' },
   'Belle Star': { hp: 4, desc: 'Trong lượt của bạn, trang bị trên bàn của người khác mất hiệu lực.' },
   'Bill Noface': { hp: 4, desc: 'Đầu lượt rút 1 lá, cộng thêm 1 lá cho mỗi điểm máu đang thiếu.' },
   'Chuck Wengam': { hp: 4, desc: 'Trong lượt, có thể trả 1 máu để rút 2 lá nhiều lần. Không được trả điểm máu cuối.' },
@@ -61,8 +63,8 @@ const DODGE_CITY_CHAR_INFO = {
   'Greg Digger': { hp: 4, desc: 'Khi người khác bị loại, hồi 2 máu, tối đa bằng giới hạn máu.' },
   'Herb Hunter': { hp: 4, desc: 'Khi người khác bị loại, rút thêm 2 lá.' },
   'José Delgado': { hp: 4, desc: 'Tối đa 2 lần mỗi lượt, bỏ 1 lá viền xanh dương trên tay để rút 2 lá.' },
-  'Molly Stark': { hp: 4, desc: 'Rút bù khi tự nguyện dùng hoặc bỏ Missed!, Beer hay Bang! ngoài lượt. Lá Bang! dùng trong Duel được rút bù khi Duel kết thúc.' },
-  'Pat Brennan': { hp: 4, desc: 'Đầu lượt chọn rút 2 lá hoặc lấy 1 trang bị đang đặt trên bàn, kể cả của bạn.' },
+  'Molly Stark': { hp: 4, desc: 'Khi bạn đánh một lá từ tay trong lượt của người chơi khác, bạn được rút 1 lá.' },
+  'Pat Brennan': { hp: 4, desc: 'Ở giai đoạn rút bài, bạn có hai lựa chọn. Rút 2 lá từ chồng bài hoặc lấy đúng 1 lá viền xanh dương hay xanh lá đang đặt trước mặt bất kỳ người chơi nào, kể cả bạn.' },
   'Pixie Pete': { hp: 3, desc: 'Đầu lượt rút 3 lá.' },
   'Sean Mallory': { hp: 3, desc: 'Cuối lượt được giữ tối đa 10 lá trên tay.' },
   'Tequila Joe': { hp: 4, desc: 'Beer hồi 2 máu, kể cả khi dùng để sống sót.' },
@@ -99,7 +101,7 @@ const DECK_SPEC = [
   ['Schofield', 'S', 'K'], ['Remington', 'C', 'K'], ['Rev. Carabine', 'C', 'A'], ['Winchester', 'S', '8'],
 ];
 
-const GREEN_EFFECTS = {
+const DODGE_CITY_EFFECTS = {
   draw: ['🃏', 'Rút bài.'],
   heal: ['❤️', 'Hồi máu.'],
   dodge: ['🙅', 'Né một đòn bắn.'],
@@ -107,25 +109,52 @@ const GREEN_EFFECTS = {
   attackAll: ['💥', 'Bắn tất cả người khác.'],
   take: ['✋', 'Lấy một lá của người khác.'],
   discard: ['🗑️', 'Buộc người khác bỏ một lá.'],
+  discardAll: ['🗑️', 'Chọn một lá để bỏ từ mỗi người chơi khác có bài.'],
+  healOther: ['❤️', 'Hồi 1 máu cho người chơi khác.'],
+  distanceIn: ['🔭', 'Bạn nhìn người khác gần hơn 1.'],
+  distanceOut: ['🏚️', 'Người khác nhìn bạn xa thêm 1.'],
 };
 
-function loadGreenCards(filename) {
-  if (!filename) return [];
+function loadDodgeCity(override) {
+  const filename = override || join(__dirname, 'dodge-city.json');
   try {
-    const definitions = JSON.parse(readFileSync(filename, 'utf8').replace(/^\uFEFF/, ''));
-    if (!Array.isArray(definitions) || definitions.length !== 13) throw new Error('Cần đúng 13 loại lá.');
-    const names = new Set(Object.keys(CARD_INFO).map((name) => name.toLowerCase()));
+    const data = readFileSync(filename);
+    const definitions = JSON.parse(data.toString('utf8').replace(/^\uFEFF/, ''));
+    if (!Array.isArray(definitions)) throw new Error('Dữ liệu lá bài phải là một mảng.');
+    const baseNames = new Set(Object.keys(CARD_INFO).map((name) => name.toLowerCase()));
+    const names = new Set();
+    const seen = new Set(DECK_SPEC.flatMap(([name, suit, ranks]) => ranks.split(' ').map((rank) => JSON.stringify([name, suit, rank]))));
     const cards = [];
+    let greenTypes = 0, greenCount = 0;
     for (const entry of definitions) {
       if (!entry || typeof entry !== 'object') throw new Error('Thông tin lá bài không hợp lệ.');
-      const { name, effect, copies, draw = effect === 'draw' ? 1 : 0, heal = 1, maxDistance } = entry;
-      if (typeof name !== 'string' || name !== name.trim() || !name || name.length > 60 || name in CARD_INFO || names.has(name.toLowerCase())) {
-        throw new Error('Tên lá phải khác nhau và không trùng tên lá gốc.');
+      const { name, type = 'green', effect, copies, draw = effect === 'draw' ? 1 : 0, heal = 1, maxDistance, discardCost = false } = entry;
+      if (typeof name !== 'string' || name !== name.trim() || !name || name.length > 60 || names.has(name.toLowerCase()) ||
+          (name in CARD_INFO && !Object.hasOwn(CARD_INFO, name)) || (baseNames.has(name.toLowerCase()) && !Object.hasOwn(CARD_INFO, name))) {
+        throw new Error('Tên mỗi loại lá phải hợp lệ và được khai báo một lần.');
       }
-      if (!Object.hasOwn(GREEN_EFFECTS, effect)) throw new Error(`Hiệu ứng không hợp lệ cho ${name}.`);
       if (!Array.isArray(copies) || !copies.length || copies.some((copy) => !copy || !Object.hasOwn(SUIT_SYMBOL, copy.suit) ||
           typeof copy.rank !== 'string' || !/^(?:[2-9]|10|[JQKA])$/.test(copy.rank))) {
         throw new Error(`Chất hoặc hạng bài không hợp lệ cho ${name}.`);
+      }
+      names.add(name.toLowerCase());
+      const added = [];
+      for (const { rank, suit } of copies) {
+        const key = JSON.stringify([name, suit, rank]);
+        if (seen.has(key)) continue;
+        seen.add(key);
+        added.push({ name, rank, suit });
+      }
+      if (baseNames.has(name.toLowerCase())) {
+        if (Object.keys(entry).some((key) => key !== 'name' && key !== 'copies')) throw new Error(`Chỉ được thêm bản sao cho ${name}.`);
+        cards.push(...added);
+        continue;
+      }
+      const distanceEffect = ['distanceIn', 'distanceOut'].includes(effect);
+      if (!Object.hasOwn(DODGE_CITY_EFFECTS, effect) || !['green', 'brown', 'blue'].includes(type) || typeof discardCost !== 'boolean' ||
+          distanceEffect !== (type === 'blue') || (discardCost && (type !== 'brown' || effect === 'dodge')) ||
+          (type === 'green' && ['discardAll', 'healOther'].includes(effect))) {
+        throw new Error(`Hiệu ứng hoặc màu viền không hợp lệ cho ${name}.`);
       }
       const validRange = maxDistance === undefined || (maxDistance === 'weapon'
         ? effect === 'attack'
@@ -135,23 +164,25 @@ function loadGreenCards(filename) {
           !Number.isInteger(heal) || heal < 1 || heal > 2 || !validRange) {
         throw new Error(`Tham số hiệu ứng không hợp lệ cho ${name}.`);
       }
-      const [icon, description] = GREEN_EFFECTS[effect];
+      const [icon, description] = DODGE_CITY_EFFECTS[effect];
       let desc = effect === 'draw' ? `Rút ${draw} lá.` : effect === 'heal' ? `Hồi ${heal} máu.` : description;
       if (effect !== 'draw' && draw) desc += ` Rút thêm ${draw} lá.`;
       if (maxDistance === 'weapon') desc += ' Chọn mục tiêu trong tầm súng.';
       else if (maxDistance !== undefined) desc += ` Khoảng cách tối đa ${maxDistance}.`;
-      CARD_INFO[name] = { type: 'green', effect, icon, desc, draw, heal, maxDistance, defense: effect === 'dodge', activate: effect !== 'dodge' };
-      names.add(name.toLowerCase());
-      for (const { rank, suit } of copies) cards.push({ name, rank, suit });
+      if (discardCost) desc = `Bỏ thêm 1 lá trên tay. ${desc}`;
+      CARD_INFO[name] = { type, effect, icon, desc, draw, heal, maxDistance, discardCost, defense: effect === 'dodge', activate: type === 'green' && effect !== 'dodge' };
+      if (type === 'green') { greenTypes++; greenCount += added.length; }
+      cards.push(...added);
     }
-    if (cards.length !== 14) throw new Error('Cần đúng 14 lá tính cả các bản trùng.');
-    return cards;
+    if (greenTypes !== 13 || greenCount !== 14) throw new Error('Cần đủ 13 loại và 14 lá viền xanh lá.');
+    return { cards, greenCount, revision: createHash('sha256').update(data).digest('hex') };
   } catch (error) {
-    throw new Error(`Không nạp được BANG_GREEN_CARDS_FILE. ${error.message}`);
+    if (!override && error.code === 'ENOENT') return { cards: [], greenCount: 0, revision: null };
+    throw new Error(`Không nạp được dữ liệu Dodge City (${filename}). ${error.message}`);
   }
 }
 
-const GREEN_CARDS = loadGreenCards(process.env.BANG_GREEN_CARDS_FILE);
+const DODGE_CITY = loadDodgeCity(process.env.BANG_DODGE_CITY_FILE || process.env.BANG_GREEN_CARDS_FILE);
 
 function buildDeck(dodgeCity) {
   const deck = [];
@@ -159,11 +190,14 @@ function buildDeck(dodgeCity) {
   for (const [name, suit, ranks] of DECK_SPEC) {
     for (const rank of ranks.split(' ')) deck.push({ id: id++, name, suit, rank });
   }
-  if (dodgeCity) for (const card of GREEN_CARDS) deck.push({ ...card, id: id++ });
+  if (dodgeCity) for (const card of DODGE_CITY.cards) deck.push({ ...card, id: id++ });
   return deck;
 }
 
 const MIN_CHECKS = 3; // Nhân phẩm tốt / Kiếp trước đốt chùa: cần rút kiểm tra ít nhất 3 lần
+const PLAY_SOUNDS = { Punch: 'punch1', Gatling: 'gatling', Howitzer: 'howitzer1', Duel: 'duelo1',
+  'Cat Balou': 'catbalou1', 'Can Can': 'catbalou1', 'General Store': 'generalstore1', Indians: 'indian1' };
+const EQUIP_SOUNDS = { Mustang: 'mustang1', Dynamite: 'dynamitearmed', Jail: 'prison1' };
 const FACTION = { Sheriff: 'law', Deputy: 'law', Outlaw: 'outlaw', Renegade: 'renegade' };
 const sameFaction = (a, b) => a !== 'Renegade' && FACTION[a] === FACTION[b]; // Renegade không có đồng đội
 const newStats = () => ({
@@ -198,7 +232,7 @@ class Game {
       const maxHp = CHAR_INFO[char].hp + (role === 'Sheriff' ? 1 : 0);
       return { name, role, char, maxHp, hp: maxHp, hand: [], eq: [], coolingGreen: new Set(), alive: true, jailed: 0 };
     });
-    if (opts.dodgeCity && !GREEN_CARDS.length) fail('Chưa nạp bộ lá xanh lá.');
+    if (opts.dodgeCity && !DODGE_CITY.cards.length) fail('Chưa nạp bộ lá Dodge City.');
     this.fullDeck = buildDeck(opts.dodgeCity); // Dùng bộ bài ban đầu của phòng để tính xác suất rút kiểm tra.
     this.deck = shuffle([...this.fullDeck], this.rng);
     this.discard = [];
@@ -288,6 +322,13 @@ class Game {
     const recipient = this.players.findIndex((p) => p.eq.some((c) => c.id === card.id));
     this.playSeq = (this.playSeq || 0) + 1;
     this.plays = [...(this.plays || []), { seq: this.playSeq, player, card, recipient: recipient < 0 ? null : recipient, kind }].slice(-40);
+    return recipient;
+  }
+  recordSound(files, player = null) {
+    this.soundSeq = (this.soundSeq || 0) + 1;
+    const sounds = this.sounds ??= [];
+    sounds.push({ seq: this.soundSeq, files: Array.isArray(files) ? files : [files], player });
+    if (sounds.length > 40) sounds.shift();
   }
   toDiscard(...cards) { this.discard.push(...cards); }
   ability(p) { return p.char === 'Vera Custer' ? p.copiedAbility : p.char; }
@@ -314,7 +355,7 @@ class Game {
   }
   dodgeCards(p) {
     const skill = this.ability(p);
-    const hand = p.hand.filter((c) => skill === 'Elena Fuente' || c.name === 'Missed' || (c.name === 'Bang' && skill === 'Calamity Janet'));
+    const hand = p.hand.filter((c) => skill === 'Elena Fuente' || c.name === 'Missed' || c.name === 'Dodge' || (c.name === 'Bang' && skill === 'Calamity Janet'));
     const equipment = this.equipmentActive(p) ? p.eq.filter((c) => CARD_INFO[c.name].defense && !p.coolingGreen.has(c.id)) : [];
     return [...hand, ...equipment];
   }
@@ -326,9 +367,9 @@ class Game {
     const d = Math.abs(ia - ib);
     let dist = Math.min(d, al.length - d);
     const pa = this.players[a], pb = this.players[b];
-    if (this.equipmentActive(pb) && this.hasEq(pb, 'Mustang')) dist++;
+    if (this.equipmentActive(pb)) dist += Number(this.hasEq(pb, 'Mustang')) + pb.eq.filter((c) => CARD_INFO[c.name].effect === 'distanceOut').length;
     if (this.ability(pb) === 'Paul Regret') dist++;
-    if (this.equipmentActive(pa) && this.hasEq(pa, 'Scope')) dist--;
+    if (this.equipmentActive(pa)) dist -= Number(this.hasEq(pa, 'Scope')) + pa.eq.filter((c) => CARD_INFO[c.name].effect === 'distanceIn').length;
     if (this.ability(pa) === 'Rose Doolan') dist--;
     return Math.max(1, dist);
   }
@@ -336,6 +377,21 @@ class Game {
     const i = p.hand.findIndex((c) => c.id === cardId);
     if (i < 0) fail('Bạn không có lá bài này.');
     return p.hand.splice(i, 1)[0];
+  }
+  targetCard(p, selection) {
+    if (selection === 'hand') {
+      if (!p.hand.length) fail('Người này không có bài trên tay.');
+      return null; // Chỉ lật lá ngẫu nhiên sau khi đã xác thực cả hành động.
+    }
+    const card = p.eq.find((c) => c.id === selection);
+    if (!card) fail('Hãy chọn một lá bài của người đó.');
+    return card;
+  }
+  removeTargetCard(p, card) {
+    if (!card) return p.hand.splice(Math.floor(this.rng() * p.hand.length), 1)[0];
+    p.eq.splice(p.eq.indexOf(card), 1);
+    p.coolingGreen.delete(card.id);
+    return card;
   }
   stealRandom(from, to) {
     if (!from.hand.length) return null;
@@ -376,13 +432,14 @@ class Game {
     this.skillUses = 0;
     this.phase = 'start';
     this.addLog(`— Lượt của ${p.name} —`);
+    this.recordSound('yourturn1', pi);
     this.continueTurnStart();
   }
 
   // Đầu lượt: lần lượt chờ rút kiểm tra Dynamite rồi Jail, sau đó mới tới bước rút bài
-  continueTurnStart() {
+  continueTurnStart(checkDynamite = true) {
     const pi = this.turn, p = this.players[pi];
-    if (p.eq.some((c) => c.name === 'Dynamite')) return this.askCheck(pi, 'Dynamite');
+    if (checkDynamite && this.hasEq(p, 'Dynamite')) return this.askCheck(pi, 'Dynamite');
     if (p.eq.some((c) => c.name === 'Jail')) return this.askCheck(pi, 'Jail');
     if (p.char === 'Vera Custer') {
       this.phase = 'draw';
@@ -393,7 +450,7 @@ class Game {
   }
 
   resolveCheck(pi, p, pend) {
-    if (pend.kind !== 'Barrel' && !p.eq.some((c) => c.name === pend.kind)) { this.pending = null; return this.continueTurnStart(); }
+    if (pend.kind !== 'Barrel' && !this.hasEq(p, pend.kind)) { this.pending = null; return this.continueTurnStart(false); }
     if (pend.kind === 'Dynamite') {
       const dyn = p.eq.find((c) => c.name === 'Dynamite');
       const safe = this.check(p, (c) => !(c.suit === 'S' && rankVal(c.rank) >= 2 && rankVal(c.rank) <= 9), 'Dynamite');
@@ -401,16 +458,20 @@ class Game {
       p.eq.splice(p.eq.indexOf(dyn), 1);
       if (!safe) {
         this.addLog(`💥 Dynamite nổ! ${p.name} mất 3 máu.`);
+        this.recordSound('dynamiteexploded');
         this.toDiscard(dyn);
         this.damage(pi, 3, null);
         if (this.winner) return;
         if (!p.alive) return this.nextTurn();
       } else {
-        const nx = this.players[this.nextAlive(pi)];
+        let next = this.nextAlive(pi);
+        while (next !== pi && this.hasEq(this.players[next], 'Dynamite')) next = this.nextAlive(next);
+        const nx = this.players[next];
         nx.eq.push(dyn);
-        this.addLog(`Dynamite được chuyền sang ${nx.name}.`);
+        if (next !== pi) this.recordSound('dynamitearmed');
+        this.addLog(next === pi ? `Dynamite vẫn ở trước ${p.name}.` : `Dynamite được chuyền sang ${nx.name}.`);
       }
-      return this.continueTurnStart();
+      return this.continueTurnStart(false);
     }
     if (pend.kind === 'Jail') {
       const jail = p.eq.find((c) => c.name === 'Jail');
@@ -424,11 +485,16 @@ class Game {
         return this.nextTurn();
       }
       this.addLog(`${p.name} thoát khỏi nhà tù!`);
-      return this.continueTurnStart();
+      this.recordSound('prisonfree');
+      return this.continueTurnStart(false);
     }
     // Barrel: rút xong thì quay lại phát Bang! đang chờ
     const bang = pend.resume;
-    if (this.check(p, (c) => c.suit === 'H', 'Barrel')) { bang.got++; this.stats[pi].dodged++; }
+    if (this.check(p, (c) => c.suit === 'H', 'Barrel')) {
+      bang.got++;
+      this.stats[pi].dodged++;
+      this.recordSound('missedsound1');
+    }
     if (bang.got >= bang.need) { this.addLog(`${p.name} đã né được!`); return this.finishResponse(bang); }
     this.pending = bang;
   }
@@ -508,16 +574,18 @@ class Game {
 
   mollyDraw(p, card, response = null) {
     const pi = this.idx(p.name);
-    if (pi === this.turn || this.ability(p) !== 'Molly Stark' || !['Bang', 'Missed', 'Beer'].includes(card.name)) return;
-    if (response) {
-      const draws = response.mollyDraws ??= new Map();
-      draws.set(pi, (draws.get(pi) || 0) + 1);
-    }
+    if (pi === this.turn || this.ability(p) !== 'Molly Stark' || !['Bang', 'Missed', 'Beer', 'Dodge'].includes(card.name)) return;
+    if (response) this.deferResponseDraw(response, pi, 1);
     else this.give(p, 1);
   }
 
-  finishMollyDraws(response) {
-    for (const [i, count] of response.mollyDraws || []) {
+  deferResponseDraw(response, player, count) {
+    const draws = response.deferredDraws ??= new Map();
+    draws.set(player, (draws.get(player) || 0) + count);
+  }
+
+  finishResponseDraws(response) {
+    for (const [i, count] of response.deferredDraws || []) {
       if (this.players[i].alive && !this.winner) this.give(this.players[i], count);
     }
   }
@@ -546,7 +614,7 @@ class Game {
     }
     const inFlight = [this.pending, ...this.queue];
     this.kill(pi, null);
-    if (pend?.type === 'duel' && cancel(pend)) this.finishMollyDraws(pend);
+    if (pend?.type === 'duel' && cancel(pend)) this.finishResponseDraws(pend);
     // Victory clears pending choices; keep any revealed cards in the deck count.
     if (this.winner) for (const q of inFlight) this.toDiscard(...(q?.cards || []));
     else this.afterAction();
@@ -568,15 +636,22 @@ class Game {
     } else this.toDiscard(...cards);
 
     const won = this.checkWin();
+    const sounds = ['playereliminated'];
     if (!won && src != null && src !== ti && this.players[src].alive) {
       const k = this.players[src];
-      if (t.role === 'Outlaw') { this.give(k, 3); this.addLog(`${k.name} được thưởng 3 lá vì hạ một Outlaw.`); }
+      if (t.role === 'Outlaw') {
+        const before = k.hand.length;
+        this.give(k, 3);
+        if (k.hand.length - before === 3) sounds.push('outlawkilled1');
+        this.addLog(`${k.name} được thưởng 3 lá vì hạ một Outlaw.`);
+      }
       if (t.role === 'Deputy' && k.role === 'Sheriff') {
         this.toDiscard(...k.hand, ...k.eq);
         k.hand = []; k.eq = [];
         this.addLog(`Sheriff ${k.name} lỡ tay giết Phó cảnh sát, phải bỏ toàn bộ bài!`);
       }
     }
+    this.recordSound(sounds);
     for (const [i, p] of this.players.entries()) {
       if (!p.alive) continue;
       const skill = this.ability(p);
@@ -622,7 +697,7 @@ class Game {
   }
 
   finishResponse(response) {
-    this.finishMollyDraws(response);
+    this.finishResponseDraws(response);
     this.nextPending();
   }
 
@@ -721,7 +796,9 @@ class Game {
     } else if (a.type === 'play' || a.type === 'activate') {
       const played = (a.type === 'activate' ? p.eq : p.hand).find((c) => c.id === a.cardId);
       this.playCard(pi, p, a);
-      this.recordPlay(pi, played, a.type === 'activate' ? 'discard' : 'play');
+      const recipient = this.recordPlay(pi, played, a.type === 'activate' ? 'discard' : 'play');
+      const sound = recipient >= 0 ? (EQUIP_SOUNDS[played.name] || 'equipment1') : PLAY_SOUNDS[played.name];
+      if (sound) this.recordSound(sound);
     }
     else if (a.type === 'discard') {
       const ids = a.cardIds || [];
@@ -873,10 +950,12 @@ class Game {
           } else {
             this.toDiscard(this.takeFromHand(p, c.id));
             this.recordPlay(pi, c);
+            if (c.name === 'Dodge') this.deferResponseDraw(pend, pi, CARD_INFO[c.name].draw);
             this.mollyDraw(p, c, pend);
           }
           pend.got++;
           this.stats[pi].dodged++;
+          this.recordSound('missedsound1');
           this.addLog(`${p.name} dùng ${c.name === 'Bang' ? 'Bang! (như Missed!)' : c.name === 'Missed' ? 'Missed!' : c.name}.`);
         } else if (a.type === 'take') {
           this.damage(pi, 1, pend.source, pend);
@@ -935,7 +1014,15 @@ class Game {
       if (cond) cond(ti, t);
       return [ti, t];
     };
-    const use = () => { pile.splice(pile.indexOf(card), 1); };
+    const cost = info.discardCost ? p.hand.find((c) => c.id === a.costCardId && c !== card) : null;
+    if (info.discardCost && !cost) fail('Hãy chọn thêm một lá khác trên tay để bỏ.');
+    const use = () => {
+      pile.splice(pile.indexOf(card), 1);
+      if (cost) {
+        this.toDiscard(this.takeFromHand(p, cost.id));
+        this.recordPlay(pi, cost, 'discard');
+      }
+    };
     const others = () => { const out = []; let j = this.nextAlive(pi); while (j !== pi) { out.push(j); j = this.nextAlive(j); } return out; };
 
     switch (info.effect || name) {
@@ -951,6 +1038,8 @@ class Game {
           this.bangsPlayed++;
           this.stats[pi].bangs++;
           this.noteSheriffTarget(pi, ti, 'Bang!');
+          this.bangSoundCount = (this.bangSoundCount || 0) + 1;
+          this.recordSound(this.bangSoundCount % 2 ? 'bangsound1' : 'bangsound2');
         }
         if (info.draw) this.give(p, info.draw);
         if (this.ignoredCard(t, card)) return;
@@ -959,14 +1048,19 @@ class Game {
         return;
       }
       case 'Missed': return fail('Missed! chỉ dùng khi bị bắn.');
+      case 'dodge': return fail(`${name} chỉ dùng khi bị bắn.`);
       case 'Beer':
+      case 'healOther':
       case 'heal': {
         if (name === 'Beer' && this.alive().length <= 2) fail('Beer vô dụng khi chỉ còn 2 người.');
-        if (p.hp >= p.maxHp) fail('Bạn đang đầy máu.');
-        const heal = Math.min(p.maxHp - p.hp, name === 'Beer' ? this.beerHealing(p) : info.heal);
-        use(); this.toDiscard(card); p.hp += heal;
-        this.stats[pi].healed += heal;
-        this.addLog(name === 'Beer' ? `🍺 ${p.name} uống Beer (+${heal} máu).` : `${p.name} dùng ${name} (+${heal} máu).`);
+        const [ti, target] = info.effect === 'healOther' ? needTarget() : [pi, p];
+        if (target.hp >= target.maxHp) fail(target === p ? 'Bạn đang đầy máu.' : 'Người này đang đầy máu.');
+        const heal = Math.min(target.maxHp - target.hp, name === 'Beer' ? this.beerHealing(p) : info.heal);
+        use(); this.toDiscard(card);
+        if (target !== p && this.ignoredCard(target, card)) return;
+        target.hp += heal;
+        this.stats[ti].healed += heal;
+        this.addLog(name === 'Beer' ? `🍺 ${p.name} uống Beer (+${heal} máu).` : `${p.name} dùng ${name}${target === p ? '' : ` cho ${target.name}`} (+${heal} máu).`);
         return;
       }
       case 'Saloon': {
@@ -1002,21 +1096,34 @@ class Game {
         const [ti, t] = needTarget((ti) => {
           if (this.distance(pi, ti) > range) fail(`${name} chỉ dùng trong khoảng cách ${range}.`);
         });
-        let taken;
-        if (a.targetCard === 'hand') {
-          if (!t.hand.length) fail('Người này không có bài trên tay.');
-        } else {
-          taken = t.eq.find((c) => c.id === a.targetCard);
-          if (!taken) fail('Hãy chọn một lá bài của người đó.');
-        }
+        const selected = this.targetCard(t, a.targetCard);
         use(); this.toDiscard(card);
         this.stats[ti].targeted++;
         if (name === 'Panic' || name === 'Cat Balou') this.noteSheriffTarget(pi, ti, name === 'Panic' ? 'Panic!' : name);
         if (this.ignoredCard(t, card)) return;
-        if (!taken) taken = t.hand.splice(Math.floor(this.rng() * t.hand.length), 1)[0];
-        else { t.eq.splice(t.eq.indexOf(taken), 1); t.coolingGreen.delete(taken.id); }
+        const taken = this.removeTargetCard(t, selected);
         if (name === 'Panic' || info.effect === 'take') { p.hand.push(taken); this.addLog(`😱 ${p.name} lấy ${a.targetCard === 'hand' ? '1 lá trên tay' : cardStr(taken)} của ${t.name}.`); }
         else { this.toDiscard(taken); this.addLog(`💃 ${p.name} buộc ${t.name} bỏ ${cardStr(taken)}.`); }
+        return;
+      }
+      case 'discardAll': {
+        const targets = others().filter((i) => this.players[i].hand.length || this.players[i].eq.length);
+        if (!Array.isArray(a.targets) || a.targets.length !== targets.length || a.targets.some((choice) => !choice || typeof choice.target !== 'string')) {
+          fail('Chọn một lá cho mỗi người chơi khác có bài.');
+        }
+        const selections = new Map(a.targets.map((choice) => [choice.target, choice.targetCard]));
+        const removals = targets.map((i) => {
+          const target = this.players[i];
+          return { i, target, selected: this.targetCard(target, selections.get(target.name)) };
+        });
+        use(); this.toDiscard(card);
+        for (const { i, target, selected } of removals) {
+          this.stats[i].targeted++;
+          if (this.ignoredCard(target, card)) continue;
+          const removed = this.removeTargetCard(target, selected);
+          this.toDiscard(removed);
+          this.addLog(`${p.name} dùng ${name}: ${target.name} bỏ ${cardStr(removed)}.`);
+        }
         return;
       }
       case 'Duel': {
@@ -1216,6 +1323,8 @@ class Game {
       pending, log: this.log.slice(-60), winner: this.winner,
       summary: this.winner ? this.summary() : null, // thống kê + danh hiệu, chỉ có khi ván đã xong
       lastCheck: this.lastCheck || null, // lá rút kiểm tra gần nhất (đã công khai ở chồng bài bỏ)
+      soundSeq: this.soundSeq || 0,
+      sounds: (this.sounds || []).filter((cue) => cue.player === null || cue.player === me).map(({ seq, files }) => ({ seq, files })),
       plays: (this.plays || []).map((event) => ({ ...event })),
       transfers: (this.transfers || []).map((event) => ({
         seq: event.seq, to: event.to, from: event.from,
@@ -1226,4 +1335,5 @@ class Game {
   }
 }
 
-module.exports = { Game, GameError, CARD_INFO, CHAR_INFO, ROLE_INFO, SUIT_SYMBOL, RULES_PREVIEW, greenCardCount: GREEN_CARDS.length };
+module.exports = { Game, GameError, CARD_INFO, CHAR_INFO, ROLE_INFO, SUIT_SYMBOL, RULES_PREVIEW,
+  greenCardCount: DODGE_CITY.greenCount, dodgeCityCardCount: DODGE_CITY.cards.length, dodgeCityRevision: DODGE_CITY.revision };

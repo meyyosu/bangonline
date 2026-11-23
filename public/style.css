@@ -34,6 +34,11 @@ input[type=number] { width: 100%; padding: 10px 12px; border-radius: 8px; border
 .brand { font-family: 'Rye', serif; font-size: 28px; color: var(--gold); letter-spacing: 2px; text-shadow: 2px 2px 0 #000; }
 .brand span { font-size: 16px; color: var(--paper); letter-spacing: 1px; }
 #userbox { color: var(--paper); display: flex; gap: 10px; align-items: center; }
+.topbar-actions { display: flex; gap: 10px; align-items: center; }
+.sound-control { position: relative; }
+.sound-panel { position: absolute; z-index: 90; right: 0; top: calc(100% + 8px); width: min(210px, 70vw); padding: 10px 12px; background: #2a160a; color: var(--paper); border: 1px solid var(--gold); border-radius: 8px; }
+.sound-panel label { display: flex; justify-content: space-between; gap: 8px; margin: 0 0 4px; }
+.sound-panel input { width: 100%; accent-color: var(--gold); }
 
 main { padding: 20px; max-width: 1640px; margin: 0 auto; }
 .loading { color: var(--paper); text-align: center; padding: 60px; }

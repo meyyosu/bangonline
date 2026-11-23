@@ -99,6 +99,7 @@ function toast(msg, ok = false) {
 }
 const run = (fn) => async (...a) => { try { await fn(...a); } catch (e) { toast(e.message); } };
 function closeStreams() {
+  gameAudio.stop();
   lobbyES?.close(); roomES?.close(); lobbyES = roomES = null;
   clearPauseUI();
   clearMatchResult();
@@ -300,8 +301,8 @@ function showLobby() {
           <label for="createPassword">Mật khẩu phòng (không bắt buộc)</label><input id="createPassword" type="password" name="password" maxlength="64" autocomplete="new-password">
           ${characterFields()}
           ${timerField()}
-          <label><input type="checkbox" name="dodgeCity" aria-describedby="dodgeCityDetails" ${META.greenCardCount ? '' : 'disabled'}> Bản mở rộng: Dodge City</label>
-          <p class="muted" id="dodgeCityDetails">${META.greenCardCount ? `Thêm ${META.greenCardCount} lá viền xanh lá vào bộ bài của phòng.` : 'Máy chủ chưa nạp dữ liệu lá viền xanh lá.'}</p>
+          <label><input type="checkbox" name="dodgeCity" aria-describedby="dodgeCityDetails" ${(META.dodgeCityCardCount ?? META.greenCardCount) ? '' : 'disabled'}> Bản mở rộng: Dodge City</label>
+          <p class="muted" id="dodgeCityDetails">${(META.dodgeCityCardCount ?? META.greenCardCount) ? `Thêm ${META.dodgeCityCardCount ?? META.greenCardCount} lá Dodge City vào bộ bài của phòng.` : 'Máy chủ chưa nạp dữ liệu Dodge City.'}</p>
           <button class="btn" style="width:100%;margin-top:10px">🎲 Tạo phòng mới</button>
         </form>
         <h2 style="margin-top:22px">Vào bằng mã</h2>
@@ -399,22 +400,39 @@ function enterRoom(code) {
     inp.value = '';
     await api(`/api/rooms/${code}/chat`, { text });
   });
-  roomES = new EventSource(`/api/rooms/${code}/stream`);
-  roomES.onmessage = (ev) => {
+  const stream = roomES = new EventSource(`/api/rooms/${code}/stream`);
+  let receivedSnapshot = false;
+  stream.onmessage = (ev) => {
+    if (roomES !== stream) return;
     const d = JSON.parse(ev.data);
     if (d.type === 'closed') { toast('Phòng đã đóng.'); return showLobby(); }
     if (d.type !== 'room') return;
     if (!d.room.players.includes(ME)) { toast('Bạn không còn ở trong phòng.'); return showLobby(); }
-    const previousGame = ROOM?.game;
+    const previous = ROOM;
+    const previousGame = previous?.game;
     const handOrigins = Object.fromEntries([...document.querySelectorAll('#hand [data-card]')].map((el) => [el.dataset.card, el.getBoundingClientRect()]));
     const drawOrigins = [...document.querySelectorAll('.draw-stage .draw-slot')].map((el) => el.getBoundingClientRect());
     ROOM = d.room;
+    if (receivedSnapshot) showRoomSounds(ROOM, previous);
+    receivedSnapshot = true;
     ui.serverOffset = ROOM.serverNow - Date.now();
     renderRoom();
     showPlayedCards(ROOM.game, previousGame, handOrigins);
     showCardTransfers(ROOM.game, previousGame, drawOrigins);
   };
-  roomES.onerror = () => { if (roomES && roomES.readyState === EventSource.CLOSED) showLobby(); };
+  stream.onerror = () => {
+    receivedSnapshot = false;
+    if (roomES === stream && stream.readyState === EventSource.CLOSED) showLobby();
+  };
+}
+
+function showRoomSounds(room, previous) {
+  if (!previous || previous.code !== room.code) return;
+  if (room.players.some((name) => !previous.players.includes(name))) gameAudio.play('playerjoin');
+  const lastSeq = previous.game?.soundSeq || 0;
+  for (const cue of room.game?.sounds || []) {
+    if (cue.seq > lastSeq) gameAudio.play(...cue.files);
+  }
 }
 
 // Ô trò chuyện thu gọn được (nhớ trên máy); khi thu gọn thì đếm tin mới của người khác
@@ -579,7 +597,7 @@ function discardStackHTML(g) {
     `<div class="ds-slot" style="--i:${n - 1 - i}">${cardHTML(c, 'small')}</div>`).join('')}</div>`;
 }
 // Thẻ trang bị vuông: màu theo loại, huy hiệu góc = tầm bắn (súng) hoặc ±khoảng cách (ngựa/ống ngắm)
-const EQ_KIND = { Mustang: ['horse', '+1'], Scope: ['horse', '−1'], Jail: ['jail', ''], Dynamite: ['dyn', ''] };
+const EQ_KIND = { Mustang: ['horse', '+1'], Scope: ['horse', '−1'], Binocular: ['', '−1'], Hideout: ['', '+1'], Jail: ['jail', ''], Dynamite: ['dyn', ''] };
 function eqTileHTML(c, extra = '', owner = null) {
   const info = cardInfo(c);
   const [kind, badge] = info.type === 'green' ? ['green', c.ready ? '✓' : '⏳']
@@ -686,6 +704,8 @@ const abilityOf = (p) => p.ability ?? p.char;
 const discardExcess = (g, p) => g.me.hand.length - (g.me.handLimit ?? p.hp);
 const docTarget = (p, g) => p.alive && p.name !== ME && p.distance <= g.me.range;
 const blueCard = (c) => ['blue', 'gun'].includes(cardInfo(c).type);
+const hasCards = (p) => p.handCount > 0 || p.eq.length > 0;
+const brawlTargets = (g) => g.players.filter((p) => p.alive && p.name !== ME && hasCards(p));
 
 function effectiveName(c, me) {
   if (abilityOf(me) === 'Calamity Janet' && c.name === 'Missed') return 'Bang';
@@ -697,14 +717,15 @@ function targetFilter(card, g, meP) {
   const name = effectiveName(card, meP);
   const others = (p) => p.alive && p.name !== ME;
   const info = cardInfo(card);
-  switch (card.ready ? info.effect : name) {
+  switch (info.type === 'green' && !card.ready ? name : (info.effect || name)) {
     case 'Bang': return (p) => others(p) && p.distance <= g.me.range;
     case 'attack': {
       const range = info.maxDistance === 'weapon' ? g.me.range : (info.maxDistance ?? Infinity);
       return (p) => others(p) && p.distance <= range;
     }
     case 'take':
-    case 'discard': return (p) => others(p) && p.distance <= (info.maxDistance ?? Infinity) && (p.handCount > 0 || p.eq.length > 0);
+    case 'discard': return (p) => others(p) && p.distance <= (info.maxDistance ?? Infinity) && hasCards(p);
+    case 'healOther': return (p) => others(p) && p.hp < p.maxHp;
     case 'Panic': return (p) => others(p) && p.distance <= 1 && (p.handCount > 0 || p.eq.length > 0);
     case 'Cat Balou': return (p) => others(p) && (p.handCount > 0 || p.eq.length > 0);
     case 'Duel': return others;
@@ -781,7 +802,9 @@ function renderGame() {
   const patDraw = myPrompt && pend.type === 'draw' && pend.options.includes('equipment');
 
   // validate mode
-  if (ui.mode?.kind === 'target' && !canPlay) ui.mode = null;
+  if (['target', 'cost', 'brawl'].includes(ui.mode?.kind) && !canPlay) ui.mode = null;
+  if (ui.mode?.costCardId && !g.me.hand.some((c) => c.id === ui.mode.costCardId)) ui.mode = null;
+  if (['cost', 'brawl'].includes(ui.mode?.kind) && !g.me.hand.some((c) => c.id === ui.mode.cardId)) ui.mode = null;
   if (ui.mode && ui.mode.kind !== 'target') {
     const hand = g.me.hand.map((c) => c.id);
     if (ui.mode.kind === 'discard' && (!canPlay || discardExcess(g, meP) <= 0)) ui.mode = null;
@@ -873,7 +896,7 @@ function renderGame() {
             <div class="eqs">${meP.eq.length ? meP.eq.map((c) => eqTileHTML(c)).join('') : '<span class="muted">Chưa có trang bị</span>'}</div></div>
         </div>
         <div class="hand" id="hand">${g.me.hand.filter((c) => !(pend?.type === 'blackJack' && pend.player === meIdx && pend.card.id === c.id)).map((c) => {
-          const sel = ui.selected.includes(c.id) || ui.mode?.cardId === c.id;
+          const sel = ui.selected.includes(c.id) || ui.mode?.cardId === c.id || ui.mode?.costCardId === c.id;
           return cardHTML(c, (sel ? 'selected ' : '') + (playableIds.has(c.id) ? 'playable' : (canPlay || myPrompt ? 'dim' : '')));
         }).join('') || '<span class="muted">Không có bài trên tay.</span>'}</div>
         <div class="actions" id="actions">${actionsHTML(g, meP, canPlay)}</div>
@@ -1045,10 +1068,16 @@ function isClickable(c, g, meP) {
   }
   if (g.turn !== g.me.index || pend || g.phase !== 'play') return false;
   const name = effectiveName(c, meP);
+  const info = cardInfo(c);
+  if (ui.mode?.kind === 'cost') return c.id !== ui.mode.cardId;
+  if (ui.mode?.kind === 'brawl') return false;
   if (name === 'Missed') return false;
+  if (info.type === 'brown' && info.defense) return false;
+  if (info.discardCost && g.me.hand.length < 2) return false;
+  if (info.type === 'brown' && info.effect === 'heal' && meP.hp >= meP.maxHp) return false;
   if (name === 'Bang' && g.bangsPlayed >= 1 && !g.me.unlimitedBang) return false;
   if (name === 'Beer' && (meP.hp >= meP.maxHp || g.players.filter((p) => p.alive).length <= 2)) return false;
-  if ((cardInfo(c).type === 'green' || ['Barrel', 'Mustang', 'Scope', 'Dynamite'].includes(c.name)) && meP.eq.some((e) => e.name === c.name)) return false;
+  if ((info.type === 'green' || (info.type === 'blue' && c.name !== 'Jail')) && meP.eq.some((e) => e.name === c.name)) return false;
   const tf = targetFilter(c, g, meP);
   if (tf && !g.players.some(tf)) return false;
   return true;
@@ -1058,6 +1087,21 @@ function promptHTML(g, meIdx, meP) {
   const pend = g.pending;
   const P = (i) => `<b>${esc(g.players[i].name)}</b>`;
   if (g.winner) return '<h4>Ván đấu đã kết thúc.</h4><div class="muted">Xem kết quả ở trên.</div>';
+  if (ui.mode?.kind === 'cost') {
+    const c = g.me.hand.find((card) => card.id === ui.mode.cardId);
+    return `<h4>${esc(c.name)} · Chọn thêm 1 lá trên tay để bỏ</h4>
+      <div class="row"><button class="btn secondary small" data-act="cancel">Huỷ</button></div>`;
+  }
+  if (ui.mode?.kind === 'brawl') {
+    return `<h4>Brawl · Chọn một lá để bỏ của từng người</h4>
+      ${brawlTargets(g).map((p) => {
+        const choices = p.eq.map((c) => [String(c.id), `${c.name} ${c.rank}${SUIT[c.suit]}`]);
+        if (p.handCount) choices.unshift(['hand', 'Một lá ngẫu nhiên trên tay']);
+        const picked = ui.mode.choices.get(p.name);
+        return `<label>${esc(p.name)}<select data-brawl-target="${esc(p.name)}">${choices.map(([id, label]) => `<option value="${id}" ${id === picked ? 'selected' : ''}>${esc(label)}</option>`).join('')}</select></label>`;
+      }).join('')}
+      <div class="row"><button class="btn" data-act="confirmBrawl">Đánh Brawl</button><button class="btn secondary small" data-act="cancel">Huỷ</button></div>`;
+  }
   if (ui.mode?.kind === 'target') {
     const c = targetingCard(g, meP);
     return `<h4>🎯 Chọn mục tiêu cho ${esc(c?.name)}</h4><div class="muted">Bấm vào người chơi có viền vàng nhấp nháy.</div>
@@ -1129,10 +1173,17 @@ function promptHTML(g, meIdx, meP) {
       return `<h4>Black Jack đang lật lá thứ hai trong 3 giây</h4><p>${pend.red ? 'Lá Cơ hoặc Rô: sẽ rút thêm 1 lá sau khi thu lá này về tay.' : 'Lá Bích hoặc Chuồn: thu lá này về tay rồi bắt đầu lượt.'}</p>`;
     case 'draw': {
       if (!mine) return `<h4>${P(pend.player)} đang chọn cách rút bài…</h4>`;
-      const seconds = ['Jesse Jones', 'Pedro Ramirez', 'Pat Brennan'].includes(abilityOf(meP)) ? 20 : 5;
+      const ability = abilityOf(meP);
+      if (ability === 'Pat Brennan') {
+        const equipment = pend.options.includes('equipment')
+          ? '<p>Hoặc bấm một lá viền xanh dương hay xanh lá đang sáng trên bàn, kể cả của bạn. Bạn sẽ chỉ lấy đúng 1 lá này.</p>' : '';
+        return `<h4>Pat Brennan · Rút bài đầu lượt</h4>${equipment}
+          <div class="row"><button class="btn" data-act="draw" data-from="deck">Rút 2 lá từ chồng bài</button></div>
+          <p class="muted">Sau 20 giây, game tự rút 2 lá nếu bạn chưa chọn.</p>`;
+      }
+      const seconds = ['Jesse Jones', 'Pedro Ramirez'].includes(ability) ? 20 : 5;
       const source = pend.options.includes('player') ? ' Hoặc bấm trực tiếp người chơi có bài đang sáng để lấy 1 lá từ tay họ và rút thêm 1 lá.'
-        : pend.options.includes('discard') ? ' Hoặc bấm trực tiếp chồng bài bỏ đang sáng để lấy lá trên cùng và rút thêm 1 lá.'
-          : pend.options.includes('equipment') ? ' Hoặc bấm một lá trang bị đang sáng trên bàn để lấy vào tay.' : '';
+        : pend.options.includes('discard') ? ' Hoặc bấm trực tiếp chồng bài bỏ đang sáng để lấy lá trên cùng và rút thêm 1 lá.' : '';
       return `<h4>Rút bài đầu lượt</h4><p>Bấm chồng bài để rút.${source} Sau ${seconds} giây sẽ tự rút. Đồng hồ lượt bắt đầu khi rút xong.</p>`;
     }
   }
@@ -1421,6 +1472,21 @@ function bindGame(g, meIdx, meP, canPlay, myPrompt) {
       return sendAction({ type: 'respond', cardId: id });
     }
     if (!canPlay) return toast(myPrompt ? 'Hãy xử lý yêu cầu ở giữa bàn trước.' : 'Chưa đến lượt bạn.');
+    if (ui.mode?.kind === 'cost') {
+      const cardId = ui.mode.cardId;
+      if (id === cardId) { ui.mode = null; return renderGame(); }
+      const paidCard = g.me.hand.find((card) => card.id === cardId);
+      if (cardInfo(paidCard).effect === 'discardAll') {
+        ui.mode = { kind: 'brawl', cardId, costCardId: id, choices: new Map() };
+        return renderGame();
+      }
+      if (targetFilter(paidCard, g, meP)) {
+        ui.mode = { kind: 'target', cardId, costCardId: id };
+        return renderGame();
+      }
+      ui.mode = null;
+      return sendAction({ type: 'play', cardId, costCardId: id });
+    }
     if (ui.mode?.kind === 'target' && ui.mode.cardId === id) { ui.mode = null; return renderGame(); }
     if (!isClickable(c, g, meP)) {
       const nm = effectiveName(c, meP);
@@ -1429,7 +1495,12 @@ function bindGame(g, meIdx, meP, canPlay, myPrompt) {
       if (nm === 'Beer') return toast('Không dùng Beer được lúc này.');
       return toast('Không dùng được lá này lúc này.');
     }
-    if (targetFilter(c, g, meP)) { ui.mode = { kind: 'target', cardId: id }; return renderGame(); }
+    if (cardInfo(c).discardCost) { ui.mode = { kind: 'cost', cardId: id }; return renderGame(); }
+    if (targetFilter(c, g, meP)) {
+      if (c.name === 'Bang') gameAudio.play('bangload');
+      ui.mode = { kind: 'target', cardId: id };
+      return renderGame();
+    }
     ui.mode = null;
     await sendAction({ type: 'play', cardId: id });
   }));
@@ -1454,12 +1525,13 @@ function bindGame(g, meIdx, meP, canPlay, myPrompt) {
     if (!tf || !tf(p)) return toast('Không chọn được người này.');
     const nm = effectiveName(card, meP);
     const type = ui.mode.activate ? 'activate' : 'play';
+    const costCardId = ui.mode.costCardId;
     if (nm === 'Panic' || nm === 'Cat Balou' || ['take', 'discard'].includes(cardInfo(card).effect)) {
-      if (!p.eq.length) { ui.mode = null; return sendAction({ type, cardId: card.id, target: p.name, targetCard: 'hand' }); }
-      return chooseTargetCard(card, p, type);
+      if (!p.eq.length) { ui.mode = null; return sendAction({ type, cardId: card.id, costCardId, target: p.name, targetCard: 'hand' }); }
+      return chooseTargetCard(card, p, type, costCardId);
     }
     ui.mode = null;
-    await sendAction({ type, cardId: card.id, target: p.name });
+    await sendAction({ type, cardId: card.id, costCardId, target: p.name });
   }));
 
   const deckEl = main.querySelector('#deck.ready');
@@ -1481,10 +1553,20 @@ function bindGame(g, meIdx, meP, canPlay, myPrompt) {
     else if (ui.selected.length < 2) ui.selected.push(id);
     renderGame();
   });
+  main.querySelectorAll('[data-brawl-target]').forEach((el) => el.onchange = () => {
+    if (ui.mode?.kind === 'brawl') ui.mode.choices.set(el.dataset.brawlTarget, el.value);
+  });
 
   main.querySelectorAll('[data-act]').forEach((el) => el.onclick = run(async (event) => {
     const act = el.dataset.act;
     if (act === 'cancel') { ui.mode = null; ui.selected = []; return renderGame(); }
+    if (act === 'confirmBrawl' && ui.mode?.kind === 'brawl') {
+      const { cardId, costCardId } = ui.mode;
+      const targets = [...main.querySelectorAll('[data-brawl-target]')].map((select) => ({
+        target: select.dataset.brawlTarget, targetCard: select.value === 'hand' ? 'hand' : Number(select.value),
+      }));
+      return sendAction({ type: 'play', cardId, costCardId, targets });
+    }
     if (act === 'discardMode') { ui.mode = { kind: 'discard' }; ui.selected = []; return renderGame(); }
     if (act === 'sidMode') { ui.mode = { kind: 'sid' }; ui.selected = []; return renderGame(); }
     if (act === 'skill') {
@@ -1527,7 +1609,7 @@ function bindGame(g, meIdx, meP, canPlay, myPrompt) {
   }));
 }
 
-function chooseTargetCard(card, p, type) {
+function chooseTargetCard(card, p, type, costCardId) {
   const modal = $('#modal');
   modal.innerHTML = `<div class="panel"><h3>${esc(card.name)}: chọn lá của ${esc(p.name)}</h3>
     <div class="row">
@@ -1543,7 +1625,7 @@ function chooseTargetCard(card, p, type) {
     modal.classList.add('hidden');
     if (b.dataset.tc === 'cancel') return;
     ui.mode = null;
-    await sendAction({ type, cardId: card.id, target: p.name, targetCard: b.dataset.tc === 'hand' ? 'hand' : Number(b.dataset.tc) });
+    await sendAction({ type, cardId: card.id, costCardId, target: p.name, targetCard: b.dataset.tc === 'hand' ? 'hand' : Number(b.dataset.tc) });
   }));
 }
 
