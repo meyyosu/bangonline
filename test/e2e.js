@@ -47,7 +47,7 @@ const BASE = 'http://localhost:3000';
           const ks = await p.$$('#kitCards .card'); await ks[0].click(); await (await p.$$('#kitCards .card'))[1].click();
           await p.click('[data-act="confirmKit"]'); acted = true; break;
         }
-        if (await p.$('#storeCards .card.playable')) { await p.click('#storeCards .card.playable'); acted = true; break; }
+        if (await p.$('.store-pop .sp-pickable')) { await p.click('.store-pop .sp-pickable'); acted = true; break; }
         const resp = await p.$('#hand .card.playable');
         if (await p.$('[data-act="take"]')) {
           if (resp && Math.random() < 0.6) await resp.click(); else await p.click('[data-act="take"]');

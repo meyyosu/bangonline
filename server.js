@@ -20,8 +20,17 @@ const SOUND_FILES = new Set([
   'howitzer1.mp3', 'indian1.mp3', 'missedsound1.mp3', 'mustang1.mp3', 'outlawkilled1.mp3',
   'playereliminated.mp3', 'playerjoin.mp3', 'prison1.mp3', 'prisonfree.mp3', 'punch1.mp3', 'yourturn1.mp3',
 ]);
-const RUNTIME_FILES = ['server.js', 'game.js', 'room-timer.js', 'room-pause.js'];
-const runtimeRevision = crypto.createHash('sha256').update(Buffer.concat(RUNTIME_FILES.map((file) => fs.readFileSync(path.join(__dirname, file))))).digest('hex');
+const RUNTIME_FILES = ['server.js', 'game.js', 'power.js', 'room-timer.js', 'room-pause.js'];
+const readRevision = () => crypto.createHash('sha256').update(Buffer.concat(RUNTIME_FILES.map((file) => fs.readFileSync(path.join(__dirname, file))))).digest('hex');
+const runtimeRevision = readRevision();
+// Giao diện dùng 2 thông tin này để cảnh báo trước khi chơi:
+// - SERVER_FEATURES: server cũ không gửi trường này → giao diện biết server chưa có thống kê/danh hiệu cuối ván.
+// - codeChanged: code trên ổ đĩa đã mới hơn code server đang chạy (cập nhật mà quên khởi động lại).
+const SERVER_FEATURES = ['endSummary'];
+let codeChanged = false;
+setInterval(() => {
+  try { codeChanged = readRevision() !== runtimeRevision; } catch { codeChanged = true; }
+}, Number(process.env.BANG_CODE_CHECK_MS) || 10000).unref();
 const startedAt = new Date().toISOString();
 const USERS_FILE = path.join(DATA_DIR, 'users.json');
 const SESSIONS_FILE = path.join(DATA_DIR, 'sessions.json');
@@ -60,6 +69,7 @@ function roomView(r, user) {
     chat: r.chat.slice(-60),
     game: r.game ? r.game.viewFor(user) : null,
     serverNow: Date.now(),
+    server: { features: SERVER_FEATURES, stale: codeChanged },
     pause: pauseView(r),
     timer: r.clock ? { deadline: r.clock.deadline, player: r.clock.player, response: !!r.clock.pending, character: !!r.clock.character, draw: !!r.clock.draw, seconds: r.clock.seconds } : null,
   };
@@ -108,7 +118,7 @@ function leaveRoom(r, user) {
 }
 
 // ---------- HTTP ----------
-const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.svg': 'image/svg+xml', '.png': 'image/png', '.ico': 'image/x-icon' };
+const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.svg': 'image/svg+xml', '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.webp': 'image/webp', '.ico': 'image/x-icon' };
 
 function send(res, code, obj, headers = {}) {
   res.writeHead(code, { 'Content-Type': 'application/json; charset=utf-8', ...headers });

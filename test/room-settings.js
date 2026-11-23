@@ -363,7 +363,7 @@ test('forfeiting resolves choices and advances past departed players without los
 test('room API protects settings and passwords, supports reconnect and games', async () => {
   // Isolate generated accounts and sessions from the user's server data.
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'bang-settings-'));
-  for (const file of ['server.js', 'game.js', 'room-timer.js', 'room-pause.js']) fs.copyFileSync(path.join(__dirname, '..', file), path.join(dir, file));
+  for (const file of ['server.js', 'game.js', 'power.js', 'room-timer.js', 'room-pause.js']) fs.copyFileSync(path.join(__dirname, '..', file), path.join(dir, file));
   const soundsDir = path.join(dir, 'data', 'sounds');
   fs.mkdirSync(soundsDir, { recursive: true });
   const soundFixture = Buffer.from([0xff, 0xfb, 0x90, 0x00]);
@@ -422,6 +422,7 @@ test('room API protects settings and passwords, supports reconnect and games', a
     assert.equal((await request(1, url + '/settings', { password: '' })).status, 403);
     assert.equal((await request(0, url + '/settings', { turnSeconds: 601, password: '' })).status, 400);
     let room = await view(0, code);
+    assert.deepEqual(room.server, { features: ['endSummary'], stale: false });
     assert.equal(room.hasPassword, true);
     assert.equal(room.turnSeconds, 10);
     assert.ok(!JSON.stringify(room).includes('room-secret'));
@@ -522,6 +523,45 @@ test('room API protects settings and passwords, supports reconnect and games', a
     assert.equal(room.status, 'waiting');
     assert.equal(room.game, null);
     assert.equal(room.timer, null);
+  } finally {
+    child.kill();
+    await new Promise((resolve) => child.exitCode !== null ? resolve() : child.once('exit', resolve));
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('room view warns when the code on disk is newer than the running server', async () => {
+  // Bản sao riêng để sửa game.js mà không đụng vào mã thật.
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'bang-stale-'));
+  for (const file of ['server.js', 'game.js', 'power.js', 'room-timer.js', 'room-pause.js']) fs.copyFileSync(path.join(__dirname, '..', file), path.join(dir, file));
+  const probe = net.createServer();
+  await new Promise((resolve) => probe.listen(0, '127.0.0.1', resolve));
+  const port = probe.address().port;
+  await new Promise((resolve) => probe.close(resolve));
+  const child = spawn(process.execPath, [path.join(dir, 'server.js')], { env: { ...process.env, PORT: String(port), BANG_CODE_CHECK_MS: '100' }, stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true });
+  try {
+    await new Promise((resolve, reject) => {
+      const timeout = setTimeout(() => reject(new Error('Server startup timed out')), 10000);
+      child.stdout.once('data', () => { clearTimeout(timeout); resolve(); });
+      child.once('exit', (code) => { clearTimeout(timeout); reject(new Error(`Server exited: ${code}`)); });
+    });
+    const base = `http://127.0.0.1:${port}`;
+    const login = await fetch(base + '/api/register', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ username: 'Stale', password: 'secret' }) });
+    const cookie = login.headers.get('set-cookie').split(';')[0];
+    const created = await (await fetch(base + '/api/rooms', { method: 'POST', headers: { 'Content-Type': 'application/json', Cookie: cookie }, body: '{}' })).json();
+    async function server() {
+      const res = await fetch(`${base}/api/rooms/${created.code}/stream`, { headers: { Cookie: cookie } });
+      const reader = res.body.getReader();
+      let text = '';
+      while (!text.includes('\n\n')) text += new TextDecoder().decode((await reader.read()).value);
+      await reader.cancel();
+      return JSON.parse(text.split('\n\n')[0].slice(6)).room.server;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    assert.deepEqual(await server(), { features: ['endSummary'], stale: false });
+    fs.appendFileSync(path.join(dir, 'game.js'), '\n// cập nhật giả lập\n');
+    await new Promise((resolve) => setTimeout(resolve, 400));
+    assert.deepEqual(await server(), { features: ['endSummary'], stale: true });
   } finally {
     child.kill();
     await new Promise((resolve) => child.exitCode !== null ? resolve() : child.once('exit', resolve));

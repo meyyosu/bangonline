@@ -71,7 +71,7 @@ try {
   if ($LASTEXITCODE -ne 0) { throw 'Game chưa nạp dữ liệu Dodge City. Hãy kiểm tra mã game và tệp dữ liệu.' }
   $dodgeCityData = $dodgeCityData | ConvertFrom-Json
   Say "Dữ liệu Dodge City: $dodgeCityFile ($($dodgeCityData.count) lá)" Green
-  $revision = & $node -e "const fs=require('fs'),crypto=require('crypto'); console.log(crypto.createHash('sha256').update(Buffer.concat(['server.js','game.js','room-timer.js','room-pause.js'].map(f=>fs.readFileSync(f)))).digest('hex'));"
+  $revision = & $node -e "const fs=require('fs'),crypto=require('crypto'); console.log(crypto.createHash('sha256').update(Buffer.concat(['server.js','game.js','power.js','room-timer.js','room-pause.js'].map(f=>fs.readFileSync(f)))).digest('hex'));"
   if ($LASTEXITCODE -ne 0) { throw 'Không đọc được mã nguồn game trong thư mục hiện tại.' }
 
   $localUrl = "http://127.0.0.1:$Port"
@@ -93,8 +93,9 @@ try {
     if ($stale -and -not $Restart) {
       Say 'Server đang chạy mã hoặc dữ liệu Dodge City cũ. Mở lại trình duyệt sẽ chưa áp dụng bản mới.' Yellow
       Say 'Khởi động lại sẽ mất các phòng/ván đang mở; tài khoản vẫn được giữ.' Yellow
-      $answer = Read-Host 'Nhập R để khởi động lại, hoặc Enter để giữ server đang chạy'
-      $Restart = $answer -eq 'R'
+      # Mặc định khởi động lại: server cũ không có thống kê/danh hiệu cuối ván và các luật mới.
+      $answer = Read-Host 'Nhấn Enter để khởi động lại server (nên chọn), hoặc nhập K để giữ server cũ'
+      $Restart = $answer -ne 'K'
     }
     if (-not $Restart) {
       Say "Server đang chạy ở cửa sổ khác: $localUrl" Green

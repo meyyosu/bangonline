@@ -4,6 +4,7 @@
 const { readFileSync } = require('node:fs');
 const { createHash } = require('node:crypto');
 const { join } = require('node:path');
+const power = require('./power'); // sức mạnh & cán cân cho tab Diễn biến / Đóng góp
 
 const RANKS = { J: 11, Q: 12, K: 13, A: 14 };
 const rankVal = (r) => RANKS[r] || Number(r);
@@ -204,6 +205,13 @@ const newStats = () => ({
   bangs: 0, dealt: 0, taken: 0, kills: 0, dodged: 0, healed: 0, mass: 0, equips: 0, targeted: 0,
   checks: 0, checksOk: 0, checkExpected: 0, friendly: 0, friendlyTo: {},
   turnDealt: 0, turnDealtAt: 0, bestTurn: 0, bestTurnAt: 0,
+  // Lươn chúa: máu tránh được trong cùng một vòng (né Bang!/Gatling, đỡ Indians!, bỏ Bang! trong Duel)
+  roundAvoided: 0, roundAvoidedAt: 0, bestAvoid: 0, bestAvoidAt: 0,
+  ownTurns: 0, lowTurns: 0,          // Di sản (số lượt của mình), Sống dai (lượt bắt đầu khi ≤ 2 máu)
+  takenFrom: {},                     // máu mất theo người gây ra → Đớp mạng
+  snatched: 0, snatchedFrom: [],     // Đớp mạng: máu người khác đã cày trên những người mình kết liễu
+  teamTargets: 0, teamTargetTo: {},  // Quả tạ vàng: nhắm vào đồng đội
+  renegadeTargets: 0,                // Tao biết mà: nhắm vào Renegade
 });
 
 class GameError extends Error {}
@@ -282,11 +290,40 @@ class Game {
     this.startedAt = Date.now();
     for (const p of this.players) p.hand.push(...this.draw(p.hp));
     this.addLog(`Ván đấu bắt đầu! Sheriff là ${this.players[this.turn].name}.`);
+    // Dòng thời gian cán cân: mốc đầu ván (sức mạnh mỗi phe lúc này là chuẩn để so) rồi mỗi hành động một điểm
+    this.timeline = [];
+    this.tlLog = [];
+    power.balance(this, CARD_INFO);
+    this.tlStart = this.players.map((p, i) => this.powerState(i));
     this.startTurn();
   }
 
+  // ---------- dòng thời gian cán cân (tab Diễn biến / Đóng góp) ----------
+  powerState(i) {
+    const p = this.players[i];
+    return [p.hp, p.alive ? 1 : 0, Math.round(power.strength(this, i, CARD_INFO) * 10) / 10, p.eq.map((c) => c.name).join('|')];
+  }
+  // Ai được ghi công cho hành động sắp làm: phản hồi khi bị tấn công → người tấn công; Duel → đối thủ;
+  // rút kiểm tra Dynamite/Jail → không ai (-1, "Số phận"); còn lại → chính người làm.
+  creditFor(pi) {
+    const pend = this.pending;
+    if (!pend || pend.player !== pi) return pi;
+    if (pend.type === 'check') return pend.kind === 'Barrel' && pend.resume ? (pend.resume.source ?? -1) : -1;
+    if (pend.type === 'duel') return pend.other ?? pi;
+    if (pend.source != null && pend.source !== pi) return pend.source;
+    return pi;
+  }
+  recordTimeline(credit) {
+    if (!this.timeline || this.phase === 'character') return;
+    this.timeline.push({
+      t: this.turnNumber || 0, r: this.roundNumber || 0, o: this.turn, a: credit,
+      b: Math.round(power.balance(this, CARD_INFO) * 1000) / 1000,
+      ps: this.players.map((_, i) => this.powerState(i)), log: this.tlLog.splice(0),
+    });
+  }
+
   // ---------- tiện ích ----------
-  addLog(msg) { this.log.push(msg); if (this.log.length > 150) this.log.shift(); }
+  addLog(msg) { this.log.push(msg); if (this.log.length > 150) this.log.shift(); if (this.tlLog) this.tlLog.push(msg); }
   idx(name) { return this.players.findIndex((p) => p.name === name); }
   alive() { return this.players.map((p, i) => i).filter((i) => this.players[i].alive); }
   nextAlive(i) {
@@ -426,6 +463,10 @@ class Game {
     if (this.winner) return;
     this.turnNumber = (this.turnNumber || 0) + 1;
     const pi = this.turn, p = this.players[pi];
+    // Vòng = từ lượt Sheriff tới trước lượt Sheriff kế tiếp (ván luôn mở bằng Sheriff; Sheriff chết là hết ván)
+    if (p.role === 'Sheriff') this.roundNumber = (this.roundNumber || 0) + 1;
+    this.stats[pi].ownTurns++;
+    if (p.hp <= 2) this.stats[pi].lowTurns++;
     p.coolingGreen.clear();
     if (p.char === 'Vera Custer') p.copiedAbility = null;
     this.bangsPlayed = 0;
@@ -494,8 +535,9 @@ class Game {
       bang.got++;
       this.stats[pi].dodged++;
       this.recordSound('missedsound1');
+      if (bang.got >= bang.need) this.noteAvoid(pi);
     }
-    if (bang.got >= bang.need) { this.addLog(`${p.name} đã né được!`); return this.finishResponse(bang); }
+    if (bang.got >= bang.need) { this.addLog(`${p.name} đã né được!`); this.noteMass(bang, { barrel: true }); return this.finishResponse(bang); }
     this.pending = bang;
   }
 
@@ -622,7 +664,13 @@ class Game {
 
   kill(ti, src) {
     const t = this.players[ti];
-    if (src != null && src !== ti) this.stats[src].kills++;
+    if (src != null && src !== ti) {
+      const st = this.stats[src];
+      st.kills++;
+      // Đớp mạng: phần máu nạn nhân đã mất do người khác (không tính người kết liễu, không tính Dynamite)
+      const others = Object.entries(this.stats[ti].takenFrom).reduce((n, [k, v]) => (Number(k) === src ? n : n + v), 0);
+      if (others > 0) { st.snatched += others; st.snatchedFrom.push(ti); }
+    }
     t.alive = false;
     t.hp = 0;
     this.addLog(`☠️ ${t.name} đã chết! Vai trò: ${t.role} (${ROLE_INFO[t.role].vi}).`);
@@ -687,6 +735,17 @@ class Game {
     return p.role === this.winner;
   }
 
+  // Ghi cách một người phản hồi lá đánh chung (Indians/Gatling) để giao diện hiện pop-up kết quả
+  noteMass(pend, res) {
+    const m = this.mass;
+    if (!m || !pend?.mass || pend.mass !== m.seq) return;
+    const t = m.targets.find((x) => x.i === pend.player);
+    if (!t || t.res) return;
+    if (res.hurt && !this.players[pend.player].alive) res = { dead: true };
+    t.res = res;
+    m.t = Date.now();
+  }
+
   // ---------- hàng đợi phản hồi ----------
   nextPending() {
     this.pending = null;
@@ -743,7 +802,7 @@ class Game {
     for (const card of cards) this.recordPlay(pi, card, 'discard');
     this.skillUses++;
     if (skill === 'Doc Holyday') {
-      this.stats[ti].targeted++;
+      this.noteTarget(pi, ti, 'Doc Holyday');
       if (cards.every((c) => c.suit === 'D') && this.ignoresDiamonds(t)) {
         this.addLog(`${t.name} miễn đòn của ${p.name} vì cả hai lá đều là Rô.`);
         return;
@@ -756,7 +815,14 @@ class Game {
     }
   }
 
+  // Mọi hành động đi qua đây: làm xong (không lỗi) thì ghi một điểm cán cân
   act(name, a) {
+    const credit = this.creditFor(this.idx(name));
+    this.doAct(name, a);
+    this.recordTimeline(credit);
+  }
+
+  doAct(name, a) {
     if (this.winner) fail('Ván đấu đã kết thúc.');
     const pi = this.idx(name);
     if (pi < 0) fail('Bạn không tham gia ván này.');
@@ -828,7 +894,8 @@ class Game {
       if (pend.red) this.give(p, 1);
       this.pending = null;
       this.phase = 'play';
-      return this.afterAction();
+      this.afterAction();
+      return this.recordTimeline(this.idx(p.name));
     }
     if (this.phase === 'character') {
       this.addLog(`⏱ ${p.name} hết giờ chọn nhân vật, tự động chọn ngẫu nhiên.`);
@@ -879,7 +946,7 @@ class Game {
           const ti = this.idx(a.target);
           const t = this.players[ti];
           if (!t || ti === pi || !t.alive || !t.hand.length) fail('Chọn người có bài trên tay.');
-          this.noteSheriffTarget(pi, ti, 'Jesse Jones');
+          this.noteTarget(pi, ti, 'Jesse Jones');
           this.stealRandom(t, p);
           this.give(p, 1);
           this.addLog(`${p.name} lấy 1 lá từ tay ${t.name} và rút 1 lá.`);
@@ -893,6 +960,7 @@ class Game {
           const ti = this.idx(a.target), target = this.players[ti];
           const index = target?.alive ? target.eq.findIndex((c) => c.id === a.cardId) : -1;
           if (index < 0) fail('Chọn một lá trang bị đang đặt trên bàn.');
+          this.noteTarget(pi, ti, 'Pat Brennan');
           const [c] = target.eq.splice(index, 1);
           target.coolingGreen.delete(c.id);
           p.hand.push(c);
@@ -928,6 +996,7 @@ class Game {
         const c = pend.cards.splice(i, 1)[0];
         p.hand.push(c);
         this.addLog(`${p.name} chọn ${cardStr(c)} ở General Store.`);
+        if (this.store) { this.store.picks.push({ i: pi, card: c }); this.store.t = Date.now(); }
         pend.order.shift();
         while (pend.order.length && !this.players[pend.order[0]].alive) pend.order.shift();
         if (pend.cards.length && pend.order.length) pend.player = pend.order[0];
@@ -956,9 +1025,12 @@ class Game {
           pend.got++;
           this.stats[pi].dodged++;
           this.recordSound('missedsound1');
+          if (pend.got >= pend.need) this.noteAvoid(pi);
           this.addLog(`${p.name} dùng ${c.name === 'Bang' ? 'Bang! (như Missed!)' : c.name === 'Missed' ? 'Missed!' : c.name}.`);
+          if (pend.got >= pend.need) this.noteMass(pend, { card: c });
         } else if (a.type === 'take') {
           this.damage(pi, 1, pend.source, pend);
+          this.noteMass(pend, { hurt: 1 });
           return this.finishResponse(pend);
         } else fail('Hành động không hợp lệ.');
         if (pend.got >= pend.need) { this.addLog(`${p.name} đã né được!`); this.finishResponse(pend); }
@@ -974,10 +1046,13 @@ class Game {
           this.recordPlay(pi, c);
           this.mollyDraw(p, c, pend.type === 'duel' ? pend : null);
           this.addLog(`${p.name} bỏ một Bang!.`);
+          this.noteAvoid(pi);
+          this.noteMass(pend, { card: c });
           if (pend.type === 'duel') this.pending = { ...pend, player: pend.other, other: pi };
           else this.nextPending();
         } else if (a.type === 'take') {
           this.damage(pi, 1, pend.type === 'duel' ? pend.other : pend.source, pend.type === 'duel' ? pend : null);
+          this.noteMass(pend, { hurt: 1 });
           this.finishResponse(pend);
         } else fail('Hành động không hợp lệ.');
         return;
@@ -1033,11 +1108,10 @@ class Game {
         const range = regularBang || info.maxDistance === 'weapon' ? this.range(p) : (info.maxDistance ?? Infinity);
         const [ti, t] = needTarget((ti) => { if (this.distance(pi, ti) > range) fail('Mục tiêu ngoài tầm bắn.'); });
         use(); this.toDiscard(card);
-        this.stats[ti].targeted++;
+        this.noteTarget(pi, ti, regularBang ? 'Bang!' : card.name);
         if (regularBang) {
           this.bangsPlayed++;
           this.stats[pi].bangs++;
-          this.noteSheriffTarget(pi, ti, 'Bang!');
           this.bangSoundCount = (this.bangSoundCount || 0) + 1;
           this.recordSound(this.bangSoundCount % 2 ? 'bangsound1' : 'bangsound2');
         }
@@ -1085,6 +1159,9 @@ class Game {
         use(); this.toDiscard(card);
         const order = [pi, ...others()];
         this.pending = { type: 'store', player: pi, order, cards: this.draw(order.length) };
+        // Lịch sử chọn (công khai) cho pop-up General Store
+        this.storeSeq = (this.storeSeq || 0) + 1;
+        this.store = { seq: this.storeSeq, by: pi, card, order: [...order], revealed: [...this.pending.cards], picks: [], t: Date.now(), t0: Date.now() };
         this.addLog(`🏪 ${p.name} mở General Store.`);
         return;
       }
@@ -1098,8 +1175,7 @@ class Game {
         });
         const selected = this.targetCard(t, a.targetCard);
         use(); this.toDiscard(card);
-        this.stats[ti].targeted++;
-        if (name === 'Panic' || name === 'Cat Balou') this.noteSheriffTarget(pi, ti, name === 'Panic' ? 'Panic!' : name);
+        this.noteTarget(pi, ti, name === 'Panic' ? 'Panic!' : card.name);
         if (this.ignoredCard(t, card)) return;
         const taken = this.removeTargetCard(t, selected);
         if (name === 'Panic' || info.effect === 'take') { p.hand.push(taken); this.addLog(`😱 ${p.name} lấy ${a.targetCard === 'hand' ? '1 lá trên tay' : cardStr(taken)} của ${t.name}.`); }
@@ -1129,8 +1205,7 @@ class Game {
       case 'Duel': {
         const [ti, t] = needTarget();
         use(); this.toDiscard(card);
-        this.stats[ti].targeted++;
-        this.noteSheriffTarget(pi, ti, 'Duel');
+        this.noteTarget(pi, ti, 'Duel');
         this.addLog(`🤠 ${p.name} thách đấu ${t.name}!`);
         this.pending = { type: 'duel', player: ti, other: pi };
         return;
@@ -1141,9 +1216,12 @@ class Game {
         use(); this.toDiscard(card);
         if (name === 'Indians' || name === 'Gatling') this.stats[pi].mass++;
         this.addLog(name === 'Indians' ? `🪶 ${p.name} thả thổ dân tấn công!` : `🔫 ${p.name} dùng ${name}!`);
-        this.queue = others().filter((j) => !this.ignoredCard(this.players[j], card)).map((j) => name === 'Indians'
-          ? { type: 'indians', player: j, source: pi }
-          : this.attackPrompt(pi, j, 1));
+        const targets = others().filter((j) => !this.ignoredCard(this.players[j], card));
+        this.massSeq = (this.massSeq || 0) + 1;
+        this.mass = { seq: this.massSeq, by: pi, card, targets: targets.map((i) => ({ i, res: null })), t: Date.now(), t0: Date.now() };
+        this.queue = targets.map((j) => name === 'Indians'
+          ? { type: 'indians', player: j, source: pi, mass: this.massSeq }
+          : { ...this.attackPrompt(pi, j, 1), mass: this.massSeq });
         this.nextPending();
         return;
       }
@@ -1153,7 +1231,7 @@ class Game {
           if (this.hasEq(t, 'Jail')) fail('Người này đã ở trong tù.');
         });
         use();
-        this.stats[ti].targeted++;
+        this.noteTarget(pi, ti, 'Jail');
         if (this.ignoredCard(t, card)) { this.toDiscard(card); return; }
         t.eq.push(card);
         this.jailSeq = (this.jailSeq || 0) + 1;
@@ -1189,6 +1267,7 @@ class Game {
     if (lost <= 0) return;
     this.stats[ti].taken += lost;
     if (src == null || src === ti) return;
+    this.stats[ti].takenFrom[src] = (this.stats[ti].takenFrom[src] || 0) + lost;
     const st = this.stats[src];
     st.dealt += lost;
     if (st.turnDealtAt !== this.turnNumber) { st.turnDealtAt = this.turnNumber; st.turnDealt = 0; }
@@ -1200,7 +1279,27 @@ class Game {
     }
   }
 
-  // Tướng cướp: ghi lại Outlaw nhắm vào Sheriff lần đầu (Bang!, Panic!, Cat Balou, Duel, Jesse Jones).
+  // Mọi lá/kỹ năng nhắm một người (Bang!, Panic!, Cat Balou, Duel, Jail, Jesse Jones, Pat Brennan, Doc Holyday,
+  // lá xanh Dodge City…) đi qua đây: Ai cũng quý bạn, Tướng cướp, Quả tạ vàng, Tao biết mà.
+  noteTarget(pi, ti, via) {
+    if (pi === ti) return;
+    const P = this.players, st = this.stats[pi];
+    this.stats[ti].targeted++;
+    this.noteSheriffTarget(pi, ti, via);
+    if (sameFaction(P[pi].role, P[ti].role)) { st.teamTargets++; st.teamTargetTo[ti] = (st.teamTargetTo[ti] || 0) + 1; }
+    if (P[ti].role === 'Renegade') st.renegadeTargets++;
+  }
+
+  // Lươn chúa: mỗi lần thoát 1 máu (né xong Bang!/Gatling, đỡ Indians!, bỏ Bang! trong Duel), cộng theo VÒNG
+  // (né đòn thường xảy ra trong lượt người khác nên tính cả vòng bàn, không tính theo lượt như Kẻ ủ mưu)
+  noteAvoid(pi) {
+    const st = this.stats[pi], round = this.roundNumber || 1;
+    if (st.roundAvoidedAt !== round) { st.roundAvoidedAt = round; st.roundAvoided = 0; }
+    st.roundAvoided++;
+    if (st.roundAvoided > st.bestAvoid) { st.bestAvoid = st.roundAvoided; st.bestAvoidAt = round; }
+  }
+
+  // Tướng cướp: ghi lại Outlaw nhắm vào Sheriff lần đầu (gọi từ noteTarget).
   noteSheriffTarget(pi, ti, via) {
     if (this.players[pi].role !== 'Outlaw' || this.players[ti].role !== 'Sheriff') return;
     if (this.bandits.some((b) => b.i === pi)) return;
@@ -1216,10 +1315,27 @@ class Game {
         return {
           name: p.name, bangs: s.bangs, dealt: s.dealt, taken: s.taken, kills: s.kills, dodged: s.dodged,
           healed: s.healed, mass: s.mass, equips: s.equips, targeted: s.targeted,
-          checks: s.checks, checksOk: s.checksOk,
+          checks: s.checks, checksOk: s.checksOk, turns: s.ownTurns,
         };
       }),
       awards: this.awards(),
+      timeline: this.compactTimeline(),
+    };
+  }
+
+  // Gửi cho màn kết thúc: trạng thái từng người chỉ giữ ở điểm cuối mỗi lượt (đủ để tính "tác động" của lượt),
+  // bỏ các dòng log thủ tục cho nhẹ.
+  compactTimeline() {
+    if (!this.timeline?.length) return null;
+    const boring = /^(— |.+ rút \d+ lá\.$|.+ kết thúc lượt\.$|.+ đã chọn |Chồng bài đã được xáo)/;
+    const T = this.timeline;
+    return {
+      start: this.tlStart,
+      pts: T.map((p, k) => ({
+        t: p.t, r: p.r, o: p.o, a: p.a, b: p.b,
+        log: p.log.filter((l) => !boring.test(l)),
+        ...(k === T.length - 1 || T[k + 1].t !== p.t ? { ps: p.ps } : {}),
+      })),
     };
   }
 
@@ -1229,28 +1345,45 @@ class Game {
     const luck = (i) => (S[i].checks >= MIN_CHECKS ? (S[i].checksOk - S[i].checkExpected) / S[i].checks : null);
     const pct = (v) => `${v > 0 ? '+' : v < 0 ? '−' : ''}${Math.round(Math.abs(v) * 100)}%`;
     const checksSub = (i) => `${S[i].checksOk}/${S[i].checks} lần`;
-    const friendlySub = (i) => {
-      const top = Object.entries(S[i].friendlyTo).sort((a, b) => b[1] - a[1])[0];
-      return top ? `vào ${P[top[0]].name}` : '';
-    };
+    const topOf = (map) => Object.entries(map).sort((a, b) => b[1] - a[1])[0];
+    const num = (v) => (Math.round(v * 10) / 10).toString().replace('.', ',');
+
+    // Ô may rủi: người lệch kỳ vọng xa nhất quyết định ô là Số đỏ (lệch dương) hay Sống chó (lệch âm, hoặc hoà)
+    const devs = P.map((_, i) => luck(i)).filter((v) => v != null && v !== 0);
+    const best = Math.max(0, ...devs), worst = Math.min(0, ...devs);
+    const luckDef = best > -worst
+      ? ['lucky', (i) => { const v = luck(i); return v != null && v > 0 ? v : null; }, { fmt: pct, sub: checksSub }]
+      : ['unlucky', (i) => { const v = luck(i); return v != null && v < 0 ? -v : null; }, { fmt: (v) => pct(-v), sub: checksSub }];
+
+    // Đớp mạng: xếp theo máu người khác đã cày; bằng nhau thì ai tự gây ít máu hơn xếp trên (cộng phần lẻ rất nhỏ)
+    const snatch = (i) => (S[i].snatched > 0 ? S[i].snatched + 1e-3 / (1 + S[i].dealt) : null);
+    const snatchSub = (i) => `💀 ${S[i].snatchedFrom.map((k) => P[k].name).join(", ")}`;
+
+    // Thứ tự = vị trí trong lưới 4×3
     const defs = [
-      ['gunslinger', (i) => S[i].bangs, { unit: 'phát' }],
       ['damage', (i) => S[i].dealt, { unit: 'máu' }],
-      ['mass', (i) => S[i].mass, { unit: 'lá' }],
+      ['killer', (i) => S[i].kills, { unit: 'mạng' }],
       ['schemer', (i) => S[i].bestTurn, { unit: 'máu', sub: (i) => `lượt ${S[i].bestTurnAt}` }],
-      ['saloon', (i) => S[i].healed, { unit: 'máu' }],
-      ['rich', (i) => S[i].equips, { unit: 'lá' }],
+      ['dodger', (i) => S[i].bestAvoid, { unit: 'máu', sub: (i) => `vòng ${S[i].bestAvoidAt}` }],
+      'bandit',
+      ['legacy', (i) => (!P[i].alive && S[i].dealt > 0 ? S[i].dealt / Math.max(1, S[i].ownTurns) : null),
+        { fmt: (v) => `${num(v)} máu/lượt`, sub: (i) => `${S[i].dealt} máu · ${S[i].ownTurns} lượt` }],
+      ['tough', (i) => S[i].lowTurns, { unit: 'lượt' }],
+      luckDef,
+      ['snatcher', snatch, { fmt: (v) => `đớp ${Math.floor(v)} máu`, sub: snatchSub }],
       ['popular', (i) => S[i].targeted, { unit: 'lần' }],
-      ['lucky', (i) => { const v = luck(i); return v != null && v > 0 ? v : null; }, { fmt: pct, sub: checksSub }],
-      ['unlucky', (i) => { const v = luck(i); return v != null && v < 0 ? -v : null; }, { fmt: (v) => pct(-v), sub: checksSub }],
-      ['friendlyFire', (i) => S[i].friendly, { unit: 'máu', sub: friendlySub }],
-      ['passenger', (i) => (this.isWinner(P[i]) ? S[i].dealt : null), { unit: 'máu', asc: true, allowZero: true }],
+      ['deadweight', (i) => (P[i].role === 'Renegade' ? null : S[i].teamTargets),
+        { unit: 'lần', sub: (i) => { const t = topOf(S[i].teamTargetTo); return t ? `vào ${P[t[0]].name}` : ''; } }],
+      // Renegade thắng một mình → "Tao biết mà": người thua nhắm vào Renegade nhiều nhất; còn lại → "Được gánh"
+      this.winner === 'Renegade'
+        ? ['iknew', (i) => (this.isWinner(P[i]) ? null : S[i].renegadeTargets), { unit: 'lần' }]
+        : ['passenger', (i) => (this.isWinner(P[i]) ? S[i].dealt : null), { unit: 'máu', asc: true, allowZero: true }],
     ];
-    const bandit = {
-      id: 'bandit',
-      ranks: this.bandits.slice(0, 2).map((b) => ({ players: [P[b.i].name], value: `lượt ${b.turn}`, sub: b.via })),
-    };
-    const list = defs.map(([id, score, o]) => {
+    return defs.map((def) => {
+      if (def === 'bandit') {
+        return { id: 'bandit', ranks: this.bandits.slice(0, 2).map((b) => ({ players: [P[b.i].name], value: `lượt ${b.turn}`, sub: b.via })) };
+      }
+      const [id, score, o] = def;
       const cand = P.map((_, i) => ({ i, v: score(i) }))
         .filter(({ v }) => v != null && (o.allowZero || v > 0))
         .sort((a, b) => (o.asc ? a.v - b.v : b.v - a.v));
@@ -1270,8 +1403,6 @@ class Game {
         })),
       };
     });
-    list.splice(5, 0, bandit); // giữ chỗ cũ của Trắng tay trong lưới 4×3
-    return list;
   }
 
 
@@ -1322,6 +1453,8 @@ class Game {
       discardRecent: this.discard.slice(-3), // [cũ nhất, ..., trên cùng]
       pending, log: this.log.slice(-60), winner: this.winner,
       summary: this.winner ? this.summary() : null, // thống kê + danh hiệu, chỉ có khi ván đã xong
+      store: this.store ? { ...this.store, order: [...this.store.order], revealed: [...this.store.revealed], picks: this.store.picks.map((x) => ({ ...x })) } : null, // General Store gần nhất cho pop-up
+      mass: this.mass ? { ...this.mass, targets: this.mass.targets.map((t) => ({ ...t })) } : null, // lá đánh chung gần nhất + kết quả từng người (công khai) cho pop-up
       lastCheck: this.lastCheck || null, // lá rút kiểm tra gần nhất (đã công khai ở chồng bài bỏ)
       soundSeq: this.soundSeq || 0,
       sounds: (this.sounds || []).filter((cue) => cue.player === null || cue.player === me).map(({ seq, files }) => ({ seq, files })),

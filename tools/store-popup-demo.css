@@ -1,0 +1,3 @@
+.demo-bar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; padding: 6px 10px; background: #1c1008f5; border: 1px solid #ad792c; border-radius: 10px; color: #fde68a; font-size: 13px; }
+.demo-bar button { padding: 7px 10px; border: 1px solid #8c6239; border-radius: 6px; background: #382315; color: #fff; cursor: pointer; font: inherit; }
+.demo-bar button[aria-pressed="true"] { background: #9a5b13; border-color: #facc15; }

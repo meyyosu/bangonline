@@ -12,7 +12,7 @@ test('Windows launcher starts current source, recognizes an existing server, and
   skip: process.platform !== 'win32', timeout: 30000,
 }, async () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'bang-launcher with spaces-'));
-  const files = ['server.js', 'game.js', 'room-timer.js', 'room-pause.js'];
+  const files = ['server.js', 'game.js', 'power.js', 'room-timer.js', 'room-pause.js'];
   for (const file of files) fs.copyFileSync(path.join(__dirname, '..', file), path.join(root, file));
   const dodgeCityFile = path.join(root, 'dodge-city.json');
   fs.copyFileSync(path.join(__dirname, '../dodge-city.json'), dodgeCityFile);
