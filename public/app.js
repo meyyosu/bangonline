@@ -608,6 +608,12 @@ function updateTurnRing() {
 
 // ---------- bàn chơi ----------
 const cardInfo = (c) => META.cards[c.name];
+// Bài trên tay: lá cùng tên đứng cạnh nhau (vd. 2 lá Missed), giữ thứ tự loại theo lần đầu xuất hiện
+function groupSameCards(cards) {
+  const first = new Map();
+  cards.forEach((c, i) => { if (!first.has(c.name)) first.set(c.name, i); });
+  return cards.map((c, i) => [c, i]).sort((a, b) => first.get(a[0].name) - first.get(b[0].name) || a[1] - b[1]).map(([c]) => c);
+}
 function cardHTML(c, cls = '') {
   const info = cardInfo(c);
   const red = c.suit === 'H' || c.suit === 'D';
@@ -854,7 +860,8 @@ function renderGame() {
   const n = g.players.length;
   const start = Math.max(meIdx, 0);
   const narrow = window.matchMedia('(max-width: 900px)').matches;
-  const rx = narrow ? 41 : 43, ry = 44;
+  // Điện thoại dọc (mobile.css): bàn cao hơn rộng, ghế lùi vào để không tràn mép màn hình
+  const rx = isPhone() ? 37 : narrow ? 41 : 43, ry = isPhone() ? 43 : 44;
 
   const seatsHTML = Array.from({ length: n }, (_, k) => {
     const i = (start + k) % n;
@@ -908,7 +915,8 @@ function renderGame() {
     const role = META.roles[meP.role];
     const playableIds = new Set(g.me.hand.filter((c) => isClickable(c, g, meP)).map((c) => c.id));
     meHTML = `
-      <div class="me ${myTurn ? 'turn' : ''} ${!meP.alive ? 'dead' : ''}">
+      <div class="me ${myTurn ? 'turn' : ''} ${!meP.alive ? 'dead' : ''} ${ui.meInfo ? 'info-open' : ''}">
+        <button type="button" class="me-info-toggle" id="meInfoToggle" aria-expanded="${!!ui.meInfo}">${ui.meInfo ? '▾ Ẩn' : '▸ Xem'} vai trò, nhân vật, trang bị</button>
         <div class="me-head">
           <div class="idcard" ${tooltipAttrs(ROLE_VI[meP.role], role.goal)}><span class="role ${meP.role}" style="margin:0">${ROLE_VI[meP.role]}</span> <b>Vai trò của bạn (bí mật)</b>
             <div style="margin-top:4px">${esc(role.goal)}</div></div>
@@ -918,7 +926,7 @@ function renderGame() {
           <div class="idcard myeq"><b>Trang bị</b>
             <div class="eqs">${meP.eq.length ? meP.eq.map((c) => eqTileHTML(c)).join('') : '<span class="muted">Chưa có trang bị</span>'}</div></div>
         </div>
-        <div class="hand" id="hand">${g.me.hand.filter((c) => !(pend?.type === 'blackJack' && pend.player === meIdx && pend.card.id === c.id)).map((c) => {
+        <div class="hand" id="hand">${groupSameCards(g.me.hand.filter((c) => !(pend?.type === 'blackJack' && pend.player === meIdx && pend.card.id === c.id))).map((c) => {
           const sel = ui.selected.includes(c.id) || ui.mode?.cardId === c.id;
           return cardHTML(c, (sel ? 'selected ' : '') + (playableIds.has(c.id) ? 'playable' : (canPlay || myPrompt ? 'dim' : '')));
         }).join('') || '<span class="muted">Không có bài trên tay.</span>'}</div>
@@ -936,6 +944,7 @@ function renderGame() {
   lb.scrollTop = lb.scrollHeight;
 
   bindGame(g, meIdx, meP, canPlay, myPrompt);
+  watchDock();
   animateDrawStage(g);
   renderMassPopup(g);
   renderStorePopup(g);
@@ -943,6 +952,21 @@ function renderGame() {
   showCheckReveal(g);
   updateClock();
 }
+
+// ---------- điện thoại dọc ----------
+// mobile.css ghim cột phải (đồng hồ, thông báo, bài trên tay) ở đáy màn hình;
+// bàn tròn lấy phần chiều cao còn lại nên cần biết thanh đáy cao bao nhiêu (--dock-h).
+const PHONE_MQ = window.matchMedia('(max-width: 600px)');
+const isPhone = () => PHONE_MQ.matches;
+let dockObserver = null;
+function watchDock() {
+  const dock = $('.right-col'), board = $('.board.playing');
+  dockObserver?.disconnect();
+  if (!dock || !board || !isPhone()) return;
+  dockObserver = new ResizeObserver(() => board.style.setProperty('--dock-h', `${Math.ceil(dock.getBoundingClientRect().height)}px`));
+  dockObserver.observe(dock);
+}
+PHONE_MQ.addEventListener('change', () => { if (ROOM?.game) renderGame(); });
 
 // ---------- pop-up đánh chung (Indians / Gatling) ----------
 // Hiện giữa bàn: lá đã đánh ➜ mỗi người bị nhắm một cột (tên + cách phản hồi). Xong hết thì thu gọn rồi tự ẩn.
@@ -1390,20 +1414,23 @@ function resultFaction(role) {
 }
 
 
-// 12 danh hiệu cuối ván: id → [biểu tượng, tên, mô tả, loại]. glory = vinh danh, tease = chọc ghẹo.
+// 12 danh hiệu cuối ván (thứ tự do awards() trong game.js quyết định, lưới 4×3): id → [biểu tượng, tên, mô tả, loại].
+// glory = Vinh danh, tease = Troll. Ô may rủi là lucky HOẶC unlucky; ô cuối là passenger HOẶC iknew (Renegade thắng).
 const AWARD_INFO = {
-  gunslinger: ['🔫', 'Tay súng nóng nhất', 'Bắn nhiều Bang! nhất', 'glory'],
   damage: ['💥', 'Kẻ gây tổn thương', 'Gây nhiều sát thương nhất', 'glory'],
-  mass: ['🏹', 'Đại đại đi', 'Đánh nhiều Gatling + Indians! nhất', 'glory'],
+  killer: ['☠️', 'Thần chết', 'Hạ gục nhiều người nhất', 'glory'],
   schemer: ['🧠', 'Kẻ ủ mưu', 'Gây nhiều sát thương nhất trong 1 lượt', 'glory'],
-  saloon: ['🍺', 'Khách quen Saloon', 'Hồi nhiều máu nhất bằng Beer / Saloon', 'glory'],
-  bandit: ['🏴‍☠️', 'Tướng cướp', 'Outlaw đầu tiên nhắm vào Sheriff (Bang!, Panic!, Cat Balou, Duel, Jesse Jones)', 'glory'],
-  rich: ['💰', 'Nhà giàu', 'Đặt nhiều lá trang bị nhất', 'glory'],
-  popular: ['💘', 'Ai cũng quý bạn', 'Bị nhắm nhiều nhất (Bang!, Panic!, Cat Balou, Duel, Jail)', 'tease'],
-  lucky: ['🍀', 'Nhân phẩm tốt', 'Rút kiểm tra may hơn kỳ vọng nhiều nhất (từ 3 lần)', 'glory'],
+  dodger: ['🐍', 'Lươn chúa', 'Tránh được nhiều sát thương nhất trong 1 vòng', 'glory'],
+  bandit: ['🏴‍☠️', 'Tướng cướp', 'Outlaw nhắm vào Sheriff sớm nhất', 'glory'],
+  legacy: ['📜', 'Di sản', 'Đã nằm xuống nhưng gây sát thương mỗi lượt nhiều nhất', 'glory'],
+  tough: ['🩸', 'Sống dai', 'Nhiều lượt sống lay lắt (≤ 2 máu) nhất', 'glory'],
+  lucky: ['🔴', 'Số đỏ', 'Rút kiểm tra may hơn kỳ vọng nhiều nhất (từ 3 lần)', 'glory'],
   unlucky: ['🐕', 'Sống chó', 'Rút kiểm tra xui hơn kỳ vọng nhiều nhất (từ 3 lần)', 'tease'],
-  friendlyFire: ['🤦', 'Bắn nhầm đồng đội', 'Gây nhiều sát thương nhất cho người cùng phe', 'tease'],
-  passenger: ['🪑', 'Có tham dự', 'Người phe thắng gây ít sát thương nhất', 'tease'],
+  snatcher: ['🦴', 'Đớp mạng', 'Ăn mạng khi người khác gây sát thương', 'tease'],
+  popular: ['💘', 'Ai cũng quý bạn', 'Bị nhắm nhiều nhất', 'tease'],
+  deadweight: ['🏋️‍♂️', 'Quả tạ vàng', 'Nhắm vào đồng đội nhiều nhất', 'tease'],
+  passenger: ['🪑', 'Được gánh', 'Người phe thắng gây ít sát thương nhất — đồng đội gánh cả ván', 'tease'],
+  iknew: ['🙄', 'Tao biết mà', 'Người đã cố ngăn cản Kẻ phản bội nhiều nhất', 'tease'],
 };
 const RESULT_STEPS = [['result', 'Kết quả'], ['awards', 'Danh hiệu'], ['stats', 'Thống kê']];
 const STAT_COLUMNS = [
@@ -1452,10 +1479,14 @@ function resultAwardsHTML(g, won) {
   if (!g.summary) return resultMissingSummaryHTML(g, won, ['result', 'Kết quả'], '<button type="button" class="result-continue small" data-step="stats"><span aria-hidden="true">✺</span> Tiếp tục</button>');
   // Bỏ qua danh hiệu lạ nếu server và giao diện lệch phiên bản, tránh lỗi làm hỏng cả màn.
   const awards = (g.summary.awards || []).filter((a) => AWARD_INFO[a.id]);
-  const mine = awards.filter((a) => a.ranks.some((r) => r.players.includes(ME))).length;
+  // Đếm riêng Vinh danh và Troll: "lên bục" = có tên ở hạng 1 hoặc 2
+  const podium = (kind) => {
+    const list = awards.filter((a) => AWARD_INFO[a.id][3] === kind);
+    return `<b>${list.filter((a) => a.ranks.some((r) => r.players.includes(ME))).length}</b>/${list.length}`;
+  };
   return `${resultHeaderHTML(g, won)}
-    <div class="aw-bar"><span>Bạn lên bục <b>${mine}</b>/${awards.length} danh hiệu</span>
-      <span class="aw-legend"><span><i class="glory"></i>Vinh danh</span><span><i class="tease"></i>Chọc ghẹo</span></span></div>
+    <div class="aw-bar"><span>Bạn lên bục ${podium('glory')} danh hiệu vinh danh · ${podium('tease')} danh hiệu troll</span>
+      <span class="aw-legend"><span><i class="glory"></i>Vinh danh</span><span><i class="tease"></i>Troll</span></span></div>
     <div class="aw-grid">${awards.map((a) => awardCardHTML(g, a)).join('')}</div>
     <div class="result-foot"><button type="button" class="btn ghost" data-step="result">← Kết quả</button><span></span>
       <button type="button" class="result-continue small" data-step="stats"><span aria-hidden="true">✺</span> Tiếp tục</button></div>`;
@@ -1627,6 +1658,8 @@ function animatePlayedCard(card, origin, action, player) {
 function bindGame(g, meIdx, meP, canPlay, myPrompt) {
   const main = $('#mainArea');
   const pend = g.pending;
+  const infoBtn = $('#meInfoToggle');
+  if (infoBtn) infoBtn.onclick = () => { ui.meInfo = !ui.meInfo; renderGame(); };
 
   main.querySelectorAll('#hand .card').forEach((el) => el.onclick = run(async () => {
     const id = Number(el.dataset.card);
