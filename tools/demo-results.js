@@ -26,7 +26,12 @@ game.stats.forEach((s, i) => {
   s.checksOk = rnd(s.checks);
   s.checkExpected = s.checks * 0.3;
   s.bestTurn = Math.min(s.dealt, 1 + rnd(3)); s.bestTurnAt = 1 + rnd(30);
-  if (i === 2) { s.friendly = 2; s.friendlyTo = { 1: 2 }; }
+  s.bestAvoid = rnd(4); s.bestAvoidAt = 1 + rnd(6); // vòng
+  s.ownTurns = 2 + rnd(5); s.lowTurns = rnd(5);
+  s.renegadeTargets = rnd(6);
+  if (s.kills && rnd(1)) { s.snatched = 1 + rnd(3); s.snatchedFrom = [(i + 1) % 7]; }
+  if (i === 2) { s.friendly = 2; s.friendlyTo = { 1: 2 }; s.teamTargets = 3; s.teamTargetTo = { 1: 3 }; }
+  if (i === 4) { s.teamTargets = 1; s.teamTargetTo = { 3: 1 }; }
 });
 game.bandits = [{ i: 3, turn: 2, via: 'Bang!' }, { i: 4, turn: 4, via: 'Cat Balou' }];
 const samples = {};

@@ -1,0 +1,108 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Nháp danh hiệu v3</title>
+<link href="https://fonts.googleapis.com/css2?family=Rye&family=Be+Vietnam+Pro:wght@400;600;700;800&family=Roboto+Slab:wght@700;900&display=swap" rel="stylesheet">
+<!-- Dùng đúng CSS của game để nháp trông như màn thật -->
+<link rel="stylesheet" href="../public/style.css">
+<style>
+  body { margin: 0; min-height: 100vh; background: radial-gradient(circle at 50% 40%, #3a2416, #120a05); }
+  .wrap { max-width: 1360px; margin: 0 auto; padding: 18px 20px 30px; display: flex; flex-direction: column; align-items: center; }
+  .tools { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; justify-content: center; margin-bottom: 14px; color: #f4e4c1; font-size: 13px; }
+  .tools b { color: #d9a441; }
+  .tools .grp { display: inline-flex; gap: 4px; align-items: center; margin-right: 8px; }
+  .tools button { padding: 6px 12px; border-radius: 8px; border: 1px solid #d9a441; background: transparent; color: #f4e4c1; font: inherit; cursor: pointer; }
+  .tools button.on { background: #d9a441; color: #2a1a0e; font-weight: 700; }
+  .new { position: absolute; top: -10px; left: 10px; padding: 1px 7px; border-radius: 99px; background: #3f7d3a; color: #fff; font-size: 10px; font-weight: 800; }
+  .rule { margin-top: 4px; padding: 5px 7px; border-radius: 6px; background: rgba(0,0,0,.05); border: 1px dashed #c9a46a; font-size: 10.5px; line-height: 1.3; color: #5a4632; }
+  .rule b { color: #8a3b1e; }
+  .hide-rules .rule { display: none; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="tools">
+    <b>NHÁP DANH HIỆU v3 · 12 ô</b>
+    <span class="grp">Phe thắng: <button data-win="Sheriff" class="on">Sheriff &amp; Deputy</button><button data-win="Renegade">Renegade một mình</button></span>
+    <span class="grp">Ván này: <button data-luck="red" class="on">có người cực đỏ</button><button data-luck="black">có người cực đen</button></span>
+    <button id="toggleRules">Ẩn/hiện cách tính</button>
+  </div>
+  <div class="aw-bar"><span id="mineCount"></span>
+    <span class="aw-legend"><span><i class="glory"></i>Vinh danh</span><span><i class="tease"></i>Troll</span></span></div>
+  <div class="aw-grid" id="grid"></div>
+</div>
+<script>
+const ME = 'CaoBoiMienTay';
+const ROLE = { CaoBoiMienTay: 'Sheriff', ThanhXaThu99: 'Deputy', HoangHonDo: 'Deputy', TuongCuopSaMac: 'Outlaw', BongMaThungLung: 'Outlaw', SieuDaoChich: 'Outlaw', KeHaiMat_VN: 'Renegade' };
+// [id, icon, tên, mô tả, loại, mới?, cách tính, hạng 1, hạng 2]   hạng = [người, giá trị, dòng phụ]
+const SINGLE = 'mọi lá/kỹ năng <b>nhắm một người</b>: Bang!, Panic!, Cat Balou, Duel, Jail, Jesse Jones, lá xanh Dodge City…';
+const SLOT = {
+  damage: ['damage', '💥', 'Kẻ gây tổn thương', 'Gây nhiều sát thương nhất', 'glory', false,
+    'Như cũ: tổng máu người khác mất do mình gây ra.', [['TuongCuopSaMac'], '9 máu'], [['CaoBoiMienTay'], '7 máu']],
+  killer: ['killer', '☠️', 'Thần chết', 'Hạ gục nhiều người nhất', 'glory', true,
+    'Đếm số người mình bắn/đấu phát cuối làm họ hết máu. Dynamite nổ không tính cho ai.', [['CaoBoiMienTay'], '2 mạng'], [['TuongCuopSaMac', 'KeHaiMat_VN'], '1 mạng']],
+  schemer: ['schemer', '🧠', 'Kẻ ủ mưu', 'Gây nhiều sát thương nhất trong 1 lượt', 'glory', false,
+    'Như cũ. Đi cặp với Lươn chúa.', [['TuongCuopSaMac'], '4 máu', 'lượt 12'], [['CaoBoiMienTay'], '3 máu', 'lượt 20']],
+  dodger: ['dodger', '🐍', 'Lươn chúa', 'Tránh được nhiều sát thương nhất trong 1 lượt', 'glory', true,
+    'Trong cùng một lượt, cộng số máu lẽ ra phải mất nhưng thoát: né Bang!/Gatling bằng Missed, Barrel; bỏ Bang! đỡ Indians!; mỗi lá Bang! bỏ ra trong Duel. Đi cặp với Kẻ ủ mưu.', [['HoangHonDo'], '4 máu', 'lượt 9'], [['KeHaiMat_VN'], '3 máu', 'lượt 15']],
+  bandit: ['bandit', '🏴‍☠️', 'Tướng cướp', 'Outlaw nhắm vào Sheriff sớm nhất', 'glory', false,
+    'Như cũ, mở rộng sang ' + SINGLE + '.', [['BongMaThungLung'], 'lượt 2', 'Bang!'], [['TuongCuopSaMac'], 'lượt 3', 'Panic!']],
+  legacy: ['legacy', '📜', 'Di sản', 'Đã nằm xuống nhưng gây sát thương mỗi lượt nhiều nhất', 'glory', true,
+    'Chỉ xét <b>người đã chết</b>: máu đã gây ÷ số lượt của chính họ trước khi chết. Người sống tới cuối không tính.', [['SieuDaoChich'], '1,5 máu/lượt', '6 máu · 4 lượt'], [['HoangHonDo'], '0,8 máu/lượt', '4 máu · 5 lượt']],
+  tough: ['tough', '🩸', 'Sống dai', 'Nhiều lượt sống lay lắt nhất', 'glory', true,
+    'Đếm số lượt <b>của mình</b> bắt đầu khi còn ≤ 2 máu.', [['KeHaiMat_VN'], '6 lượt'], [['CaoBoiMienTay'], '4 lượt']],
+  red: ['luck', '🔴', 'Số đỏ', 'Rút kiểm tra may hơn kỳ vọng nhiều nhất', 'glory', false,
+    '<b>Ô gộp Số đỏ / Sống chó</b>: xét người rút từ 3 lần. Ai lệch xa kỳ vọng nhất? Lệch dương → ô thành Số đỏ (2 người may nhất). Lệch âm → Sống chó. Bằng nhau → Sống chó.', [['BongMaThungLung'], '+40%', '4/5 lần'], [['CaoBoiMienTay'], '+17%', '3/4 lần']],
+  black: ['luck', '🐕', 'Sống chó', 'Rút kiểm tra xui hơn kỳ vọng nhiều nhất', 'tease', false,
+    '<b>Ô gộp Số đỏ / Sống chó</b>: ván này người lệch xa nhất là người xui, nên ô hiện Sống chó với 2 người xui nhất.', [['SieuDaoChich'], '−55%', '0/4 lần'], [['ThanhXaThu99'], '−25%', '1/4 lần']],
+  snatcher: ['snatcher', '🦴', 'Đớp mạng', 'Ăn mạng khi người khác gây sát thương', 'tease', true,
+    'Với mỗi người mình hạ gục, cộng số máu nạn nhân đã mất <b>do người khác</b> trước phát cuối. Cao nhất đứng đầu; bằng nhau thì ai tự gây ít máu hơn xếp trên. Tự cày rồi tự kết liễu = 0.', [['KeHaiMat_VN'], 'đớp 3 máu', 'mạng HoangHonDo, ThanhXaThu99 cày'], [['TuongCuopSaMac'], 'đớp 1 máu', 'mạng SieuDaoChich']],
+  popular: ['popular', '💘', 'Ai cũng quý bạn', 'Bị nhắm nhiều nhất', 'tease', false,
+    'Như cũ.', [['CaoBoiMienTay'], '11 lần'], [['KeHaiMat_VN'], '6 lần']],
+  friendly: ['friendly', '🏋️‍♂️', 'Quả tạ vàng', 'Nhắm vào đồng đội nhiều nhất', 'tease', true,
+    'Đếm số lần dùng ' + SINGLE + ' vào người cùng phe. Renegade không có đồng đội nên không xét. Thay cho “Bắn nhầm đồng đội”.', [['CaoBoiMienTay'], '3 lần', 'vào HoangHonDo'], [['SieuDaoChich'], '1 lần', 'vào TuongCuopSaMac']],
+  passenger: ['passenger', '🪑', 'Được gánh', 'Người phe thắng gây ít sát thương nhất — đồng đội gánh cả ván', 'tease', false,
+    'Như hiện tại. Khi Renegade thắng một mình, ô này đổi thành “Tao biết mà”.', [['HoangHonDo'], '1 máu'], [['ThanhXaThu99'], '4 máu']],
+  iknew: ['iknew', '🙄', 'Tao biết mà', 'Người đã cố ngăn cản Kẻ phản bội nhiều nhất', 'tease', true,
+    'Chỉ khi Renegade thắng một mình: người thua nhắm vào Renegade nhiều nhất bằng ' + SINGLE + '.', [['CaoBoiMienTay'], '7 lần'], [['SieuDaoChich'], '4 lần']],
+};
+// Thứ tự lưới 4×3: hàng 1 sát thương & mạng (Kẻ ủ mưu cạnh Lươn chúa), hàng 2 Tướng cướp, sống sót & may rủi, hàng 3 chọc ghẹo
+const ORDER = (win, luck) => ['damage', 'killer', 'schemer', 'dodger', 'bandit', 'legacy', 'tough', luck, 'snatcher', 'popular', 'friendly', win === 'Renegade' ? 'iknew' : 'passenger'];
+
+const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+function row(r, i) {
+  const [players, value, sub] = r;
+  const who = players.map((n) => `<span class="aw-name ${n === ME ? 'aw-me' : ''}"><b>${esc(n)}</b>${n === ME ? ' <i>(bạn)</i>' : ''}${players.length === 1 ? ` <span class="aw-role role-${ROLE[n].toLowerCase()}">${ROLE[n]}</span>` : ''}</span>`).join('');
+  return `<div class="aw-rank r${i + 1} ${players.includes(ME) ? 'aw-mine' : ''}"><span class="aw-medal">${i ? '🥈' : '🥇'}</span>
+    <span class="aw-who">${who}</span><span class="aw-val">${esc(value)}${sub ? `<small>${esc(sub)}</small>` : ''}</span></div>`;
+}
+function card(a) {
+  const [, icon, title, desc, kind, isNew, rule, r1, r2] = a;
+  const mine = r1[0].includes(ME);
+  return `<div class="aw-card ${kind} ${mine ? 'mine' : ''}">${mine ? '<span class="aw-you">Bạn!</span>' : ''}${isNew ? '<span class="new">MỚI</span>' : ''}
+    <div class="aw-head"><span class="aw-icon">${icon}</span><div><div class="aw-title">${esc(title)}</div><div class="aw-desc">${esc(desc)}</div></div></div>
+    ${row(r1, 0)}${row(r2, 1)}<div class="rule">${rule}</div></div>`;
+}
+const state = { win: 'Sheriff', luck: 'red' };
+function render() {
+  const list = ORDER(state.win, state.luck).map((k) => SLOT[k]);
+  document.getElementById('grid').innerHTML = list.map(card).join('');
+  // "Lên bục" = có tên ở hạng 1 hoặc 2; đếm riêng vinh danh và troll
+  const onPodium = (a) => a[7][0].includes(ME) || a[8][0].includes(ME);
+  const count = (kind) => { const l = list.filter((a) => a[4] === kind); return `<b>${l.filter(onPodium).length}</b>/${l.length}`; };
+  document.getElementById('mineCount').innerHTML = `Bạn lên bục ${count('glory')} danh hiệu vinh danh · ${count('tease')} danh hiệu troll`;
+}
+for (const key of ['win', 'luck']) {
+  document.querySelectorAll(`[data-${key}]`).forEach((b) => b.onclick = () => {
+    document.querySelectorAll(`[data-${key}]`).forEach((x) => x.classList.toggle('on', x === b));
+    state[key] = b.dataset[key];
+    render();
+  });
+}
+document.getElementById('toggleRules').onclick = () => document.body.classList.toggle('hide-rules');
+render();
+</script>
+</body>
+</html>

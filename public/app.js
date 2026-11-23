@@ -470,11 +470,27 @@ function roomSettingsBody(form) {
   return body;
 }
 
+// Phát hiện server chạy bản cũ trước khi chơi, để ván không kết thúc mà thiếu danh hiệu/thống kê.
+// Server cũ không gửi r.server; server mới báo stale khi code trên ổ đĩa mới hơn code đang chạy.
+function serverOutdated(r) {
+  return !r.server?.features?.includes('endSummary') || !!r.server.stale;
+}
+
+function serverWarningHTML(r) {
+  if (!serverOutdated(r)) return '';
+  const isHost = r.host === ME;
+  return `<div class="server-warning" role="alert"><b>⚠️ Server đang chạy bản cũ</b>
+    <p>Ván chơi trên server này sẽ <b>không có danh hiệu và thống kê</b> cuối ván.</p>
+    <p>${isHost ? 'Bạn là host: hãy' : 'Nhắc host'} chạy lại <code>CHAY-GAME.bat</code> và nhấn <b>Enter</b> để khởi động lại server trước khi bắt đầu.
+    Khởi động lại sẽ đóng các phòng đang mở; mọi người chỉ cần vào lại.</p></div>`;
+}
+
 function renderWaiting() {
   const r = ROOM;
   const isHost = r.host === ME;
   const n = r.players.length;
   $('#mainArea').innerHTML = `
+    ${serverWarningHTML(r)}
     <div class="panel">
       <h2>Phòng chờ (${n}/7)</h2>
       <ul class="seat-list">
@@ -513,6 +529,7 @@ function renderWaiting() {
   $('#startBtn') && ($('#startBtn').onclick = run(async () => {
     const form = $('#settingsForm');
     if (form && !form.reportValidity()) return;
+    if (serverOutdated(ROOM) && !confirm('Server đang chạy bản cũ: ván này sẽ KHÔNG có danh hiệu và thống kê cuối ván.\n\nNên khởi động lại server (chạy lại CHAY-GAME.bat, nhấn Enter) trước.\n\nVẫn bắt đầu ván?')) return;
     // Save the visible settings even when the host starts without pressing Save.
     const settings = form ? roomSettingsBody(form) : {};
     await api(`/api/rooms/${r.code}/start`, settings);
@@ -557,11 +574,46 @@ function updateClock() {
     el.textContent = text;
     el.classList.toggle('urgent', !p?.frozen && !!t && seconds <= 10);
   });
+  updateTurnRing();
 }
 setInterval(updateClock, 250);
 
+// Vòng đếm ngược quanh avatar người mà đồng hồ đang đếm (ROOM.timer.player).
+// Vòng chạy bằng CSS animation; mỗi lần vẽ lại bàn thì tính lại số giây còn lại theo hạn của server.
+const RING_URGENT = 10, RING_FINAL = 4;
+const timerLeft = (t) => (t.deadline - Date.now() - (ui.serverOffset || 0)) / 1000;
+function renderTurnRing() {
+  const t = ROOM?.timer, g = ROOM?.game;
+  if (!t || !g || g.winner || ROOM.pause?.frozen) return;
+  const p = g.players[t.player];
+  const seat = p && $(`.player[data-player="${CSS.escape(p.name)}"]`);
+  if (!seat) return;
+  const ring = document.createElement('div');
+  ring.className = 'turn-ring';
+  ring.style.setProperty('--ring-total', t.seconds);
+  ring.style.setProperty('--ring-left', Math.max(0, timerLeft(t)).toFixed(2));
+  seat.classList.add('ticking');
+  seat.querySelector('.av').appendChild(ring);
+  updateTurnRing();
+}
+// Nhấp nháy khi gần hết (gọi trong updateClock, mỗi 250ms)
+function updateTurnRing() {
+  const seat = $('.player.ticking');
+  if (!seat) return;
+  const t = ROOM?.timer;
+  const left = t && !ROOM.pause?.frozen ? timerLeft(t) : Infinity;
+  seat.classList.toggle('urgent', left <= RING_URGENT);
+  seat.classList.toggle('final', left <= RING_FINAL);
+}
+
 // ---------- bàn chơi ----------
 const cardInfo = (c) => META.cards[c.name];
+// Bài trên tay: lá cùng tên đứng cạnh nhau (vd. 2 lá Missed), giữ thứ tự loại theo lần đầu xuất hiện
+function groupSameCards(cards) {
+  const first = new Map();
+  cards.forEach((c, i) => { if (!first.has(c.name)) first.set(c.name, i); });
+  return cards.map((c, i) => [c, i]).sort((a, b) => first.get(a[0].name) - first.get(b[0].name) || a[1] - b[1]).map(([c]) => c);
+}
 function cardHTML(c, cls = '') {
   const info = cardInfo(c);
   const red = c.suit === 'H' || c.suit === 'D';
@@ -808,7 +860,8 @@ function renderGame() {
   const n = g.players.length;
   const start = Math.max(meIdx, 0);
   const narrow = window.matchMedia('(max-width: 900px)').matches;
-  const rx = narrow ? 41 : 43, ry = 44;
+  // Điện thoại dọc (mobile.css): bàn cao hơn rộng, ghế lùi vào để không tràn mép màn hình
+  const rx = isPhone() ? 37 : narrow ? 41 : 43, ry = isPhone() ? 43 : 44;
 
   const seatsHTML = Array.from({ length: n }, (_, k) => {
     const i = (start + k) % n;
@@ -862,7 +915,8 @@ function renderGame() {
     const role = META.roles[meP.role];
     const playableIds = new Set(g.me.hand.filter((c) => isClickable(c, g, meP)).map((c) => c.id));
     meHTML = `
-      <div class="me ${myTurn ? 'turn' : ''} ${!meP.alive ? 'dead' : ''}">
+      <div class="me ${myTurn ? 'turn' : ''} ${!meP.alive ? 'dead' : ''} ${ui.meInfo ? 'info-open' : ''}">
+        <button type="button" class="me-info-toggle" id="meInfoToggle" aria-expanded="${!!ui.meInfo}">${ui.meInfo ? '▾ Ẩn' : '▸ Xem'} vai trò, nhân vật, trang bị</button>
         <div class="me-head">
           <div class="idcard" ${tooltipAttrs(ROLE_VI[meP.role], role.goal)}><span class="role ${meP.role}" style="margin:0">${ROLE_VI[meP.role]}</span> <b>Vai trò của bạn (bí mật)</b>
             <div style="margin-top:4px">${esc(role.goal)}</div></div>
@@ -872,7 +926,7 @@ function renderGame() {
           <div class="idcard myeq"><b>Trang bị</b>
             <div class="eqs">${meP.eq.length ? meP.eq.map((c) => eqTileHTML(c)).join('') : '<span class="muted">Chưa có trang bị</span>'}</div></div>
         </div>
-        <div class="hand" id="hand">${g.me.hand.filter((c) => !(pend?.type === 'blackJack' && pend.player === meIdx && pend.card.id === c.id)).map((c) => {
+        <div class="hand" id="hand">${groupSameCards(g.me.hand.filter((c) => !(pend?.type === 'blackJack' && pend.player === meIdx && pend.card.id === c.id))).map((c) => {
           const sel = ui.selected.includes(c.id) || ui.mode?.cardId === c.id;
           return cardHTML(c, (sel ? 'selected ' : '') + (playableIds.has(c.id) ? 'playable' : (canPlay || myPrompt ? 'dim' : '')));
         }).join('') || '<span class="muted">Không có bài trên tay.</span>'}</div>
@@ -890,9 +944,184 @@ function renderGame() {
   lb.scrollTop = lb.scrollHeight;
 
   bindGame(g, meIdx, meP, canPlay, myPrompt);
+  watchDock();
   animateDrawStage(g);
+  renderMassPopup(g);
+  renderStorePopup(g);
+  renderTurnRing();
   showCheckReveal(g);
   updateClock();
+}
+
+// ---------- điện thoại dọc ----------
+// mobile.css ghim cột phải (đồng hồ, thông báo, bài trên tay) ở đáy màn hình;
+// bàn tròn lấy phần chiều cao còn lại nên cần biết thanh đáy cao bao nhiêu (--dock-h).
+const PHONE_MQ = window.matchMedia('(max-width: 600px)');
+const isPhone = () => PHONE_MQ.matches;
+let dockObserver = null;
+function watchDock() {
+  const dock = $('.right-col'), board = $('.board.playing');
+  dockObserver?.disconnect();
+  if (!dock || !board || !isPhone()) return;
+  dockObserver = new ResizeObserver(() => board.style.setProperty('--dock-h', `${Math.ceil(dock.getBoundingClientRect().height)}px`));
+  dockObserver.observe(dock);
+}
+PHONE_MQ.addEventListener('change', () => { if (ROOM?.game) renderGame(); });
+
+// ---------- pop-up đánh chung (Indians / Gatling) ----------
+// Hiện giữa bàn: lá đã đánh ➜ mỗi người bị nhắm một cột (tên + cách phản hồi). Xong hết thì thu gọn rồi tự ẩn.
+const MASS_MINI_MS = 2500, MASS_HIDE_MS = 5000;
+const massDone = (g, m) => m.targets.every((t) => t.res || !g.players[t.i].alive);
+function massResHTML(r, dead, flip) {
+  const f = flip ? ' flip' : '';
+  if (r?.card) return cardHTML(r.card, 'mp-res ok' + f);
+  if (r?.barrel) return `<div class="mp-res barrel ok${f}"><div class="ic">🛢️</div>Barrel<br>né được</div>`;
+  if (r?.dead || dead) return `<div class="mp-res dead${f}"><div class="ic">💀</div>Bị hạ</div>`;
+  if (r?.hurt) return `<div class="mp-res hurt${f}"><div class="big">−${r.hurt}</div>máu</div>`;
+  return '<div class="mp-res wait">chờ…</div>';
+}
+const massSum = (r, dead) => r?.card ? cardInfo(r.card).icon : r?.barrel ? '🛢️' : r?.dead || dead ? '💀' : r?.hurt ? `−${r.hurt}❤` : '…';
+
+function renderMassPopup(g) {
+  $('.mass-pop:not(.store-pop):not(.out)')?.remove();
+  const m = g.mass, arena = $('.arena');
+  if (!m || !arena || g.winner || centerPopupKind(g) !== 'mass') return;
+  let st = ui.mass;
+  if (st?.key !== `${m.seq}:${m.t0}`) {
+    // Vào phòng khi lá đánh chung đã xong từ trước thì không hiện lại
+    const age = Date.now() + (ui.serverOffset || 0) - m.t;
+    clearTimeout(st?.timer);
+    st = ui.mass = { key: `${m.seq}:${m.t0}`, seen: new Set(), mini: false, hidden: massDone(g, m) && age > MASS_MINI_MS, enter: true };
+  }
+  if (st.hidden) return;
+  if (massDone(g, m) && !st.timer) {
+    st.timer = setTimeout(() => {
+      st.mini = true;
+      if (ui.mass === st && ROOM?.game) renderMassPopup(ROOM.game);
+      st.timer = setTimeout(() => hideMassPopup(st), MASS_HIDE_MS);
+    }, MASS_MINI_MS);
+  }
+  const by = g.players[m.by];
+  const active = g.pending ? m.targets.find((t) => !t.res && g.players[t.i].alive) : null;
+  const fresh = m.targets.filter((t) => (t.res || !g.players[t.i].alive) && !st.seen.has(t.i));
+  // Lúc có người đang rút kiểm tra (Barrel) thì thu gọn để lộ chồng bài
+  const mini = st.mini || g.pending?.type === 'check';
+  const el = document.createElement('div');
+  el.className = `mass-pop${mini ? ' mini' : ''}${st.enter ? ' enter' : ''}`;
+  el.setAttribute('role', 'status');
+  el.title = mini ? 'Bấm để mở rộng' : 'Bấm để thu gọn';
+  el.innerHTML = `
+    <div class="mp-src"><div class="who"><span class="mini-ic">${cardInfo(m.card).icon} </span>${esc(by.name)}</div>${cardHTML(m.card)}</div>
+    <div class="mp-arrow">➜</div>
+    <div class="mp-targets">${m.targets.map((t) => {
+      const p = g.players[t.i], dead = !p.alive && !t.res, mine = t.i === g.me?.index;
+      return `<div class="mp-col${mine ? ' mine' : ''}${t === active ? ' active' : ''}">
+        <div class="mp-name" title="${esc(p.name)}" data-sum="${massSum(t.res, dead)}">${mine ? 'Bạn' : esc(p.name)}</div>
+        <div class="mp-slot">${massResHTML(t.res, dead, fresh.includes(t) && !st.enter)}</div></div>`;
+    }).join('')}</div>
+    <button type="button" class="mp-close" title="Đóng" aria-label="Đóng">✕</button>`;
+  el.onclick = (e) => {
+    if (e.target.closest('.mp-close')) return hideMassPopup(st);
+    clearTimeout(st.timer); st.timer = 'manual'; // đã bấm thì giữ nguyên cho tới khi tự đóng
+    st.mini = !mini;
+    renderMassPopup(ROOM.game);
+  };
+  arena.appendChild(el);
+  if (!st.enter) {
+    for (const t of fresh) {
+      if (t.res?.hurt || t.res?.dead) $(`.player[data-player="${CSS.escape(g.players[t.i].name)}"]`)?.classList.add('mp-hit');
+    }
+  }
+  for (const t of fresh) st.seen.add(t.i);
+  st.enter = false;
+}
+function hideMassPopup(st) {
+  clearTimeout(st.timer);
+  st.hidden = true;
+  const el = $('.mass-pop:not(.store-pop)');
+  if (!el || ui.mass !== st) return;
+  el.classList.add('out');
+  el.addEventListener('animationend', () => el.remove(), { once: true });
+  setTimeout(() => el.remove(), 600); // phòng khi tắt hiệu ứng
+}
+
+// Pop-up Indians/Gatling và General Store dùng chung chỗ giữa bàn: chỉ hiện cái đang diễn ra / mới nhất
+function centerPopupKind(g) {
+  if (g.pending?.type === 'store') return 'store';
+  if (g.mass && !massDone(g, g.mass)) return 'mass';
+  return (g.store?.t || 0) > (g.mass?.t || 0) ? 'store' : 'mass';
+}
+
+// ---------- pop-up General Store ----------
+// Mỗi người một cột theo thứ tự chọn (tên + lá đã lấy); hàng dưới là lá còn trên quầy, tới lượt mình thì bấm để lấy.
+function renderStorePopup(g) {
+  $('.store-pop:not(.out)')?.remove();
+  const s = g.store, arena = $('.arena');
+  if (!s || !arena || g.winner || centerPopupKind(g) !== 'store') return;
+  const picking = g.pending?.type === 'store' ? g.pending.player : null;
+  const myTurn = picking != null && picking === g.me?.index;
+  let st = ui.store;
+  if (st?.key !== `${s.seq}:${s.t0}`) {
+    const age = Date.now() + (ui.serverOffset || 0) - s.t;
+    clearTimeout(st?.timer);
+    st = ui.store = { key: `${s.seq}:${s.t0}`, seen: new Set(), mini: false, hidden: picking == null && age > MASS_MINI_MS, enter: true };
+  }
+  if (myTurn) { st.hidden = false; st.mini = false; } // tới lượt mình thì luôn mở để chọn được
+  if (st.hidden) return;
+  if (picking == null && !st.timer) {
+    st.timer = setTimeout(() => {
+      st.mini = true;
+      if (ui.store === st && ROOM?.game) renderStorePopup(ROOM.game);
+      st.timer = setTimeout(() => hideStorePopup(st), MASS_HIDE_MS);
+    }, MASS_MINI_MS);
+  }
+  const pickOf = (id) => s.picks.find((x) => x.card.id === id);
+  const pickBy = (i) => s.picks.find((x) => x.i === i);
+  const remaining = picking == null ? [] : s.revealed.filter((c) => !pickOf(c.id));
+  const fresh = s.picks.filter((x) => !st.seen.has(x.card.id));
+  const mini = st.mini;
+  const el = document.createElement('div');
+  el.className = `mass-pop store-pop${mini ? ' mini' : ''}${st.enter ? ' enter' : ''}${myTurn ? ' my-turn' : ''}`;
+  el.setAttribute('role', 'status');
+  el.title = myTurn ? 'Tới lượt bạn: bấm 1 lá trên quầy' : mini ? 'Bấm để mở rộng' : 'Bấm để thu gọn';
+  el.innerHTML = `
+    <div class="mp-src"><div class="who"><span class="mini-ic">${cardInfo(s.card).icon} </span>${esc(g.players[s.by].name)}</div>${cardHTML(s.card)}</div>
+    <div class="mp-arrow">➜</div>
+    <div class="sp-right">
+      <div class="mp-targets">${s.order.map((i) => {
+        const p = g.players[i], pk = pickBy(i), now = i === picking, mine = i === g.me?.index;
+        const gone = !pk && !now && !p.alive;
+        const slot = pk ? cardHTML(pk.card, 'mp-res ok' + (fresh.includes(pk) && !st.enter ? ' flip' : ''))
+          : gone ? '<div class="mp-res dead"><div class="ic">💀</div></div>'
+          : `<div class="mp-res wait">${now ? 'đang<br>chọn…' : picking == null ? '—' : 'chờ…'}</div>`;
+        return `<div class="mp-col${mine ? ' mine' : ''}${now ? ' active' : ''}">
+          <div class="mp-name" title="${esc(p.name)}" data-sum="${pk ? cardInfo(pk.card).icon : now ? '…' : ''}">${mine ? 'Bạn' : esc(p.name)}</div>
+          <div class="mp-slot">${slot}</div></div>`;
+      }).join('')}</div>
+      ${remaining.length ? `<div class="sp-left"><span>${myTurn ? '👉 Bấm 1 lá để lấy' : 'Còn trên quầy'}</span>${remaining.map((c) => cardHTML(c, 'sp-tiny' + (myTurn ? ' sp-pickable' : ''))).join('')}</div>` : ''}
+    </div>
+    ${myTurn ? '' : '<button type="button" class="mp-close" title="Đóng" aria-label="Đóng">✕</button>'}`;
+  el.onclick = (e) => {
+    if (e.target.closest('.mp-close')) return hideStorePopup(st);
+    const pick = e.target.closest('.sp-pickable');
+    if (pick) return run(() => sendAction({ type: 'pick', cardId: Number(pick.dataset.card) }))();
+    if (myTurn) return;
+    clearTimeout(st.timer); st.timer = 'manual';
+    st.mini = !mini;
+    renderStorePopup(ROOM.game);
+  };
+  arena.appendChild(el);
+  for (const x of fresh) st.seen.add(x.card.id);
+  st.enter = false;
+}
+function hideStorePopup(st) {
+  clearTimeout(st.timer);
+  st.hidden = true;
+  const el = $('.store-pop');
+  if (!el || ui.store !== st) return;
+  el.classList.add('out');
+  el.addEventListener('animationend', () => el.remove(), { once: true });
+  setTimeout(() => el.remove(), 600);
 }
 
 function drawStageHTML(g) {
@@ -1113,8 +1342,9 @@ function promptHTML(g, meIdx, meP) {
       return `<h4>🤠 Đấu súng với ${P(pend.other)}!</h4><div>Bỏ 1 lá Bang! để tiếp tục, hoặc chịu thua mất 1 máu.</div>
         <div class="row"><button class="btn secondary" data-act="take">Chịu thua (mất 1 máu)</button></div>`;
     case 'store':
-      return `<h4>🏪 General Store — ${mine ? 'chọn 1 lá:' : `đang chờ ${P(pend.player)} chọn…`}</h4>
-        <div class="row" id="storeCards">${pend.cards.map((c) => cardHTML(c, 'small ' + (mine ? 'playable' : ''))).join('')}</div>`;
+      // Các lá nằm trên pop-up giữa bàn (renderStorePopup)
+      return mine ? '<h4>🏪 General Store — tới lượt bạn!</h4><div>Bấm 1 lá trên <b>quầy giữa bàn</b> để lấy.</div>'
+        : `<h4>🏪 General Store</h4><div class="muted">Đang chờ ${P(pend.player)} chọn…</div>`;
     case 'check': {
       const ci = CHECK_INFO[pend.kind] || CHECK_INFO.Barrel;
       const luck = abilityOf(g.players[pend.player]) === 'Lucky Duke' ? ' (Lucky Duke lật 2 lá, lấy lá có lợi)' : '';
@@ -1184,20 +1414,23 @@ function resultFaction(role) {
 }
 
 
-// 12 danh hiệu cuối ván: id → [biểu tượng, tên, mô tả, loại]. glory = vinh danh, tease = chọc ghẹo.
+// 12 danh hiệu cuối ván (thứ tự do awards() trong game.js quyết định, lưới 4×3): id → [biểu tượng, tên, mô tả, loại].
+// glory = Vinh danh, tease = Troll. Ô may rủi là lucky HOẶC unlucky; ô cuối là passenger HOẶC iknew (Renegade thắng).
 const AWARD_INFO = {
-  gunslinger: ['🔫', 'Tay súng nóng nhất', 'Bắn nhiều Bang! nhất', 'glory'],
   damage: ['💥', 'Kẻ gây tổn thương', 'Gây nhiều sát thương nhất', 'glory'],
-  mass: ['🏹', 'Đại đại đi', 'Đánh nhiều Gatling + Indians! nhất', 'glory'],
+  killer: ['☠️', 'Thần chết', 'Hạ gục nhiều người nhất', 'glory'],
   schemer: ['🧠', 'Kẻ ủ mưu', 'Gây nhiều sát thương nhất trong 1 lượt', 'glory'],
-  saloon: ['🍺', 'Khách quen Saloon', 'Hồi nhiều máu nhất bằng Beer / Saloon', 'glory'],
-  bandit: ['🏴‍☠️', 'Tướng cướp', 'Outlaw đầu tiên nhắm vào Sheriff (Bang!, Panic!, Cat Balou, Duel, Jesse Jones)', 'glory'],
-  rich: ['💰', 'Nhà giàu', 'Đặt nhiều lá trang bị nhất', 'glory'],
-  popular: ['💘', 'Ai cũng quý bạn', 'Bị nhắm nhiều nhất (Bang!, Panic!, Cat Balou, Duel, Jail)', 'tease'],
-  lucky: ['🍀', 'Nhân phẩm tốt', 'Rút kiểm tra may hơn kỳ vọng nhiều nhất (từ 3 lần)', 'glory'],
+  dodger: ['🐍', 'Lươn chúa', 'Tránh được nhiều sát thương nhất trong 1 vòng', 'glory'],
+  bandit: ['🏴‍☠️', 'Tướng cướp', 'Outlaw nhắm vào Sheriff sớm nhất', 'glory'],
+  legacy: ['📜', 'Di sản', 'Đã nằm xuống nhưng gây sát thương mỗi lượt nhiều nhất', 'glory'],
+  tough: ['🩸', 'Sống dai', 'Nhiều lượt sống lay lắt (≤ 2 máu) nhất', 'glory'],
+  lucky: ['🔴', 'Số đỏ', 'Rút kiểm tra may hơn kỳ vọng nhiều nhất (từ 3 lần)', 'glory'],
   unlucky: ['🐕', 'Sống chó', 'Rút kiểm tra xui hơn kỳ vọng nhiều nhất (từ 3 lần)', 'tease'],
-  friendlyFire: ['🤦', 'Bắn nhầm đồng đội', 'Gây nhiều sát thương nhất cho người cùng phe', 'tease'],
-  passenger: ['🪑', 'Có tham dự', 'Người phe thắng gây ít sát thương nhất', 'tease'],
+  snatcher: ['🦴', 'Đớp mạng', 'Ăn mạng khi người khác gây sát thương', 'tease'],
+  popular: ['💘', 'Ai cũng quý bạn', 'Bị nhắm nhiều nhất', 'tease'],
+  deadweight: ['🏋️‍♂️', 'Quả tạ vàng', 'Nhắm vào đồng đội nhiều nhất', 'tease'],
+  passenger: ['🪑', 'Được gánh', 'Người phe thắng gây ít sát thương nhất — đồng đội gánh cả ván', 'tease'],
+  iknew: ['🙄', 'Tao biết mà', 'Người đã cố ngăn cản Kẻ phản bội nhiều nhất', 'tease'],
 };
 const RESULT_STEPS = [['result', 'Kết quả'], ['awards', 'Danh hiệu'], ['stats', 'Thống kê']];
 const STAT_COLUMNS = [
@@ -1227,19 +1460,41 @@ function awardCardHTML(g, award) {
     ${row(award.ranks[0], 0)}${row(award.ranks[1], 1)}</div>`;
 }
 
-function resultAwardsHTML(g, won) {
-  const awards = g.summary?.awards || [];
-  const mine = awards.filter((a) => a.ranks.some((r) => r.players.includes(ME))).length;
+// Server chạy bản cũ (chưa khởi động lại sau khi cập nhật) sẽ không gửi g.summary:
+// báo rõ cho người chơi thay vì để màn Danh hiệu trống và bảng Thống kê toàn số 0.
+function resultMissingSummaryHTML(g, won, back, next) {
   return `${resultHeaderHTML(g, won)}
-    <div class="aw-bar"><span>Bạn lên bục <b>${mine}</b>/${awards.length} danh hiệu</span>
-      <span class="aw-legend"><span><i class="glory"></i>Vinh danh</span><span><i class="tease"></i>Chọc ghẹo</span></span></div>
+    <div class="result-missing" role="alert"><b>⚠️ Không có số liệu cuối ván</b>
+      <p>Server đang chạy bản cũ nên chưa gửi danh hiệu và thống kê.</p>
+      <p>Người làm host hãy chạy lại <code>CHAY-GAME.bat</code>, nhấn <b>Enter</b> để khởi động lại server, rồi mở ván mới.</p></div>
+    <div class="result-foot"><button type="button" class="btn ghost" data-step="${back[0]}">← ${back[1]}</button><span></span>${next}</div>`;
+}
+
+function resultFinalButtonsHTML() {
+  return `<button type="button" class="btn ghost" data-close>Xem bàn chơi</button>
+    ${ROOM.host === ME ? '<button type="button" class="result-continue small" data-reset><span aria-hidden="true">🔁</span> Về phòng chờ</button>' : '<span class="st-wait">Chờ chủ phòng mở ván mới…</span>'}`;
+}
+
+function resultAwardsHTML(g, won) {
+  if (!g.summary) return resultMissingSummaryHTML(g, won, ['result', 'Kết quả'], '<button type="button" class="result-continue small" data-step="stats"><span aria-hidden="true">✺</span> Tiếp tục</button>');
+  // Bỏ qua danh hiệu lạ nếu server và giao diện lệch phiên bản, tránh lỗi làm hỏng cả màn.
+  const awards = (g.summary.awards || []).filter((a) => AWARD_INFO[a.id]);
+  // Đếm riêng Vinh danh và Troll: "lên bục" = có tên ở hạng 1 hoặc 2
+  const podium = (kind) => {
+    const list = awards.filter((a) => AWARD_INFO[a.id][3] === kind);
+    return `<b>${list.filter((a) => a.ranks.some((r) => r.players.includes(ME))).length}</b>/${list.length}`;
+  };
+  return `${resultHeaderHTML(g, won)}
+    <div class="aw-bar"><span>Bạn lên bục ${podium('glory')} danh hiệu vinh danh · ${podium('tease')} danh hiệu troll</span>
+      <span class="aw-legend"><span><i class="glory"></i>Vinh danh</span><span><i class="tease"></i>Troll</span></span></div>
     <div class="aw-grid">${awards.map((a) => awardCardHTML(g, a)).join('')}</div>
     <div class="result-foot"><button type="button" class="btn ghost" data-step="result">← Kết quả</button><span></span>
       <button type="button" class="result-continue small" data-step="stats"><span aria-hidden="true">✺</span> Tiếp tục</button></div>`;
 }
 
 function resultStatsHTML(g, won) {
-  const sum = g.summary || { stats: [], turns: 0 };
+  if (!g.summary) return resultMissingSummaryHTML(g, won, ['awards', 'Danh hiệu'], resultFinalButtonsHTML());
+  const sum = g.summary;
   const byName = Object.fromEntries(sum.stats.map((s) => [s.name, s]));
   const rows = [...g.players].sort((a, b) => b.winner - a.winner);
   const best = Object.fromEntries(STAT_COLUMNS.map(([k]) => [k, Math.max(0, ...sum.stats.map((s) => s[k]))]));
@@ -1262,8 +1517,7 @@ function resultStatsHTML(g, won) {
       <tbody>${body}</tbody></table></div>
       <div class="st-note">Ô tô vàng = cao nhất ván · Rút kiểm tra = số lần thành công / số lần rút (Barrel, Jail, Dynamite)</div></div>
     <div class="result-foot"><button type="button" class="btn ghost" data-step="awards">← Danh hiệu</button><span></span>
-      <button type="button" class="btn ghost" data-close>Xem bàn chơi</button>
-      ${ROOM.host === ME ? '<button type="button" class="result-continue small" data-reset><span aria-hidden="true">🔁</span> Về phòng chờ</button>' : '<span class="st-wait">Chờ chủ phòng mở ván mới…</span>'}</div>`;
+      ${resultFinalButtonsHTML()}</div>`;
 }
 
 function resultMainHTML(g, won, team) {
@@ -1404,6 +1658,8 @@ function animatePlayedCard(card, origin, action, player) {
 function bindGame(g, meIdx, meP, canPlay, myPrompt) {
   const main = $('#mainArea');
   const pend = g.pending;
+  const infoBtn = $('#meInfoToggle');
+  if (infoBtn) infoBtn.onclick = () => { ui.meInfo = !ui.meInfo; renderGame(); };
 
   main.querySelectorAll('#hand .card').forEach((el) => el.onclick = run(async () => {
     const id = Number(el.dataset.card);
@@ -1470,10 +1726,6 @@ function bindGame(g, meIdx, meP, canPlay, myPrompt) {
   const discardEl = main.querySelector('#discardPile.draw-source');
   if (discardEl) discardEl.onclick = run(() => sendAction({ type: 'drawChoice', from: 'discard' }));
 
-  main.querySelectorAll('#storeCards .card').forEach((el) => el.onclick = run(async () => {
-    if (!myPrompt) return;
-    await sendAction({ type: 'pick', cardId: Number(el.dataset.card) });
-  }));
   main.querySelectorAll('#kitCards .kit-choice').forEach((el) => el.onclick = () => {
     if (!myPrompt || pend.type !== 'kit') return;
     const id = Number(el.dataset.kitId);

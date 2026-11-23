@@ -1,0 +1,157 @@
+/* ---------- Điện thoại dọc (≤ 600px) ----------
+   Nạp sau style.css bằng <link media="(max-width: 600px)">, nên chỉ ghi đè trên màn hẹp; desktop không đổi.
+   Bố cục khi đang chơi: bàn tròn dọc ở trên, thanh đáy ghim (đồng hồ + thông báo + bài trên tay + nút).
+   Chiều cao thanh đáy do app.js đo và gán vào --dock-h để bàn co lại vừa phần màn hình còn lại. */
+
+html, body { overflow-x: clip; }
+main { padding: 6px 8px; }
+
+/* Thanh trên cùng & đầu phòng gọn lại */
+.topbar { padding: 6px 10px; }
+.brand { font-size: 20px; letter-spacing: 1px; }
+.brand span { font-size: 11px; }
+#userbox { gap: 6px; font-size: 13px; }
+#userbox .btn { padding: 4px 8px; font-size: 12px; }
+.room-head { margin-bottom: 6px; gap: 6px; }
+.room-head .row { gap: 6px; flex-wrap: wrap; }
+.room-head h2 { font-size: 18px; }
+.room-head .btn { padding: 5px 9px; font-size: 12px; }
+
+/* ---------- chọn nhân vật: các lá nằm cùng một hàng ngang ---------- */
+.panel.choose { padding: 10px; }
+.rolecard { gap: 10px; padding: 8px 10px; margin-bottom: 8px; }
+.rolecard .rstar { width: 38px; height: 38px; font-size: 20px; }
+.rolecard h3 { font-size: 15px; }
+.rolecard p { font-size: 12px; }
+.choose-head h2 { font-size: 18px; }
+.choose-head .muted { font-size: 12px; }
+.chars { flex-wrap: nowrap; gap: 6px; margin: 16px 0 6px; }
+.ccard { flex: 1 1 0; min-width: 0; width: auto; min-height: 0; padding: 7px 5px 8px; border-width: 2px; border-radius: 10px; }
+.ccard .por { width: 46px; height: 46px; font-size: 24px; margin: 2px 0 5px; border-width: 2px; box-shadow: 0 0 0 2px var(--gold); }
+.ccard .nm { font-size: 12.5px; }
+.ccard .chp { margin: 5px 0; padding: 1px 5px; gap: 1px; }
+.ccard .chp svg { width: 11px; height: auto; }
+.ccard .chp .plus { font-size: 9px; margin-left: 2px; }
+.ccard .ab { font-size: 10.5px; line-height: 1.35; padding: 4px 5px; }
+.ccard:hover, .ccard:focus-visible { transform: none; }
+.ccard.sel { transform: translateY(-4px); }
+.ccard.sel::after { font-size: 10px; padding: 1px 7px; top: -10px; white-space: nowrap; }
+.choose .actions .btn { width: 100%; padding: 11px; font-size: 15px; }
+.choose h3 { font-size: 15px; margin-top: 12px !important; }
+.plist li { padding: 6px 8px; font-size: 13px; }
+
+/* ---------- bàn chơi ---------- */
+:root { --eqs: calc(var(--eq) * .5); }
+.board.playing { display: flex; flex-direction: column; align-items: stretch; gap: 6px; }
+.arena {
+  aspect-ratio: auto; width: 100%;
+  /* phần màn hình còn lại sau thanh đáy; không thấp quá để vẫn đủ chỗ cho 7 ghế, không cao quá rộng màn */
+  height: clamp(280px, calc(100dvh - var(--dock-h, 260px) - var(--eqs) - 56px), 140vw);
+  margin: calc(var(--eqs) + 30px) 0 20px; /* chừa chỗ cho thanh máu của ghế mình ở đáy bàn */
+}
+.felt { inset: 11% 17%; }
+.felt::after { inset: 30% 26%; }
+
+.player { width: 78px; gap: 2px; }
+.av { width: 40px; height: 40px; font-size: 20px; }
+.hand-fan { transform: scale(.7); }
+.plate { font-size: 10px; max-width: 78px; padding: 1px 5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.player .hpbar svg { height: 10px; }
+.dist { font-size: 9px; padding: 0 5px; top: -6px; left: -2px; }
+.eqframe { gap: 2px; padding: 3px; bottom: calc(100% + 6px); }
+.verdict { font-size: 15px; padding: 3px 8px; }
+
+.arena .piles { gap: 8px; }
+.arena .card-back, .arena .card.small { width: 42px; height: 60px; font-size: 10px; }
+.arena .card.small .icon { font-size: 15px; }
+.arena .card.small .cname { font-size: 8.5px; }
+.arena .discard-stack { height: 60px; width: calc(42px + (var(--n) - 1) * 16px); }
+.arena .ds-slot { right: calc(var(--i) * 16px); }
+.pile { font-size: 10px; }
+
+/* ---------- pop-up Gatling/Indians & General Store ----------
+   Không đè giữa bàn nữa: thành một dải ngay trên thanh đáy (gần ngón tay), tên từng người đã ghi sẵn trong pop-up. */
+.mass-pop, .mass-pop.mini {
+  --ty: 0; position: fixed; z-index: 40; left: 50%; top: auto;
+  bottom: calc(var(--dock-h, 260px) + 6px);
+  width: max-content; max-width: calc(100vw - 12px);
+  padding: 6px 8px; justify-content: center;
+}
+.mass-pop.mini { padding-right: 28px; }
+.mp-targets { flex-wrap: wrap; justify-content: center; gap: 3px; }
+.mp-arrow { display: none; }
+.mp-col { width: 40px; gap: 3px; }
+.mp-name { font-size: 9px; }
+.mp-slot { width: 36px; height: 50px; }
+.mp-res .ic, .mp-res.hurt .big { font-size: 16px; }
+.mass-pop .mp-src .card { width: 38px; height: 52px; }
+.mp-src .who { font-size: 9px; max-width: 46px; }
+.mp-close { width: 26px; height: 26px; top: -12px; right: -6px; }
+.store-pop.my-turn .card.sp-tiny { width: 54px; height: 74px; }
+.store-pop.my-turn .card.sp-tiny .icon { font-size: 20px; }
+.store-pop.my-turn .card.sp-tiny .cname { font-size: 9px; }
+.store-pop .card.sp-pickable:hover { transform: none; }
+
+/* ---------- màn kết thúc: danh hiệu ----------
+   Dòng phụ dài (vd. "mạng của BongMaThungLung") không được kéo thẻ rộng quá màn hình */
+.aw-grid { grid-template-columns: minmax(0, 1fr); }
+.aw-card { min-width: 0; }
+.aw-val { white-space: normal; max-width: 45%; }
+.aw-val small { overflow-wrap: anywhere; }
+
+/* ---------- màn kết thúc: bảng thống kê ----------
+   Nhiều cột nên vẫn vuốt ngang, nhưng cột tên người chơi ghim bên trái để luôn biết dòng nào của ai. */
+.st-panel { padding: 8px; }
+.st-table { font-size: 12px; }
+.st-table th, .st-table td { padding: 6px 6px; }
+.st-table th:first-child, .st-table td:first-child {
+  position: sticky; left: 0; z-index: 1; background: var(--paper);
+  max-width: 118px; box-shadow: 3px 0 5px -3px rgba(0,0,0,.35);
+}
+.st-table tr.st-me td:first-child { background: #e6e3e0; }
+.st-table tr.win td:first-child { box-shadow: inset 4px 0 var(--green), 3px 0 5px -3px rgba(0,0,0,.35); }
+.st-table tr.lose td:first-child { box-shadow: inset 4px 0 #b9a99a, 3px 0 5px -3px rgba(0,0,0,.35); }
+.st-player { gap: 5px; }
+.st-player > span, .st-player > div { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.st-av { width: 24px; height: 24px; font-size: 14px; }
+.st-player small { font-size: 10px; }
+.st-scroll::after { content: 'Vuốt ngang để xem thêm →'; display: block; padding-top: 4px; font-size: 11px; color: var(--muted); text-align: right; }
+
+/* ---------- thanh đáy ghim ---------- */
+.right-col {
+  position: sticky; bottom: 0; top: auto; z-index: 30;
+  gap: 6px; margin: 0 -8px; padding: 6px 8px calc(6px + env(safe-area-inset-bottom));
+  max-height: 62dvh; overflow-y: auto; overscroll-behavior: contain;
+  background: rgba(32, 19, 10, .97); border-top: 2px solid var(--gold);
+  box-shadow: 0 -8px 18px rgba(0, 0, 0, .55);
+}
+.room-clock { padding: 3px 10px; font-size: 13px; border-width: 1px; }
+.prompt { padding: 7px 10px; min-height: 0; font-size: 13px; }
+.prompt.mine { border-width: 2px; }
+.prompt h4 { font-size: 14px; margin-bottom: 3px; }
+.prompt .row { margin-top: 5px; }
+
+.right-col .me { padding: 6px 8px 8px; border-width: 2px; }
+.me-info-toggle {
+  all: unset; display: block; box-sizing: border-box; width: 100%; cursor: pointer;
+  font-size: 12px; font-weight: 700; color: var(--muted); padding: 2px 0;
+}
+.me-head { display: none; }
+.me.info-open .me-head { display: flex; margin: 4px 0 2px; }
+.right-col .idcard { flex: 1 1 100%; padding: 6px 9px; font-size: 12px; }
+
+/* bài trên tay: một hàng vuốt ngang, chừa chỗ cho lá được chọn nhô lên */
+.right-col .hand {
+  flex-wrap: nowrap; overflow-x: auto; overflow-y: hidden; gap: 5px;
+  margin-top: 2px; min-height: 0; padding: 12px 2px 4px;
+  scroll-snap-type: x proximity; -webkit-overflow-scrolling: touch;
+}
+.right-col .hand .card { flex: 0 0 auto; width: 62px; height: 86px; padding: 3px; scroll-snap-align: start; }
+.right-col .hand .card .icon { font-size: 21px; }
+.right-col .hand .card .cname { font-size: 10px; margin-top: 4px; }
+.right-col .hand .card .corner { font-size: 10px; }
+.card.playable:hover { transform: none; }
+.card.selected { transform: translateY(-8px); }
+
+.actions { margin-top: 6px; gap: 6px; }
+.actions .btn { padding: 8px 11px; font-size: 13px; }

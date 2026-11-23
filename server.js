@@ -14,7 +14,16 @@ const sessionCookie = RULES_PREVIEW ? 'bang_preview_sid' : 'sid';
 const sessionPattern = new RegExp('(?:^|;\\s*)' + sessionCookie + '=([a-f0-9]+)');
 const PUBLIC_DIR = path.join(__dirname, 'public');
 const RUNTIME_FILES = ['server.js', 'game.js', 'room-timer.js', 'room-pause.js'];
-const runtimeRevision = crypto.createHash('sha256').update(Buffer.concat(RUNTIME_FILES.map((file) => fs.readFileSync(path.join(__dirname, file))))).digest('hex');
+const readRevision = () => crypto.createHash('sha256').update(Buffer.concat(RUNTIME_FILES.map((file) => fs.readFileSync(path.join(__dirname, file))))).digest('hex');
+const runtimeRevision = readRevision();
+// Giao diện dùng 2 thông tin này để cảnh báo trước khi chơi:
+// - SERVER_FEATURES: server cũ không gửi trường này → giao diện biết server chưa có thống kê/danh hiệu cuối ván.
+// - codeChanged: code trên ổ đĩa đã mới hơn code server đang chạy (cập nhật mà quên khởi động lại).
+const SERVER_FEATURES = ['endSummary'];
+let codeChanged = false;
+setInterval(() => {
+  try { codeChanged = readRevision() !== runtimeRevision; } catch { codeChanged = true; }
+}, Number(process.env.BANG_CODE_CHECK_MS) || 10000).unref();
 const greenCardsRevision = greenCardCount > 0 && process.env.BANG_GREEN_CARDS_FILE
   ? crypto.createHash('sha256').update(fs.readFileSync(process.env.BANG_GREEN_CARDS_FILE)).digest('hex') : null;
 const startedAt = new Date().toISOString();
@@ -55,6 +64,7 @@ function roomView(r, user) {
     chat: r.chat.slice(-60),
     game: r.game ? r.game.viewFor(user) : null,
     serverNow: Date.now(),
+    server: { features: SERVER_FEATURES, stale: codeChanged },
     pause: pauseView(r),
     timer: r.clock ? { deadline: r.clock.deadline, player: r.clock.player, response: !!r.clock.pending, character: !!r.clock.character, draw: !!r.clock.draw, seconds: r.clock.seconds } : null,
   };
