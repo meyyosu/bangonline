@@ -326,17 +326,18 @@ test('an Outlaw bounty groups the elimination and payout sounds in one cue', () 
 test('the end of the match sends each player a private victory or defeat sound', () => {
   const { g, p } = setup('Willy the Kid');
   const [eliminated, survivor] = g.players.filter((player) => player.role === 'Outlaw');
-  const resultsFor = (player) => g.viewFor(player.name).sounds.flatMap((cue) =>
+  const resultsFor = (name) => g.viewFor(name).sounds.flatMap((cue) =>
     cue.files.filter((file) => file === 'victory' || file === 'defeat'));
 
   g.kill(g.idx(eliminated.name), null);
-  for (const player of g.players) assert.deepEqual(resultsFor(player), []);
+  for (const player of g.players) assert.deepEqual(resultsFor(player.name), []);
 
   g.kill(g.idx(p.name), g.idx(survivor.name));
   assert.equal(g.winner, 'Outlaw');
   for (const player of g.players) {
-    assert.deepEqual(resultsFor(player), [player.role === 'Outlaw' ? 'victory' : 'defeat']);
+    assert.deepEqual(resultsFor(player.name), [player.role === 'Outlaw' ? 'victory' : 'defeat']);
   }
+  assert.deepEqual(resultsFor(null), []);
   assertDeck(g);
 });
 

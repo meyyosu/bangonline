@@ -138,7 +138,7 @@ test('auto draw fires at five seconds; Kit then gets twenty seconds to choose', 
   }
 });
 
-test('Panic and Cat Balou publish transfers from hands and equipment without exposing stolen hands', () => {
+test('Panic and Cat Balou publish sounds and transfers without exposing stolen hands', () => {
   for (const name of ['Panic', 'Cat Balou']) {
     for (const zone of ['hand', 'eq']) {
       const g = game();
@@ -155,6 +155,7 @@ test('Panic and Cat Balou publish transfers from hands and equipment without exp
       }
       const equipment = target.eq[0];
       const before = g.transferSeq || 0;
+      const beforeSound = g.soundSeq;
       g.act(p.name, { type: 'play', cardId: card.id, target: target.name, targetCard: zone === 'hand' ? 'hand' : equipment.id });
       const event = g.viewFor(p.name).transfers.at(-1);
       assert.ok(event.seq > before);
@@ -168,6 +169,10 @@ test('Panic and Cat Balou publish transfers from hands and equipment without exp
       for (const viewer of [...names, null]) {
         const visible = g.viewFor(viewer).transfers.at(-1).cards[0];
         assert.equal(visible?.id ?? null, name === 'Panic' && zone === 'hand' && viewer !== p.name ? null : moved.id);
+        const cue = g.viewFor(viewer).sounds.at(-1);
+        assert.equal(cue.seq, beforeSound + 1);
+        assert.equal(cue.files.length, 1);
+        assert.match(cue.files[0], name === 'Panic' ? /^cardswap2?$/ : /^catbalou1$/);
       }
       assert.equal(count(g), 80);
     }
