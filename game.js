@@ -212,12 +212,13 @@ const IRON_PLATE_SOUNDS = [
 ];
 const BARREL_SOUND = 'missedsound_barrel';
 const STEAL_SOUNDS = ['cardswap', 'cardswap2'];
+const TARGET_DISCARD_SOUND = 'catbalou1';
 const HURT_SOUNDS = { female: numberedSounds('hurt_f', 4), male: numberedSounds('hurt_m', 4) };
 const FEMALE_CHARACTERS = new Set([
   'Calamity Janet', 'Rose Doolan', 'Suzy Lafayette', 'Belle Star', 'Elena Fuente', 'Molly Stark', 'Vera Custer',
 ]);
 const PLAY_SOUNDS = { Punch: 'punch1', Gatling: 'gatling', Howitzer: 'howitzer1', Duel: 'duelo1',
-  'Cat Balou': 'catbalou1', 'Can Can': 'catbalou1', 'General Store': 'generalstore1', Indians: 'indian1',
+  'General Store': 'generalstore1', Indians: 'indian1',
   'Buffalo Rifle': 'bangsound_buffalorifle', Derringer: 'bangsound_derringer', Pepperbox: 'bangsound_pepperbox',
   Knife: 'bangsound_knife',
   Beer: 'beerdrink', Saloon: numberedSounds('saloon', 4), Whisky: numberedSounds('whiskey', 2) };
@@ -225,7 +226,7 @@ const EQUIP_SOUNDS = { Mustang: 'mustang1', Dynamite: 'dynamite_start.wav', Jail
 const SOUND_FILES = new Set([
   'bangload', 'playerjoin', 'yourturn1', 'equipment1', 'prisonfree', 'playereliminated', 'outlawkilled1', 'dynamite_explode.wav',
   'victory', 'defeat',
-  BARREL_SOUND, ...MISSED_SOUNDS, ...IRON_PLATE_SOUNDS, ...STEAL_SOUNDS,
+  BARREL_SOUND, TARGET_DISCARD_SOUND, ...MISSED_SOUNDS, ...IRON_PLATE_SOUNDS, ...STEAL_SOUNDS,
   ...Object.values(HURT_SOUNDS).flat(), ...Object.values(GUN_SOUNDS).flat(),
   ...Object.values(PLAY_SOUNDS).flat(), ...Object.values(EQUIP_SOUNDS),
 ].map((file) => file.includes('.') ? file : `${file}.mp3`));
@@ -1226,6 +1227,7 @@ class Game {
         } else {
           this.toDiscard(taken);
           this.recordTransfer(t, [taken], ti, 'discard', true, null, sourceZone);
+          this.recordSound(TARGET_DISCARD_SOUND);
           this.addLog(`💃 ${p.name} buộc ${t.name} bỏ ${cardStr(taken)}.`);
         }
         return;

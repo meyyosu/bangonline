@@ -133,6 +133,27 @@ test('Rag Time and Springfield require a distinct hand cost and reach across the
   assertDeck(g);
 });
 
+test('Cat Balou audio requires another player to discard a card', () => {
+  const { g, p, adjacent } = setup('Willy the Kid');
+  adjacent.char = 'Apache Kid';
+  g.timeout();
+  const barrel = equip(g, adjacent, 'Barrel');
+  const cat = deal(g, p, 'Cat Balou', 'D');
+  const before = g.soundSeq;
+  g.act(p.name, { type: 'play', cardId: cat.id, target: adjacent.name, targetCard: barrel.id });
+  assert.equal(g.soundSeq, before);
+  assert.ok(adjacent.eq.includes(barrel));
+
+  const canCan = play(g, p, 'Can Can');
+  assert.deepEqual(g.viewFor(adjacent.name).sounds.at(-1).files, ['equipment1']);
+  g.startTurn();
+  g.timeout();
+  g.act(p.name, { type: 'activate', cardId: canCan.id, target: adjacent.name, targetCard: barrel.id });
+  assert.deepEqual(g.viewFor(adjacent.name).sounds.at(-1).files, ['catbalou1']);
+  assert.ok(g.discard.includes(barrel));
+  assertDeck(g);
+});
+
 test('Brawl validates all choices before consuming cards and skips a player with no cards', () => {
   const { g, p, adjacent, distant } = setup('Willy the Kid');
   g.timeout();
