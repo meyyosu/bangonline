@@ -4,7 +4,8 @@ const http = require('http');
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
-const { Game, GameError, CARD_INFO, CHAR_INFO, ROLE_INFO, RULES_PREVIEW, greenCardCount, dodgeCityCardCount, dodgeCityRevision } = require('./game');
+const { Game, GameError, CARD_INFO, CHAR_INFO, ROLE_INFO, RULES_PREVIEW, SOUND_FILES,
+  greenCardCount, dodgeCityCardCount, dodgeCityRevision } = require('./game');
 const { syncTimer, tickTimer } = require('./room-timer');
 const { pauseAction, finishPause, pauseView } = require('./room-pause');
 
@@ -14,12 +15,6 @@ const sessionCookie = RULES_PREVIEW ? 'bang_preview_sid' : 'sid';
 const sessionPattern = new RegExp('(?:^|;\\s*)' + sessionCookie + '=([a-f0-9]+)');
 const PUBLIC_DIR = path.join(__dirname, 'public');
 const SOUNDS_DIR = path.join(__dirname, 'data', 'sounds');
-const SOUND_FILES = new Set([
-  'bangload.mp3', 'bangsound1.mp3', 'bangsound2.mp3', 'catbalou1.mp3', 'duelo1.mp3',
-  'dynamite_start.wav', 'dynamite_explode.wav', 'equipment1.mp3', 'gatling.mp3', 'generalstore1.mp3',
-  'howitzer1.mp3', 'indian1.mp3', 'missedsound1.mp3', 'mustang1.mp3', 'outlawkilled1.mp3',
-  'playereliminated.mp3', 'playerjoin.mp3', 'prison1.mp3', 'prisonfree.mp3', 'punch1.mp3', 'yourturn1.mp3',
-]);
 const RUNTIME_FILES = ['server.js', 'game.js', 'power.js', 'room-timer.js', 'room-pause.js'];
 const readRevision = () => crypto.createHash('sha256').update(Buffer.concat(RUNTIME_FILES.map((file) => fs.readFileSync(path.join(__dirname, file))))).digest('hex');
 const runtimeRevision = readRevision();

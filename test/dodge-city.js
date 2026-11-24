@@ -84,7 +84,7 @@ test('Dodge City appends distinct name, rank and suit copies without changing th
   assert.deepEqual(extra.filter((c) => c.name === 'Iron Plate').map(key).sort(), ['Iron Plate AD', 'Iron Plate QS']);
 });
 
-test('Rag Time and Springfield require a distinct hand cost and reach across the table', () => {
+test('Rag Time and Springfield require a distinct hand cost and reach across the table', (t) => {
   const { g, p, distant } = setup('Slab the Killer');
   g.timeout();
   const barrel = equip(g, distant, 'Barrel');
@@ -92,10 +92,14 @@ test('Rag Time and Springfield require a distinct hand cost and reach across the
   const rifle = deal(g, p, 'Springfield');
   const cost = deal(g, p, 'Beer');
   const ragAction = { type: 'play', cardId: rag.id, target: distant.name, targetCard: barrel.id };
+  const beforeSound = g.soundSeq;
   assert.throws(() => g.act(p.name, { ...ragAction, costCardId: rag.id }), GameError);
   assert.throws(() => g.act(p.name, { ...ragAction, costCardId: cost.id, targetCard: -1 }), GameError);
   assert.ok(p.hand.includes(rag) && p.hand.includes(cost));
+  assert.equal(g.soundSeq, beforeSound);
+  t.mock.method(Math, 'random', () => 0.99);
   g.act(p.name, { ...ragAction, costCardId: cost.id });
+  assert.deepEqual(g.viewFor(distant.name).sounds.at(-1), { seq: beforeSound + 1, files: ['cardswap2'] });
   assert.ok(p.hand.includes(barrel));
   assert.ok(!distant.eq.includes(barrel));
   g.bangsPlayed = 1;
@@ -146,7 +150,7 @@ test('Dodge draws after the shot and Molly cannot use the draw to finish the sam
   assertDeck(g);
 });
 
-test('Tequila heals someone else and Whisky heals its owner without exceeding max HP', () => {
+test('Tequila heals someone else and Whisky heals its owner without exceeding max HP', (t) => {
   const { g, p, distant } = setup('Tequila Joe');
   g.timeout();
   const tequila = deal(g, p, 'Tequila');
@@ -158,8 +162,10 @@ test('Tequila heals someone else and Whisky heals its owner without exceeding ma
   assert.throws(() => g.act(p.name, { ...heal, target: p.name }), GameError);
   g.act(p.name, { ...heal, target: distant.name });
   assert.equal(distant.hp, distant.maxHp - 1);
+  t.mock.method(Math, 'random', () => 0);
   g.act(p.name, { type: 'play', cardId: whisky.id, costCardId: cost[1].id });
   assert.equal(p.hp, p.maxHp);
+  assert.deepEqual(g.viewFor(distant.name).sounds.at(-1).files, ['whiskey1']);
   assertDeck(g);
 });
 
@@ -209,14 +215,18 @@ test('a failed Dynamite check uses the explosion WAV', () => {
   const spade = deal(g, p, 'Missed', 'S');
   g.deck.push(g.takeFromHand(p, spade.id));
   g.startTurn();
+  const before = g.soundSeq;
   g.timeout();
   assert.equal(p.hp, p.maxHp - 3);
   assert.ok(g.discard.includes(dynamite));
-  assert.deepEqual(g.viewFor(adjacent.name).sounds.at(-1).files, ['dynamite_explode.wav']);
+  const cues = g.viewFor(adjacent.name).sounds.filter((cue) => cue.seq > before);
+  assert.deepEqual(cues[0].files, ['dynamite_explode.wav']);
+  assert.match(cues[1].files[0], /^hurt_m[1-4]$/);
   assertDeck(g);
 });
 
-test('confirmed Bang attacks alternate audio, responses use a dodge cue, and turn audio stays private', () => {
+test('confirmed Bang attacks sample default and equipped gun sounds and turn audio stays private', (t) => {
+  const rng = t.mock.method(Math, 'random', () => 0.99);
   const { g, p, adjacent } = setup('Willy the Kid');
   assert.deepEqual(g.viewFor(p.name).sounds.at(-1).files, ['yourturn1']);
   assert.ok(!g.viewFor(adjacent.name).sounds.some((cue) => cue.files.includes('yourturn1')));
@@ -228,9 +238,31 @@ test('confirmed Bang attacks alternate audio, responses use a dodge cue, and tur
   assert.throws(() => g.act(p.name, { type: 'play', cardId: first.id, target: p.name }), GameError);
   assert.equal(g.soundSeq, before);
   g.act(p.name, { type: 'play', cardId: first.id, target: adjacent.name });
+  rng.mock.mockImplementation(() => 0);
   g.act(adjacent.name, { type: 'respond', cardId: missed.id });
+  equip(g, p, 'Remington');
   g.act(p.name, { type: 'play', cardId: second.id, target: adjacent.name });
-  assert.deepEqual(g.viewFor(adjacent.name).sounds.map((cue) => cue.files), [['bangsound1'], ['missedsound1'], ['bangsound2']]);
+  assert.deepEqual(g.viewFor(adjacent.name).sounds.map((cue) => cue.files), [
+    ['bangsound7'], ['missedsound1'], ['bangsound_remington1'],
+  ]);
+  assertDeck(g);
+});
+
+test('Barrel and Iron Plate use their own defense sounds', () => {
+  const { g, p, adjacent } = setup('Willy the Kid');
+  g.timeout();
+  equip(g, adjacent, 'Barrel');
+  const ironPlate = equip(g, adjacent, 'Iron Plate');
+  const heart = deal(g, p, 'Bang', 'H');
+  g.deck.push(g.takeFromHand(p, heart.id));
+  play(g, p, 'Bang', adjacent, 'C');
+  g.act(adjacent.name, { type: 'barrel' });
+  g.timeout();
+  assert.deepEqual(g.viewFor(p.name).sounds.at(-1).files, ['missedsound_barrel']);
+
+  play(g, p, 'Bang', adjacent, 'D');
+  g.act(adjacent.name, { type: 'respond', cardId: ironPlate.id });
+  assert.match(g.viewFor(p.name).sounds.at(-1).files[0], /^missedsound_ironplate[2-4]?$/);
   assertDeck(g);
 });
 
@@ -249,12 +281,14 @@ test('Indians plays one sound for everyone as the Bang responses begin', () => {
   g.act(distant.name, { type: 'take' });
   for (const player of g.players) {
     const cues = g.viewFor(player.name).sounds.filter((cue) => cue.seq > before);
-    assert.deepEqual(cues, [{ seq: before + 1, files: ['indian1'] }]);
+    assert.equal(cues.length, 2);
+    assert.deepEqual(cues[0], { seq: before + 1, files: ['indian1'] });
+    assert.match(cues[1].files[0], /^hurt_m[1-4]$/);
   }
   assertDeck(g);
 });
 
-test('an Outlaw bounty appends its sound after the elimination cue', () => {
+test('an Outlaw bounty groups the elimination and payout sounds in one cue', () => {
   for (const rewarded of [true, false]) {
     const { g, p } = setup('Willy the Kid');
     const outlaw = g.players.find((q) => q.role === 'Outlaw');
@@ -264,6 +298,23 @@ test('an Outlaw bounty appends its sound after the elimination cue', () => {
     assert.deepEqual(g.viewFor(p.name).sounds.at(-1).files, rewarded ? ['playereliminated', 'outlawkilled1'] : ['playereliminated']);
     assertDeck(g);
   }
+});
+
+test('the end of the match sends each player a private victory or defeat sound', () => {
+  const { g, p } = setup('Willy the Kid');
+  const [eliminated, survivor] = g.players.filter((player) => player.role === 'Outlaw');
+  const resultsFor = (player) => g.viewFor(player.name).sounds.flatMap((cue) =>
+    cue.files.filter((file) => file === 'victory' || file === 'defeat'));
+
+  g.kill(g.idx(eliminated.name), null);
+  for (const player of g.players) assert.deepEqual(resultsFor(player), []);
+
+  g.kill(g.idx(p.name), g.idx(survivor.name));
+  assert.equal(g.winner, 'Outlaw');
+  for (const player of g.players) {
+    assert.deepEqual(resultsFor(player), [player.role === 'Outlaw' ? 'victory' : 'defeat']);
+  }
+  assertDeck(g);
 });
 
 test('Apache Kid ignores diamonds aimed at him, including group attacks, except Duel', () => {
@@ -468,7 +519,10 @@ test('Pat Brennan takes equipment from any seat including his own', () => {
     g.startTurn();
     assert.ok(g.pending.options.includes('equipment'));
     const before = p.hand.length;
+    const beforeSound = g.soundSeq;
     g.act(p.name, { type: 'drawChoice', from: 'equipment', target: target.name, cardId: card.id });
+    assert.equal(g.soundSeq - beforeSound, own ? 0 : 1);
+    if (!own) assert.match(g.viewFor(p.name).sounds.at(-1).files[0], /^cardswap2?$/);
     assert.equal(g.phase, 'play');
     assert.equal(p.hand.length, before + 1);
     assert.ok(p.hand.includes(card));

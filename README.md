@@ -71,7 +71,7 @@ Cách chơi: mỗi người tự đăng ký tài khoản → chủ phòng bấm 
 
 ## Tính năng
 
-- Biểu tượng loa ở góc trên bên phải mở thanh âm lượng. Mức 0 tắt tiếng. Trình duyệt nhớ mức đã chọn và bắt đầu phát sau khi bạn tương tác với trang. Server lấy âm thanh MP3 và WAV từ `data/sounds`.
+- Biểu tượng loa ở góc trên bên phải mở thanh âm lượng. Mức 0 tắt tiếng. Trình duyệt nhớ mức đã chọn và bắt đầu phát sau khi bạn tương tác với trang. Server lấy âm thanh MP3 và WAV từ `data/sounds`. Các hiệu ứng có nhiều bản thu chọn ngẫu nhiên mỗi lần phát.
 
 - Rút bài đầu lượt bằng cách bấm chồng bài. Sau 5 giây không rút, server tự rút từ bộ bài kể cả khi tắt timer lượt hoặc mất kết nối; riêng Jesse Jones/Pedro Ramirez có 20 giây. Jesse bấm trực tiếp người chơi có bài đang sáng; Pedro bấm trực tiếp bài bỏ để dùng kỹ năng, không cần menu. Kit Carlson xem 3 lá giữa bàn và có 20 giây chọn 2 lá về tay, lá còn lại bay về bộ bài; người khác chỉ thấy 3 lá úp. Black Jack lật công khai lá thứ hai giữa bàn trong 3 giây rồi thu về tay; nếu là Cơ/Rô sẽ rút thêm 1 lá với animation. Timer lượt bắt đầu sau khi hoàn tất bước rút/chọn/lật bài. Animation thể hiện đúng nguồn và đích; bài bí mật chỉ hiện mặt cho người nhận.
 - Đăng ký/đăng nhập (mật khẩu được băm bằng scrypt, lưu trong `data/users.json`)
