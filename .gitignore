@@ -1,5 +1,10 @@
 node_modules/
-data/
+/data/*
+!/data/sounds/
+/data/sounds/*
+!/data/sounds/*.mp3
+/data/sounds/dynamite.mp3
+/data/sounds/emote_disappointed.mp3
 test/*.png
 node/
 node-tmp/

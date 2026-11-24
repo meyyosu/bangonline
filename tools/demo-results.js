@@ -26,9 +26,31 @@ game.stats.forEach((s, i) => {
   s.checksOk = rnd(s.checks);
   s.checkExpected = s.checks * 0.3;
   s.bestTurn = Math.min(s.dealt, 1 + rnd(3)); s.bestTurnAt = 1 + rnd(30);
-  if (i === 2) { s.friendly = 2; s.friendlyTo = { 1: 2 }; }
+  s.bestAvoid = rnd(4); s.bestAvoidAt = 1 + rnd(6); // vòng
+  s.ownTurns = 2 + rnd(5); s.lowTurns = rnd(5);
+  s.renegadeTargets = rnd(6);
+  if (s.kills && rnd(1)) { s.snatched = 1 + rnd(3); s.snatchedFrom = [(i + 1) % 7]; }
+  if (i === 2) { s.friendly = 2; s.friendlyTo = { 1: 2 }; s.teamTargets = 3; s.teamTargetTo = { 1: 3 }; }
+  if (i === 4) { s.teamTargets = 1; s.teamTargetTo = { 3: 1 }; }
 });
 game.bandits = [{ i: 3, turn: 2, via: 'Bang!' }, { i: 4, turn: 4, via: 'Cat Balou' }];
+// Diễn biến / Đóng góp: dùng dòng thời gian của một ván bot thật (tools/demo-timeline.json),
+// ghép người trong ván mẫu với người trong demo theo vai trò rồi đổi tên trong log.
+{
+  const T = JSON.parse(fs.readFileSync(path.join(__dirname, 'demo-timeline.json'), 'utf8'));
+  const free = roles.map((r, i) => ({ r, i }));
+  const map = T.roles.map((r) => free.splice(free.findIndex((f) => f.r === r), 1)[0].i); // chỉ số mẫu → chỉ số demo
+  const reorder = (arr) => { const out = []; arr.forEach((v, k) => { out[map[k]] = v; }); return out; };
+  const rename = (s) => s.replace(/\bP\d\b/g, (p) => names[map[T.names.indexOf(p)]]);
+  let owner = 0;
+  game.timeline = T.pts.map((p) => {
+    const m = p.log.map((l) => l.match(/^— Lượt của (P\d) —/)).find(Boolean);
+    if (m) owner = map[T.names.indexOf(m[1])];
+    return { t: p.t, r: p.r, o: owner, a: p.a >= 0 ? map[p.a] : -1, b: p.b, ps: reorder(p.ps), log: p.log.map(rename) };
+  });
+  game.tlStart = reorder(T.pts[0].ps);
+  game.stats.forEach((s, i) => { s.ownTurns = game.timeline.filter((p, k) => p.o === i && (k === 0 || game.timeline[k - 1].t !== p.t)).length; });
+}
 const samples = {};
 for (const winner of ['Sheriff', 'Outlaw', 'Renegade']) {
   game.winner = winner;
@@ -96,7 +118,7 @@ const server = http.createServer((req,res) => {
   if (!file.startsWith(publicDir + path.sep)) { res.writeHead(404);return res.end(); }
   fs.readFile(file,(error,data)=>{
     if(error){res.writeHead(404);return res.end();}
-    res.writeHead(200,{'Content-Type':{'.css':'text/css; charset=utf-8','.svg':'image/svg+xml','.js':'text/javascript; charset=utf-8'}[path.extname(file)] || 'application/octet-stream'});res.end(data);
+    res.writeHead(200,{'Content-Type':{'.css':'text/css; charset=utf-8','.svg':'image/svg+xml','.jpg':'image/jpeg','.png':'image/png','.js':'text/javascript; charset=utf-8'}[path.extname(file)] || 'application/octet-stream'});res.end(data);
   });
 });
 server.listen(port,'127.0.0.1',()=>console.log('Demo: http://localhost:'+port+'/demo-results.html'));

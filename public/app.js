@@ -99,6 +99,7 @@ function toast(msg, ok = false) {
 }
 const run = (fn) => async (...a) => { try { await fn(...a); } catch (e) { toast(e.message); } };
 function closeStreams() {
+  gameAudio.stop();
   lobbyES?.close(); roomES?.close(); lobbyES = roomES = null;
   clearPauseUI();
   clearMatchResult();
@@ -300,8 +301,8 @@ function showLobby() {
           <label for="createPassword">Mật khẩu phòng (không bắt buộc)</label><input id="createPassword" type="password" name="password" maxlength="64" autocomplete="new-password">
           ${characterFields()}
           ${timerField()}
-          <label><input type="checkbox" name="dodgeCity" aria-describedby="dodgeCityDetails" ${META.greenCardCount ? '' : 'disabled'}> Bản mở rộng: Dodge City</label>
-          <p class="muted" id="dodgeCityDetails">${META.greenCardCount ? `Thêm ${META.greenCardCount} lá viền xanh lá vào bộ bài của phòng.` : 'Máy chủ chưa nạp dữ liệu lá viền xanh lá.'}</p>
+          <label><input type="checkbox" name="dodgeCity" aria-describedby="dodgeCityDetails" ${(META.dodgeCityCardCount ?? META.greenCardCount) ? '' : 'disabled'}> Bản mở rộng: Dodge City</label>
+          <p class="muted" id="dodgeCityDetails">${(META.dodgeCityCardCount ?? META.greenCardCount) ? `Thêm ${META.dodgeCityCardCount ?? META.greenCardCount} lá Dodge City vào bộ bài của phòng.` : 'Máy chủ chưa nạp dữ liệu Dodge City.'}</p>
           <button class="btn" style="width:100%;margin-top:10px">🎲 Tạo phòng mới</button>
         </form>
         <h2 style="margin-top:22px">Vào bằng mã</h2>
@@ -309,7 +310,7 @@ function showLobby() {
           <input type="text" name="code" placeholder="VD: AB12" maxlength="4" style="flex:1;text-transform:uppercase">
           <button class="btn blue">Vào</button>
         </form>
-        <p class="muted" style="margin-top:18px">Bang! cần 4–7 người. Tạo phòng rồi gửi mã hoặc đường link cho bạn bè.</p>
+        <p class="muted" style="margin-top:18px">Bang! cần 4–7 người, tối đa 8 người khi bật Dodge City. Tạo phòng rồi gửi mã hoặc đường link cho bạn bè.</p>
       </div>
       <div class="panel">
         <h2>Các phòng đang mở</h2>
@@ -338,12 +339,12 @@ function showLobby() {
       <div class="room-item">
         <div>
           <div><b>${esc(r.name)}</b> <span class="code">${r.code}</span> ${r.hasPassword ? '🔒' : ''} ${r.dodgeCity ? '· Dodge City' : ''}</div>
-          <div class="muted">Chủ phòng: ${esc(r.host)} · ${r.players.length}/7 người · ${r.turnSeconds ? r.turnSeconds + ' giây/lượt' : 'Không giới hạn giờ'}</div>
+          <div class="muted">Chủ phòng: ${esc(r.host)} · ${r.players.length}/${r.max} người chơi · ${(r.spectators || []).length} khán giả · ${r.turnSeconds ? r.turnSeconds + ' giây/lượt' : 'Không giới hạn giờ'}</div>
         </div>
         <div class="row">
           <span class="badge ${r.status}">${r.status === 'waiting' ? 'Đang chờ' : r.status === 'playing' ? 'Đang chơi' : 'Đã xong'}</span>
-          ${r.players.includes(ME) ? `<button class="btn small green" data-join="${r.code}">Quay lại</button>`
-            : r.status === 'waiting' && r.players.length < 7 ? `<button class="btn small" data-join="${r.code}">Tham gia</button>` : ''}
+          ${(r.players.includes(ME) || r.spectators?.includes(ME)) ? `<button class="btn small green" data-join="${r.code}">Quay lại</button>`
+            : `<button class="btn small" data-join="${r.code}">${r.status === 'waiting' && r.players.length < r.max ? 'Tham gia' : 'Vào xem'}</button>`}
         </div>
       </div>`).join('');
     list.querySelectorAll('[data-join]').forEach((b) => b.onclick = run(async () => {
@@ -399,22 +400,40 @@ function enterRoom(code) {
     inp.value = '';
     await api(`/api/rooms/${code}/chat`, { text });
   });
-  roomES = new EventSource(`/api/rooms/${code}/stream`);
-  roomES.onmessage = (ev) => {
+  const stream = roomES = new EventSource(`/api/rooms/${code}/stream`);
+  let receivedSnapshot = false;
+  stream.onmessage = (ev) => {
+    if (roomES !== stream) return;
     const d = JSON.parse(ev.data);
     if (d.type === 'closed') { toast('Phòng đã đóng.'); return showLobby(); }
     if (d.type !== 'room') return;
-    if (!d.room.players.includes(ME)) { toast('Bạn không còn ở trong phòng.'); return showLobby(); }
-    const previousGame = ROOM?.game;
+    if (!d.room.players.includes(ME) && !d.room.spectators?.includes(ME)) { toast('Bạn không còn ở trong phòng.'); return showLobby(); }
+    const previous = ROOM;
+    const previousGame = previous?.game;
     const handOrigins = Object.fromEntries([...document.querySelectorAll('#hand [data-card]')].map((el) => [el.dataset.card, el.getBoundingClientRect()]));
     const drawOrigins = [...document.querySelectorAll('.draw-stage .draw-slot')].map((el) => el.getBoundingClientRect());
+    const transferOrigins = captureTransferOrigins(previousGame);
     ROOM = d.room;
+    if (receivedSnapshot) showRoomSounds(ROOM, previous);
+    receivedSnapshot = true;
     ui.serverOffset = ROOM.serverNow - Date.now();
     renderRoom();
     showPlayedCards(ROOM.game, previousGame, handOrigins);
-    showCardTransfers(ROOM.game, previousGame, drawOrigins);
+    showCardTransfers(ROOM.game, previousGame, drawOrigins, transferOrigins);
   };
-  roomES.onerror = () => { if (roomES && roomES.readyState === EventSource.CLOSED) showLobby(); };
+  stream.onerror = () => {
+    receivedSnapshot = false;
+    if (roomES === stream && stream.readyState === EventSource.CLOSED) showLobby();
+  };
+}
+
+function showRoomSounds(room, previous) {
+  if (!previous || previous.code !== room.code) return;
+  if (room.players.some((name) => !previous.players.includes(name))) gameAudio.play('playerjoin');
+  const lastSeq = previous.game?.soundSeq || 0;
+  for (const cue of room.game?.sounds || []) {
+    if (cue.seq > lastSeq) gameAudio.play(...cue.files);
+  }
 }
 
 // Ô trò chuyện thu gọn được (nhớ trên máy); khi thu gọn thì đếm tin mới của người khác
@@ -438,9 +457,10 @@ function renderRoom() {
   const isHost = r.host === ME;
   const g = r.game;
   btns.innerHTML = `
+    ${g && r.spectators?.length ? `<span class="muted" title="${esc(r.spectators.join(', '))}">👁️ ${r.spectators.length} khán giả</span>` : ''}
     ${isHost && g?.winner ? '<button class="btn green" id="resetBtn">🔁 Về phòng chờ</button>' : ''}
-    ${g && !g.winner ? `<button class="btn" id="pauseBtn" ${r.pause ? 'disabled' : ''}>Tạm dừng</button><button class="btn ghost small" id="pauseNotifications">Bật thông báo Windows</button>` : ''}
-    <button class="btn secondary" id="leaveBtn">Rời phòng${g && !g.winner ? ' giữa ván' : ''}</button>`;
+    ${g?.me && !g.winner ? `<button class="btn" id="pauseBtn" ${r.pause ? 'disabled' : ''}>Tạm dừng</button><button class="btn ghost small" id="pauseNotifications">Bật thông báo Windows</button>` : ''}
+    <button class="btn secondary" id="leaveBtn">Rời phòng${g?.me && !g.winner ? ' giữa ván' : ''}</button>`;
   $('#pauseBtn') && ($('#pauseBtn').onclick = run(() => api(`/api/rooms/${r.code}/pause`, { type: 'request' })));
   $('#pauseNotifications') && ($('#pauseNotifications').onclick = run(enablePauseNotifications));
   $('#leaveBtn') && ($('#leaveBtn').onclick = run(async () => { await api(`/api/rooms/${r.code}/leave`, {}); showLobby(); }));
@@ -473,18 +493,40 @@ function roomSettingsBody(form) {
   return body;
 }
 
+// Phát hiện server chạy bản cũ trước khi chơi, để ván không kết thúc mà thiếu danh hiệu/thống kê.
+// Server cũ không gửi r.server; server mới báo stale khi code trên ổ đĩa mới hơn code đang chạy.
+function serverOutdated(r) {
+  return !r.server?.features?.includes('endSummary') || !!r.server.stale;
+}
+
+function serverWarningHTML(r) {
+  if (!serverOutdated(r)) return '';
+  const isHost = r.host === ME;
+  return `<div class="server-warning" role="alert"><b>⚠️ Server đang chạy bản cũ</b>
+    <p>Ván chơi trên server này sẽ <b>không có danh hiệu và thống kê</b> cuối ván.</p>
+    <p>${isHost ? 'Bạn là host: hãy' : 'Nhắc host'} chạy lại <code>CHAY-GAME.bat</code> và nhấn <b>Enter</b> để khởi động lại server trước khi bắt đầu.
+    Khởi động lại sẽ đóng các phòng đang mở; mọi người chỉ cần vào lại.</p></div>`;
+}
+
 function renderWaiting() {
   const r = ROOM;
   const isHost = r.host === ME;
   const n = r.players.length;
+  const spectator = r.spectators?.includes(ME);
   $('#mainArea').innerHTML = `
+    ${serverWarningHTML(r)}
     <div class="panel">
-      <h2>Phòng chờ (${n}/7)</h2>
+      <h2>Phòng chờ (${n}/${r.max})</h2>
       <ul class="seat-list">
         ${r.players.map((p) => `<li><span class="dot ${r.online.includes(p) ? 'on' : ''}"></span>
-          <b>${esc(p)}</b> ${p === r.host ? '👑' : ''} ${p === ME ? '<span class="muted">(bạn)</span>' : ''}
+          <b>${esc(p)}</b> ${r.bots?.includes(p) ? '<span class="muted">🤖 Bot</span>' : ''} ${p === r.host ? '👑' : ''} ${p === ME ? '<span class="muted">(bạn)</span>' : ''}
           ${isHost && p !== ME ? `<button class="btn small secondary" style="margin-left:auto" data-kick="${esc(p)}">Mời ra</button>` : ''}</li>`).join('')}
       </ul>
+      ${isHost ? `<button class="btn secondary" id="addBotBtn" ${n >= r.max ? 'disabled' : ''}>🤖 Thêm bot</button>` : ''}
+      <h3>Khán giả (${(r.spectators || []).length})</h3>
+      <ul class="seat-list">${(r.spectators || []).map((p) => `<li><span class="dot ${r.online.includes(p) ? 'on' : ''}"></span><b>${esc(p)}</b> ${p === r.host ? '👑' : ''} ${p === ME ? '(bạn)' : ''}${isHost && p !== ME ? `<button class="btn small secondary" data-kick="${esc(p)}">Mời ra</button>` : ''}</li>`).join('')}</ul>
+      <button class="btn secondary" id="spectatorBtn" ${spectator && n >= r.max ? 'disabled' : ''}>${spectator ? 'Tham gia chơi' : 'Làm khán giả'}</button>
+      <p class="muted">${spectator ? 'Bạn đang làm khán giả.' : 'Bạn đang là người chơi.'} Khán giả không chiếm ghế và chỉ xem thông tin công khai.</p>
       <div class="room-settings">
         <h3>Cài đặt phòng</h3>
         ${r.dodgeCity ? '<p>Bản mở rộng: Dodge City</p>' : ''}
@@ -516,11 +558,14 @@ function renderWaiting() {
   $('#startBtn') && ($('#startBtn').onclick = run(async () => {
     const form = $('#settingsForm');
     if (form && !form.reportValidity()) return;
+    if (serverOutdated(ROOM) && !confirm('Server đang chạy bản cũ: ván này sẽ KHÔNG có danh hiệu và thống kê cuối ván.\n\nNên khởi động lại server (chạy lại CHAY-GAME.bat, nhấn Enter) trước.\n\nVẫn bắt đầu ván?')) return;
     // Save the visible settings even when the host starts without pressing Save.
     const settings = form ? roomSettingsBody(form) : {};
     await api(`/api/rooms/${r.code}/start`, settings);
     ui.settingsDraft = null;
   }));
+  $('#addBotBtn') && ($('#addBotBtn').onclick = run(() => api(`/api/rooms/${r.code}/add-bot`, {})));
+  $('#spectatorBtn').onclick = run(() => api(`/api/rooms/${r.code}/spectator`, { spectator: !spectator }));
   const settings = $('#settingsForm');
   if (settings) {
     settings.oninput = () => {
@@ -560,11 +605,46 @@ function updateClock() {
     el.textContent = text;
     el.classList.toggle('urgent', !p?.frozen && !!t && seconds <= 10);
   });
+  updateTurnRing();
 }
 setInterval(updateClock, 250);
 
+// Vòng đếm ngược quanh avatar người mà đồng hồ đang đếm (ROOM.timer.player).
+// Vòng chạy bằng CSS animation; mỗi lần vẽ lại bàn thì tính lại số giây còn lại theo hạn của server.
+const RING_URGENT = 10, RING_FINAL = 4;
+const timerLeft = (t) => (t.deadline - Date.now() - (ui.serverOffset || 0)) / 1000;
+function renderTurnRing() {
+  const t = ROOM?.timer, g = ROOM?.game;
+  if (!t || !g || g.winner || ROOM.pause?.frozen) return;
+  const p = g.players[t.player];
+  const seat = p && $(`.player[data-player="${CSS.escape(p.name)}"]`);
+  if (!seat) return;
+  const ring = document.createElement('div');
+  ring.className = 'turn-ring';
+  ring.style.setProperty('--ring-total', t.seconds);
+  ring.style.setProperty('--ring-left', Math.max(0, timerLeft(t)).toFixed(2));
+  seat.classList.add('ticking');
+  seat.querySelector('.av').appendChild(ring);
+  updateTurnRing();
+}
+// Nhấp nháy khi gần hết (gọi trong updateClock, mỗi 250ms)
+function updateTurnRing() {
+  const seat = $('.player.ticking');
+  if (!seat) return;
+  const t = ROOM?.timer;
+  const left = t && !ROOM.pause?.frozen ? timerLeft(t) : Infinity;
+  seat.classList.toggle('urgent', left <= RING_URGENT);
+  seat.classList.toggle('final', left <= RING_FINAL);
+}
+
 // ---------- bàn chơi ----------
 const cardInfo = (c) => META.cards[c.name];
+// Bài trên tay: lá cùng tên đứng cạnh nhau (vd. 2 lá Missed), giữ thứ tự loại theo lần đầu xuất hiện
+function groupSameCards(cards) {
+  const first = new Map();
+  cards.forEach((c, i) => { if (!first.has(c.name)) first.set(c.name, i); });
+  return cards.map((c, i) => [c, i]).sort((a, b) => first.get(a[0].name) - first.get(b[0].name) || a[1] - b[1]).map(([c]) => c);
+}
 function cardHTML(c, cls = '') {
   const info = cardInfo(c);
   const red = c.suit === 'H' || c.suit === 'D';
@@ -582,7 +662,7 @@ function discardStackHTML(g) {
     `<div class="ds-slot" style="--i:${n - 1 - i}">${cardHTML(c, 'small')}</div>`).join('')}</div>`;
 }
 // Thẻ trang bị vuông: màu theo loại, huy hiệu góc = tầm bắn (súng) hoặc ±khoảng cách (ngựa/ống ngắm)
-const EQ_KIND = { Mustang: ['horse', '+1'], Scope: ['horse', '−1'], Jail: ['jail', ''], Dynamite: ['dyn', ''] };
+const EQ_KIND = { Mustang: ['horse', '+1'], Scope: ['horse', '−1'], Binocular: ['', '−1'], Hideout: ['', '+1'], Jail: ['jail', ''], Dynamite: ['dyn', ''] };
 function eqTileHTML(c, extra = '', owner = null) {
   const info = cardInfo(c);
   const [kind, badge] = info.type === 'green' ? ['green', c.ready ? '✓' : '⏳']
@@ -629,10 +709,15 @@ const CHAR_ICON = {
 };
 
 // Bàn chơi và màn hình kết quả dùng chung avatar theo nhân vật/trạng thái.
+// Ảnh chân dung nhân vật (public/avatars/<tên-không-dấu>.jpg, cắt sẵn quanh khuôn mặt; bo tròn bằng CSS)
+const charSlug = (name) => name.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+const charPortrait = (name) => (name && META.chars?.[name] ?`<img class="char-img" src="/avatars/${charSlug(name)}.jpg" alt="" draggable="false">` : '');
+
 function playerAvatarHTML(player) {
-  const icon = player.alive ? (CHAR_ICON[player.char] || '🤠') : '💀';
+  const img = charPortrait(player.char);
   const label = `${player.char || 'Cao bồi'}${player.alive ? '' : ' · Đã bị hạ'}`;
-  return `<span class="character-avatar" role="img" aria-label="${esc(label)}">${icon}</span>`;
+  // Chưa có nhân vật thì giữ biểu tượng cũ; người đã chết vẫn hiện chân dung (tô xám bằng CSS)
+  return `<span class="character-avatar ${img ? 'has-img' : ''} ${player.alive ? '' : 'dead'}" role="img" aria-label="${esc(label)}">${img || (player.alive ? '🤠' : '💀')}</span>`;
 }
 
 // ---------- cài đặt hiển thị (lưu trên máy từng người) ----------
@@ -673,7 +758,8 @@ function closeSettingsMenu() {
 document.addEventListener('click', closeSettingsMenu);
 document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeSettingsMenu(); });
 function roleBadge(p) {
-  return p.role ? `<span class="role ${p.role}" ${tooltipAttrs(ROLE_VI[p.role], META.roles[p.role].goal)}>${ROLE_VI[p.role]}</span>` : `<span class="role unknown" ${tooltipAttrs('Vai trò bí mật', 'Vai trò của người chơi này chưa được tiết lộ.')}>?</span>`;
+  // Vai trò chưa lộ thì không hiện gì (không còn huy hiệu "?")
+  return p.role ? `<span class="role ${p.role}" ${tooltipAttrs(ROLE_VI[p.role], META.roles[p.role].goal)}>${ROLE_VI[p.role]}</span>` : '';
 }
 // Song sắt phủ lên người đang có Jail trước mặt (đến khi rút kiểm tra); hiệu ứng sập xuống chỉ chạy lần đầu thấy
 const jailSeen = new Set();
@@ -689,6 +775,8 @@ const abilityOf = (p) => p.ability ?? p.char;
 const discardExcess = (g, p) => g.me.hand.length - (g.me.handLimit ?? p.hp);
 const docTarget = (p, g) => p.alive && p.name !== ME && p.distance <= g.me.range;
 const blueCard = (c) => ['blue', 'gun'].includes(cardInfo(c).type);
+const hasCards = (p) => p.handCount > 0 || p.eq.length > 0;
+const brawlTargets = (g) => g.players.filter((p) => p.alive && p.name !== ME && hasCards(p));
 
 function effectiveName(c, me) {
   if (abilityOf(me) === 'Calamity Janet' && c.name === 'Missed') return 'Bang';
@@ -700,14 +788,15 @@ function targetFilter(card, g, meP) {
   const name = effectiveName(card, meP);
   const others = (p) => p.alive && p.name !== ME;
   const info = cardInfo(card);
-  switch (card.ready ? info.effect : name) {
+  switch (info.type === 'green' && !card.ready ? name : (info.effect || name)) {
     case 'Bang': return (p) => others(p) && p.distance <= g.me.range;
     case 'attack': {
       const range = info.maxDistance === 'weapon' ? g.me.range : (info.maxDistance ?? Infinity);
       return (p) => others(p) && p.distance <= range;
     }
     case 'take':
-    case 'discard': return (p) => others(p) && p.distance <= (info.maxDistance ?? Infinity) && (p.handCount > 0 || p.eq.length > 0);
+    case 'discard': return (p) => others(p) && p.distance <= (info.maxDistance ?? Infinity) && hasCards(p);
+    case 'healOther': return (p) => others(p) && p.hp < p.maxHp;
     case 'Panic': return (p) => others(p) && p.distance <= 1 && (p.handCount > 0 || p.eq.length > 0);
     case 'Cat Balou': return (p) => others(p) && (p.handCount > 0 || p.eq.length > 0);
     case 'Duel': return others;
@@ -725,8 +814,8 @@ function targetingCard(g, meP) {
 const ROLE_ICON = { Sheriff: '⭐', Deputy: '🛡️', Outlaw: '💀', Renegade: '🎭' };
 function renderCharacterSelection() {
   const g = ROOM.game;
-  const meP = g.players[g.me.index];
-  const mine = g.pending.player === g.me.index;
+  const meP = g.players[g.me?.index] || {};
+  const mine = g.pending.player === g.me?.index;
   const options = mine ? g.pending.options : meP.char ? [meP.char] : [];
   const choiceKey = `${ROOM.code}:${g.pending.player}`;
   if (ui.chooseFor !== choiceKey) { ui.chooseFor = choiceKey; ui.choosePick = null; }
@@ -738,22 +827,22 @@ function renderCharacterSelection() {
     const ch = META.chars[name];
     const max = ch.hp + (meP.role === 'Sheriff' ? 1 : 0);
     return `<div class="ccard ${selected === name ? 'sel' : ''}" ${mine ? `data-character="${esc(name)}" role="button" tabindex="0" aria-pressed="${selected === name}"` : ''}>
-      <div class="por">${CHAR_ICON[name] || '🤠'}</div><div class="nm">${esc(name)}</div>
+      <div class="por">${charPortrait(name) || '🤠'}</div><div class="nm">${esc(name)}</div>
       <div class="chp" title="${max} máu">${Array.from({ length: max }, () => bulletSVG(true, 22)).join('')}${meP.role === 'Sheriff' ? '<span class="plus">+1 Sheriff</span>' : ''}</div>
       <div class="ab">${esc(ch.desc)}</div></div>`;
   }).join('');
   $('#mainArea').innerHTML = `<div class="panel choose">
-    <div class="rolecard ${meP.role}"><div class="rstar">${ROLE_ICON[meP.role]}</div>
+    ${g.me ? `<div class="rolecard ${meP.role}"><div class="rstar">${ROLE_ICON[meP.role]}</div>
       <div><h3>Bạn là ${esc(ROLE_VI[meP.role])} · ${esc(role.vi)}</h3><p>${esc(role.goal)}${meP.role === 'Sheriff' ? ' Bạn được +1 máu.' : ''}</p></div>
-      <span class="secret">${meP.role === 'Sheriff' ? '👁️ Mọi người đều biết' : '🔒 Chỉ bạn thấy'}</span></div>
+      <span class="secret">${meP.role === 'Sheriff' ? '👁️ Mọi người đều biết' : '🔒 Chỉ bạn thấy'}</span></div>` : '<h2>👁️ Bạn đang xem trận đấu</h2>'}
     <div class="choose-head"><h2>Chọn nhân vật</h2><span class="muted">${mine ? `Bạn được chia ${options.length} lá — bấm vào 1 lá rồi xác nhận.` : `Đang chờ ${esc(g.players[g.pending.player].name)} chọn nhân vật…`}</span></div>
     <div class="room-clock" data-room-clock role="timer"></div>
     <div class="chars ${selected ? 'has-sel' : ''} ${mine ? '' : 'locked'}">${cards}</div>
-    <div class="actions" style="justify-content:center">${mine ? `<button class="btn" id="confirmCharacter" ${selected ? '' : 'disabled'}>✔ Chọn ${esc(selected || 'nhân vật')}</button>` : meP.char ? `<span class="muted">✔ Bạn chơi <b>${esc(meP.char)}</b>. Đang chờ những người khác…</span>` : '<span class="muted">Chờ tới lượt của bạn.</span>'}
+    <div class="actions" style="justify-content:center">${mine ? `<button class="btn" id="confirmCharacter" ${selected ? '' : 'disabled'}>✔ Chọn ${esc(selected || 'nhân vật')}</button>` : meP.char ? `<span class="muted">✔ Bạn chơi <b>${esc(meP.char)}</b>. Đang chờ những người khác…</span>` : `<span class="muted">${g.me ? 'Chờ tới lượt của bạn.' : 'Đang chờ người chơi chọn nhân vật.'}</span>`}
       ${mine && ROOM.characterSeconds ? '<span class="muted">Hết giờ sẽ tự chọn ngẫu nhiên.</span>' : ''}</div>
     <h3 style="margin-top:18px">Người chơi (${done}/${g.players.length} đã chọn)</h3>
     <div class="cprogress"><i style="width:${done / g.players.length * 100}%"></i></div>
-    <ul class="plist">${g.players.map((p, i) => `<li>${roleBadge(p)} <b>${esc(p.name)}</b>${i === g.me.index ? ' (bạn)' : ''}<span class="st ${p.char ? 'done' : 'wait'}">${p.char ? '✔ Đã chọn' : i === g.pending.player ? 'Đang chọn' : 'Chờ tới lượt'}</span></li>`).join('')}</ul>
+    <ul class="plist">${g.players.map((p, i) => `<li>${roleBadge(p)} <b>${esc(p.name)}</b>${i === g.me?.index ? ' (bạn)' : ''}<span class="st ${p.char ? 'done' : 'wait'}">${p.char ? '✔ Đã chọn' : i === g.pending.player ? 'Đang chọn' : 'Chờ tới lượt'}</span></li>`).join('')}</ul>
     <p class="muted">Ván đấu và timer lượt bắt đầu khi mọi người đã chọn xong.</p>
   </div>`;
   document.querySelectorAll('[data-character]').forEach((el) => {
@@ -783,8 +872,11 @@ function renderGame() {
   const canPlay = myTurn && !pend && g.phase === 'play' && meP.alive;
   const patDraw = myPrompt && pend.type === 'draw' && pend.options.includes('equipment');
 
+  if (!g.me) { ui.mode = null; ui.selected = []; }
   // validate mode
-  if (ui.mode?.kind === 'target' && !canPlay) ui.mode = null;
+  if (['target', 'cost', 'brawl'].includes(ui.mode?.kind) && !canPlay) ui.mode = null;
+  if (ui.mode?.costCardId && !g.me.hand.some((c) => c.id === ui.mode.costCardId)) ui.mode = null;
+  if (['cost', 'brawl'].includes(ui.mode?.kind) && !g.me.hand.some((c) => c.id === ui.mode.cardId)) ui.mode = null;
   if (ui.mode && ui.mode.kind !== 'target') {
     const hand = g.me.hand.map((c) => c.id);
     if (ui.mode.kind === 'discard' && (!canPlay || discardExcess(g, meP) <= 0)) ui.mode = null;
@@ -811,7 +903,8 @@ function renderGame() {
   const n = g.players.length;
   const start = Math.max(meIdx, 0);
   const narrow = window.matchMedia('(max-width: 900px)').matches;
-  const rx = narrow ? 41 : 43, ry = 44;
+  // Điện thoại dọc (mobile.css): bàn cao hơn rộng, ghế lùi vào để không tràn mép màn hình
+  const rx = isPhone() ? 37 : narrow ? 41 : 43, ry = isPhone() ? 43 : 44;
 
   const seatsHTML = Array.from({ length: n }, (_, k) => {
     const i = (start + k) % n;
@@ -845,6 +938,7 @@ function renderGame() {
     </div>`;
   }).join('');
 
+  const promptBoxHTML = `<div class="prompt ${myPrompt || (canPlay && !ui.mode) ? 'mine' : ''}" id="prompt">${!g.me ? '<h4>👁️ Bạn đang xem trận đấu</h4><p class="muted">Bạn chỉ xem thông tin công khai.</p>' : ''}${promptHTML(g, meIdx, meP)}</div>`;
   const tableHTML = `
     <div class="arena">
       <div class="felt"></div>
@@ -857,7 +951,6 @@ function renderGame() {
       ${seatsHTML}
       ${drawStageHTML(g)}
     </div>`;
-  const promptBoxHTML = `<div class="prompt ${myPrompt || (canPlay && !ui.mode) ? 'mine' : ''}" id="prompt">${promptHTML(g, meIdx, meP)}</div>`;
 
   let meHTML = '';
   if (meP) {
@@ -865,7 +958,8 @@ function renderGame() {
     const role = META.roles[meP.role];
     const playableIds = new Set(g.me.hand.filter((c) => isClickable(c, g, meP)).map((c) => c.id));
     meHTML = `
-      <div class="me ${myTurn ? 'turn' : ''} ${!meP.alive ? 'dead' : ''}">
+      <div class="me ${myTurn ? 'turn' : ''} ${!meP.alive ? 'dead' : ''} ${ui.meInfo ? 'info-open' : ''}">
+        <button type="button" class="me-info-toggle" id="meInfoToggle" aria-expanded="${!!ui.meInfo}">${ui.meInfo ? '▾ Ẩn' : '▸ Xem'} vai trò, nhân vật, trang bị</button>
         <div class="me-head">
           <div class="idcard" ${tooltipAttrs(ROLE_VI[meP.role], role.goal)}><span class="role ${meP.role}" style="margin:0">${ROLE_VI[meP.role]}</span> <b>Vai trò của bạn (bí mật)</b>
             <div style="margin-top:4px">${esc(role.goal)}</div></div>
@@ -875,8 +969,8 @@ function renderGame() {
           <div class="idcard myeq"><b>Trang bị</b>
             <div class="eqs">${meP.eq.length ? meP.eq.map((c) => eqTileHTML(c)).join('') : '<span class="muted">Chưa có trang bị</span>'}</div></div>
         </div>
-        <div class="hand" id="hand">${g.me.hand.filter((c) => !(pend?.type === 'blackJack' && pend.player === meIdx && pend.card.id === c.id)).map((c) => {
-          const sel = ui.selected.includes(c.id) || ui.mode?.cardId === c.id;
+        <div class="hand" id="hand">${groupSameCards(g.me.hand.filter((c) => !(pend?.type === 'blackJack' && pend.player === meIdx && pend.card.id === c.id))).map((c) => {
+          const sel = ui.selected.includes(c.id) || ui.mode?.cardId === c.id || ui.mode?.costCardId === c.id;
           return cardHTML(c, (sel ? 'selected ' : '') + (playableIds.has(c.id) ? 'playable' : (canPlay || myPrompt ? 'dim' : '')));
         }).join('') || '<span class="muted">Không có bài trên tay.</span>'}</div>
         <div class="actions" id="actions">${actionsHTML(g, meP, canPlay)}</div>
@@ -893,9 +987,184 @@ function renderGame() {
   lb.scrollTop = lb.scrollHeight;
 
   bindGame(g, meIdx, meP, canPlay, myPrompt);
+  watchDock();
   animateDrawStage(g);
+  renderMassPopup(g);
+  renderStorePopup(g);
+  renderTurnRing();
   showCheckReveal(g);
   updateClock();
+}
+
+// ---------- điện thoại dọc ----------
+// mobile.css ghim cột phải (đồng hồ, thông báo, bài trên tay) ở đáy màn hình;
+// bàn tròn lấy phần chiều cao còn lại nên cần biết thanh đáy cao bao nhiêu (--dock-h).
+const PHONE_MQ = window.matchMedia('(max-width: 600px)');
+const isPhone = () => PHONE_MQ.matches;
+let dockObserver = null;
+function watchDock() {
+  const dock = $('.right-col'), board = $('.board.playing');
+  dockObserver?.disconnect();
+  if (!dock || !board || !isPhone()) return;
+  dockObserver = new ResizeObserver(() => board.style.setProperty('--dock-h', `${Math.ceil(dock.getBoundingClientRect().height)}px`));
+  dockObserver.observe(dock);
+}
+PHONE_MQ.addEventListener('change', () => { if (ROOM?.game) renderGame(); });
+
+// ---------- pop-up đánh chung (Indians / Gatling) ----------
+// Hiện giữa bàn: lá đã đánh ➜ mỗi người bị nhắm một cột (tên + cách phản hồi). Xong hết thì thu gọn rồi tự ẩn.
+const MASS_MINI_MS = 2500, MASS_HIDE_MS = 5000;
+const massDone = (g, m) => m.targets.every((t) => t.res || !g.players[t.i].alive);
+function massResHTML(r, dead, flip) {
+  const f = flip ? ' flip' : '';
+  if (r?.card) return cardHTML(r.card, 'mp-res ok' + f);
+  if (r?.barrel) return `<div class="mp-res barrel ok${f}"><div class="ic">🛢️</div>Barrel<br>né được</div>`;
+  if (r?.dead || dead) return `<div class="mp-res dead${f}"><div class="ic">💀</div>Bị hạ</div>`;
+  if (r?.hurt) return `<div class="mp-res hurt${f}"><div class="big">−${r.hurt}</div>máu</div>`;
+  return '<div class="mp-res wait">chờ…</div>';
+}
+const massSum = (r, dead) => r?.card ? cardInfo(r.card).icon : r?.barrel ? '🛢️' : r?.dead || dead ? '💀' : r?.hurt ? `−${r.hurt}❤` : '…';
+
+function renderMassPopup(g) {
+  $('.mass-pop:not(.store-pop):not(.out)')?.remove();
+  const m = g.mass, arena = $('.arena');
+  if (!m || !arena || g.winner || centerPopupKind(g) !== 'mass') return;
+  let st = ui.mass;
+  if (st?.key !== `${m.seq}:${m.t0}`) {
+    // Vào phòng khi lá đánh chung đã xong từ trước thì không hiện lại
+    const age = Date.now() + (ui.serverOffset || 0) - m.t;
+    clearTimeout(st?.timer);
+    st = ui.mass = { key: `${m.seq}:${m.t0}`, seen: new Set(), mini: false, hidden: massDone(g, m) && age > MASS_MINI_MS, enter: true };
+  }
+  if (st.hidden) return;
+  if (massDone(g, m) && !st.timer) {
+    st.timer = setTimeout(() => {
+      st.mini = true;
+      if (ui.mass === st && ROOM?.game) renderMassPopup(ROOM.game);
+      st.timer = setTimeout(() => hideMassPopup(st), MASS_HIDE_MS);
+    }, MASS_MINI_MS);
+  }
+  const by = g.players[m.by];
+  const active = g.pending ? m.targets.find((t) => !t.res && g.players[t.i].alive) : null;
+  const fresh = m.targets.filter((t) => (t.res || !g.players[t.i].alive) && !st.seen.has(t.i));
+  // Lúc có người đang rút kiểm tra (Barrel) thì thu gọn để lộ chồng bài
+  const mini = st.mini || g.pending?.type === 'check';
+  const el = document.createElement('div');
+  el.className = `mass-pop${mini ? ' mini' : ''}${st.enter ? ' enter' : ''}`;
+  el.setAttribute('role', 'status');
+  el.title = mini ? 'Bấm để mở rộng' : 'Bấm để thu gọn';
+  el.innerHTML = `
+    <div class="mp-src"><div class="who"><span class="mini-ic">${cardInfo(m.card).icon} </span>${esc(by.name)}</div>${cardHTML(m.card)}</div>
+    <div class="mp-arrow">➜</div>
+    <div class="mp-targets">${m.targets.map((t) => {
+      const p = g.players[t.i], dead = !p.alive && !t.res, mine = t.i === g.me?.index;
+      return `<div class="mp-col${mine ? ' mine' : ''}${t === active ? ' active' : ''}">
+        <div class="mp-name" title="${esc(p.name)}" data-sum="${massSum(t.res, dead)}">${mine ? 'Bạn' : esc(p.name)}</div>
+        <div class="mp-slot">${massResHTML(t.res, dead, fresh.includes(t) && !st.enter)}</div></div>`;
+    }).join('')}</div>
+    <button type="button" class="mp-close" title="Đóng" aria-label="Đóng">✕</button>`;
+  el.onclick = (e) => {
+    if (e.target.closest('.mp-close')) return hideMassPopup(st);
+    clearTimeout(st.timer); st.timer = 'manual'; // đã bấm thì giữ nguyên cho tới khi tự đóng
+    st.mini = !mini;
+    renderMassPopup(ROOM.game);
+  };
+  arena.appendChild(el);
+  if (!st.enter) {
+    for (const t of fresh) {
+      if (t.res?.hurt || t.res?.dead) $(`.player[data-player="${CSS.escape(g.players[t.i].name)}"]`)?.classList.add('mp-hit');
+    }
+  }
+  for (const t of fresh) st.seen.add(t.i);
+  st.enter = false;
+}
+function hideMassPopup(st) {
+  clearTimeout(st.timer);
+  st.hidden = true;
+  const el = $('.mass-pop:not(.store-pop)');
+  if (!el || ui.mass !== st) return;
+  el.classList.add('out');
+  el.addEventListener('animationend', () => el.remove(), { once: true });
+  setTimeout(() => el.remove(), 600); // phòng khi tắt hiệu ứng
+}
+
+// Pop-up Indians/Gatling và General Store dùng chung chỗ giữa bàn: chỉ hiện cái đang diễn ra / mới nhất
+function centerPopupKind(g) {
+  if (g.pending?.type === 'store') return 'store';
+  if (g.mass && !massDone(g, g.mass)) return 'mass';
+  return (g.store?.t || 0) > (g.mass?.t || 0) ? 'store' : 'mass';
+}
+
+// ---------- pop-up General Store ----------
+// Mỗi người một cột theo thứ tự chọn (tên + lá đã lấy); hàng dưới là lá còn trên quầy, tới lượt mình thì bấm để lấy.
+function renderStorePopup(g) {
+  $('.store-pop:not(.out)')?.remove();
+  const s = g.store, arena = $('.arena');
+  if (!s || !arena || g.winner || centerPopupKind(g) !== 'store') return;
+  const picking = g.pending?.type === 'store' ? g.pending.player : null;
+  const myTurn = picking != null && picking === g.me?.index;
+  let st = ui.store;
+  if (st?.key !== `${s.seq}:${s.t0}`) {
+    const age = Date.now() + (ui.serverOffset || 0) - s.t;
+    clearTimeout(st?.timer);
+    st = ui.store = { key: `${s.seq}:${s.t0}`, seen: new Set(), mini: false, hidden: picking == null && age > MASS_MINI_MS, enter: true };
+  }
+  if (myTurn) { st.hidden = false; st.mini = false; } // tới lượt mình thì luôn mở để chọn được
+  if (st.hidden) return;
+  if (picking == null && !st.timer) {
+    st.timer = setTimeout(() => {
+      st.mini = true;
+      if (ui.store === st && ROOM?.game) renderStorePopup(ROOM.game);
+      st.timer = setTimeout(() => hideStorePopup(st), MASS_HIDE_MS);
+    }, MASS_MINI_MS);
+  }
+  const pickOf = (id) => s.picks.find((x) => x.card.id === id);
+  const pickBy = (i) => s.picks.find((x) => x.i === i);
+  const remaining = picking == null ? [] : s.revealed.filter((c) => !pickOf(c.id));
+  const fresh = s.picks.filter((x) => !st.seen.has(x.card.id));
+  const mini = st.mini;
+  const el = document.createElement('div');
+  el.className = `mass-pop store-pop${mini ? ' mini' : ''}${st.enter ? ' enter' : ''}${myTurn ? ' my-turn' : ''}`;
+  el.setAttribute('role', 'status');
+  el.title = myTurn ? 'Tới lượt bạn: bấm 1 lá trên quầy' : mini ? 'Bấm để mở rộng' : 'Bấm để thu gọn';
+  el.innerHTML = `
+    <div class="mp-src"><div class="who"><span class="mini-ic">${cardInfo(s.card).icon} </span>${esc(g.players[s.by].name)}</div>${cardHTML(s.card)}</div>
+    <div class="mp-arrow">➜</div>
+    <div class="sp-right">
+      <div class="mp-targets">${s.order.map((i) => {
+        const p = g.players[i], pk = pickBy(i), now = i === picking, mine = i === g.me?.index;
+        const gone = !pk && !now && !p.alive;
+        const slot = pk ? cardHTML(pk.card, 'mp-res ok' + (fresh.includes(pk) && !st.enter ? ' flip' : ''))
+          : gone ? '<div class="mp-res dead"><div class="ic">💀</div></div>'
+          : `<div class="mp-res wait">${now ? 'đang<br>chọn…' : picking == null ? '—' : 'chờ…'}</div>`;
+        return `<div class="mp-col${mine ? ' mine' : ''}${now ? ' active' : ''}">
+          <div class="mp-name" title="${esc(p.name)}" data-sum="${pk ? cardInfo(pk.card).icon : now ? '…' : ''}">${mine ? 'Bạn' : esc(p.name)}</div>
+          <div class="mp-slot">${slot}</div></div>`;
+      }).join('')}</div>
+      ${remaining.length ? `<div class="sp-left"><span>${myTurn ? '👉 Bấm 1 lá để lấy' : 'Còn trên quầy'}</span>${remaining.map((c) => cardHTML(c, 'sp-tiny' + (myTurn ? ' sp-pickable' : ''))).join('')}</div>` : ''}
+    </div>
+    ${myTurn ? '' : '<button type="button" class="mp-close" title="Đóng" aria-label="Đóng">✕</button>'}`;
+  el.onclick = (e) => {
+    if (e.target.closest('.mp-close')) return hideStorePopup(st);
+    const pick = e.target.closest('.sp-pickable');
+    if (pick) return run(() => sendAction({ type: 'pick', cardId: Number(pick.dataset.card) }))();
+    if (myTurn) return;
+    clearTimeout(st.timer); st.timer = 'manual';
+    st.mini = !mini;
+    renderStorePopup(ROOM.game);
+  };
+  arena.appendChild(el);
+  for (const x of fresh) st.seen.add(x.card.id);
+  st.enter = false;
+}
+function hideStorePopup(st) {
+  clearTimeout(st.timer);
+  st.hidden = true;
+  const el = $('.store-pop');
+  if (!el || ui.store !== st) return;
+  el.classList.add('out');
+  el.addEventListener('animationend', () => el.remove(), { once: true });
+  setTimeout(() => el.remove(), 600);
 }
 
 function drawStageHTML(g) {
@@ -937,7 +1206,26 @@ function animateDrawStage(g) {
 }
 
 // Transfers come from the server so steals animate on every player's screen.
-function showCardTransfers(g, previous, drawOrigins = []) {
+function captureTransferOrigins(g) {
+  const origins = {};
+  for (const [index, player] of (g?.players || []).entries()) {
+    const seat = [...document.querySelectorAll('.player[data-player]')].find((el) => el.dataset.player === player.name);
+    const hand = index === g.me?.index ? $('#hand') : seat?.querySelector('.hand-fan');
+    origins[`${index}:hand`] = (hand || seat)?.getBoundingClientRect();
+    for (const el of seat?.querySelectorAll('[data-eq]') || []) {
+      const rect = el.getBoundingClientRect();
+      if (rect.width && rect.height) origins[`${index}:eq:${el.dataset.eq}`] = rect;
+    }
+    if (index === g.me?.index) {
+      for (const el of document.querySelectorAll('#hand [data-card]')) {
+        origins[`${index}:hand:${el.dataset.card}`] = el.getBoundingClientRect();
+      }
+    }
+  }
+  return origins;
+}
+
+function showCardTransfers(g, previous, drawOrigins = [], transferOrigins = {}) {
   if (!g || !previous || window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
   const lastSeq = previous.transfers?.at(-1)?.seq || 0;
   const seatHand = (index) => {
@@ -951,8 +1239,10 @@ function showCardTransfers(g, previous, drawOrigins = []) {
       : event.from === 'discard' ? $('.arena .pile:last-child .discard-stack') || $('.arena .pile:last-child .card-back')
       : seatHand(event.from);
     for (const [index, card] of event.cards.entries()) {
-      const target = event.to === 'deck' ? $('#deck .card-back') : event.to === g.me?.index ? (card && $(`#hand [data-card="${card.id}"]`)) || $('#hand') : seatHand(event.to);
-      const origin = ['kit', 'reveal'].includes(event.from) ? drawOrigins[event.slots?.[index] ?? 0] : null;
+      const target = event.to === 'discard' ? $('#discardPile .ds-slot:last-child .card') || $('#discardPile')
+        : event.to === 'deck' ? $('#deck .card-back') : event.to === g.me?.index ? (card && $(`#hand [data-card="${card.id}"]`)) || $('#hand') : seatHand(event.to);
+      const origin = ['kit', 'reveal'].includes(event.from) ? drawOrigins[event.slots?.[index] ?? 0]
+        : event.sourceZone ? transferOrigins[`${event.from}:${event.sourceZone}:${card?.id}`] || transferOrigins[`${event.from}:hand`] : null;
       if ((!source && !origin) || !target) continue;
       const start = origin || source.getBoundingClientRect(), end = target.getBoundingClientRect();
       const flyer = document.createElement('div');
@@ -968,7 +1258,7 @@ function showCardTransfers(g, previous, drawOrigins = []) {
         { transform: 'translate(0, 0) rotate(-8deg) scale(1)', opacity: 1 },
         { transform: `translate(${dx * .5}px, ${dy * .5 - 45}px) rotate(5deg) scale(1.15)`, opacity: 1, offset: .5 },
         { transform: `translate(${dx}px, ${dy}px) rotate(0deg) scale(.85)`, opacity: 0 },
-      ], { duration: 650, delay: (event.from === 'deck' && previous.pending?.type === 'blackJack' ? 650 : 0) + order++ * 130, easing: 'ease-in-out', fill: 'both' });
+      ], { duration: 650, delay: (event.sourceZone ? 220 : event.from === 'deck' && previous.pending?.type === 'blackJack' ? 650 : 0) + order++ * 130, easing: 'ease-in-out', fill: 'both' });
       animation.onfinish = () => flyer.remove();
       animation.oncancel = () => flyer.remove();
     }
@@ -1050,10 +1340,16 @@ function isClickable(c, g, meP) {
   }
   if (g.turn !== g.me.index || pend || g.phase !== 'play') return false;
   const name = effectiveName(c, meP);
+  const info = cardInfo(c);
+  if (ui.mode?.kind === 'cost') return c.id !== ui.mode.cardId;
+  if (ui.mode?.kind === 'brawl') return false;
   if (name === 'Missed') return false;
+  if (info.type === 'brown' && info.defense) return false;
+  if (info.discardCost && g.me.hand.length < 2) return false;
+  if (info.type === 'brown' && info.effect === 'heal' && meP.hp >= meP.maxHp) return false;
   if (name === 'Bang' && g.bangsPlayed >= 1 && !g.me.unlimitedBang) return false;
   if (name === 'Beer' && (meP.hp >= meP.maxHp || g.players.filter((p) => p.alive).length <= 2)) return false;
-  if ((cardInfo(c).type === 'green' || ['Barrel', 'Mustang', 'Scope', 'Dynamite'].includes(c.name)) && meP.eq.some((e) => e.name === c.name)) return false;
+  if ((info.type === 'green' || (info.type === 'blue' && c.name !== 'Jail')) && meP.eq.some((e) => e.name === c.name)) return false;
   const tf = targetFilter(c, g, meP);
   if (tf && !g.players.some(tf)) return false;
   return true;
@@ -1063,6 +1359,21 @@ function promptHTML(g, meIdx, meP) {
   const pend = g.pending;
   const P = (i) => `<b>${esc(g.players[i].name)}</b>`;
   if (g.winner) return '<h4>Ván đấu đã kết thúc.</h4><div class="muted">Xem kết quả ở trên.</div>';
+  if (ui.mode?.kind === 'cost') {
+    const c = g.me.hand.find((card) => card.id === ui.mode.cardId);
+    return `<h4>${esc(c.name)} · Chọn thêm 1 lá trên tay để bỏ</h4>
+      <div class="row"><button class="btn secondary small" data-act="cancel">Huỷ</button></div>`;
+  }
+  if (ui.mode?.kind === 'brawl') {
+    return `<h4>Brawl · Chọn một lá để bỏ của từng người</h4>
+      ${brawlTargets(g).map((p) => {
+        const choices = p.eq.map((c) => [String(c.id), `${c.name} ${c.rank}${SUIT[c.suit]}`]);
+        if (p.handCount) choices.unshift(['hand', 'Một lá ngẫu nhiên trên tay']);
+        const picked = ui.mode.choices.get(p.name);
+        return `<label>${esc(p.name)}<select data-brawl-target="${esc(p.name)}">${choices.map(([id, label]) => `<option value="${id}" ${id === picked ? 'selected' : ''}>${esc(label)}</option>`).join('')}</select></label>`;
+      }).join('')}
+      <div class="row"><button class="btn" data-act="confirmBrawl">Đánh Brawl</button><button class="btn secondary small" data-act="cancel">Huỷ</button></div>`;
+  }
   if (ui.mode?.kind === 'target') {
     const c = targetingCard(g, meP);
     return `<h4>🎯 Chọn mục tiêu cho ${esc(c?.name)}</h4><div class="muted">Bấm vào người chơi có viền vàng nhấp nháy.</div>
@@ -1118,8 +1429,9 @@ function promptHTML(g, meIdx, meP) {
       return `<h4>🤠 Đấu súng với ${P(pend.other)}!</h4><div>Bỏ 1 lá Bang! để tiếp tục, hoặc chịu thua mất 1 máu.</div>
         <div class="row"><button class="btn secondary" data-act="take">Chịu thua (mất 1 máu)</button></div>`;
     case 'store':
-      return `<h4>🏪 General Store — ${mine ? 'chọn 1 lá:' : `đang chờ ${P(pend.player)} chọn…`}</h4>
-        <div class="row" id="storeCards">${pend.cards.map((c) => cardHTML(c, 'small ' + (mine ? 'playable' : ''))).join('')}</div>`;
+      // Các lá nằm trên pop-up giữa bàn (renderStorePopup)
+      return mine ? '<h4>🏪 General Store — tới lượt bạn!</h4><div>Bấm 1 lá trên <b>quầy giữa bàn</b> để lấy.</div>'
+        : `<h4>🏪 General Store</h4><div class="muted">Đang chờ ${P(pend.player)} chọn…</div>`;
     case 'check': {
       const ci = CHECK_INFO[pend.kind] || CHECK_INFO.Barrel;
       const luck = abilityOf(g.players[pend.player]) === 'Lucky Duke' ? ' (Lucky Duke lật 2 lá, lấy lá có lợi)' : '';
@@ -1134,10 +1446,17 @@ function promptHTML(g, meIdx, meP) {
       return `<h4>Black Jack đang lật lá thứ hai trong 3 giây</h4><p>${pend.red ? 'Lá Cơ hoặc Rô: sẽ rút thêm 1 lá sau khi thu lá này về tay.' : 'Lá Bích hoặc Chuồn: thu lá này về tay rồi bắt đầu lượt.'}</p>`;
     case 'draw': {
       if (!mine) return `<h4>${P(pend.player)} đang chọn cách rút bài…</h4>`;
-      const seconds = ['Jesse Jones', 'Pedro Ramirez', 'Pat Brennan'].includes(abilityOf(meP)) ? 20 : 5;
+      const ability = abilityOf(meP);
+      if (ability === 'Pat Brennan') {
+        const equipment = pend.options.includes('equipment')
+          ? '<p>Hoặc bấm một lá viền xanh dương hay xanh lá đang sáng trên bàn, kể cả của bạn. Bạn sẽ chỉ lấy đúng 1 lá này.</p>' : '';
+        return `<h4>Pat Brennan · Rút bài đầu lượt</h4>${equipment}
+          <div class="row"><button class="btn" data-act="draw" data-from="deck">Rút 2 lá từ chồng bài</button></div>
+          <p class="muted">Sau 20 giây, game tự rút 2 lá nếu bạn chưa chọn.</p>`;
+      }
+      const seconds = ['Jesse Jones', 'Pedro Ramirez'].includes(ability) ? 20 : 5;
       const source = pend.options.includes('player') ? ' Hoặc bấm trực tiếp người chơi có bài đang sáng để lấy 1 lá từ tay họ và rút thêm 1 lá.'
-        : pend.options.includes('discard') ? ' Hoặc bấm trực tiếp chồng bài bỏ đang sáng để lấy lá trên cùng và rút thêm 1 lá.'
-          : pend.options.includes('equipment') ? ' Hoặc bấm một lá trang bị đang sáng trên bàn để lấy vào tay.' : '';
+        : pend.options.includes('discard') ? ' Hoặc bấm trực tiếp chồng bài bỏ đang sáng để lấy lá trên cùng và rút thêm 1 lá.' : '';
       return `<h4>Rút bài đầu lượt</h4><p>Bấm chồng bài để rút.${source} Sau ${seconds} giây sẽ tự rút. Đồng hồ lượt bắt đầu khi rút xong.</p>`;
     }
   }
@@ -1172,9 +1491,9 @@ function winnerHTML(g) {
   const names = { Sheriff: 'Phe Sheriff', Outlaw: 'Phe Outlaw', Renegade: 'Renegade' };
   const winners = g.players.filter((p) => p.winner).map((p) => esc(p.name)).join(', ');
   const iWon = g.players.find((p) => p.name === ME)?.winner;
-  return `<div class="panel winner-banner"><div style="font-size:40px">${iWon ? '🏆' : '💀'}</div>
+  return `<div class="panel winner-banner"><div style="font-size:40px">${!g.me || iWon ? '🏆' : '💀'}</div>
     <h3>${names[g.winner]} chiến thắng!</h3><div>${winners}</div>
-    <div class="muted" style="margin-top:6px">${iWon ? 'Chúc mừng, cao bồi!' : 'Lần sau may mắn hơn nhé.'} ${ROOM.host === ME ? 'Bấm “Về phòng chờ” để chơi ván mới.' : 'Chờ chủ phòng mở ván mới.'}</div></div>`;
+    <div class="muted" style="margin-top:6px">${!g.me ? 'Bạn đã theo dõi ván đấu.' : iWon ? 'Chúc mừng, cao bồi!' : 'Lần sau may mắn hơn nhé.'} ${ROOM.host === ME ? 'Bấm “Về phòng chờ” để chơi ván mới.' : 'Chờ chủ phòng mở ván mới.'}</div></div>`;
 }
 
 // Kết quả dùng cờ winner do server tính, kể cả đồng đội đã bị loại.
@@ -1189,22 +1508,25 @@ function resultFaction(role) {
 }
 
 
-// 12 danh hiệu cuối ván: id → [biểu tượng, tên, mô tả, loại]. glory = vinh danh, tease = chọc ghẹo.
+// 12 danh hiệu cuối ván (thứ tự do awards() trong game.js quyết định, lưới 4×3): id → [biểu tượng, tên, mô tả, loại].
+// glory = Vinh danh, tease = Troll. Ô may rủi là lucky HOẶC unlucky; ô cuối là passenger HOẶC iknew (Renegade thắng).
 const AWARD_INFO = {
-  gunslinger: ['🔫', 'Tay súng nóng nhất', 'Bắn nhiều Bang! nhất', 'glory'],
   damage: ['💥', 'Kẻ gây tổn thương', 'Gây nhiều sát thương nhất', 'glory'],
-  mass: ['🏹', 'Đại đại đi', 'Đánh nhiều Gatling + Indians! nhất', 'glory'],
+  killer: ['☠️', 'Thần chết', 'Hạ gục nhiều người nhất', 'glory'],
   schemer: ['🧠', 'Kẻ ủ mưu', 'Gây nhiều sát thương nhất trong 1 lượt', 'glory'],
-  saloon: ['🍺', 'Khách quen Saloon', 'Hồi nhiều máu nhất bằng Beer / Saloon', 'glory'],
-  bandit: ['🏴‍☠️', 'Tướng cướp', 'Outlaw đầu tiên nhắm vào Sheriff (Bang!, Panic!, Cat Balou, Duel, Jesse Jones)', 'glory'],
-  rich: ['💰', 'Nhà giàu', 'Đặt nhiều lá trang bị nhất', 'glory'],
-  popular: ['💘', 'Ai cũng quý bạn', 'Bị nhắm nhiều nhất (Bang!, Panic!, Cat Balou, Duel, Jail)', 'tease'],
-  lucky: ['🍀', 'Nhân phẩm tốt', 'Rút kiểm tra may hơn kỳ vọng nhiều nhất (từ 3 lần)', 'glory'],
+  dodger: ['🐍', 'Lươn chúa', 'Tránh được nhiều sát thương nhất trong 1 vòng', 'glory'],
+  bandit: ['🏴‍☠️', 'Tướng cướp', 'Outlaw nhắm vào Sheriff sớm nhất', 'glory'],
+  legacy: ['📜', 'Di sản', 'Đã nằm xuống nhưng gây sát thương mỗi lượt nhiều nhất', 'glory'],
+  tough: ['🩸', 'Sống dai', 'Nhiều lượt sống lay lắt (≤ 2 máu) nhất', 'glory'],
+  lucky: ['🔴', 'Số đỏ', 'Rút kiểm tra may hơn kỳ vọng nhiều nhất (từ 3 lần)', 'glory'],
   unlucky: ['🐕', 'Sống chó', 'Rút kiểm tra xui hơn kỳ vọng nhiều nhất (từ 3 lần)', 'tease'],
-  friendlyFire: ['🤦', 'Bắn nhầm đồng đội', 'Gây nhiều sát thương nhất cho người cùng phe', 'tease'],
-  passenger: ['🪑', 'Có tham dự', 'Người phe thắng gây ít sát thương nhất', 'tease'],
+  snatcher: ['🦴', 'Đớp mạng', 'Ăn mạng khi người khác gây sát thương', 'tease'],
+  popular: ['💘', 'Ai cũng quý bạn', 'Bị nhắm nhiều nhất', 'tease'],
+  deadweight: ['🏋️‍♂️', 'Quả tạ vàng', 'Nhắm vào đồng đội nhiều nhất', 'tease'],
+  passenger: ['🪑', 'Được gánh', 'Người phe thắng gây ít sát thương nhất — đồng đội gánh cả ván', 'tease'],
+  iknew: ['🙄', 'Tao biết mà', 'Người đã cố ngăn cản Kẻ phản bội nhiều nhất', 'tease'],
 };
-const RESULT_STEPS = [['result', 'Kết quả'], ['awards', 'Danh hiệu'], ['stats', 'Thống kê']];
+const RESULT_STEPS = [['result', 'Kết quả'], ['awards', 'Danh hiệu'], ['timeline', 'Diễn biến'], ['contrib', 'Đóng góp'], ['stats', 'Thống kê']];
 const STAT_COLUMNS = [
   ['bangs', 'Bang! bắn'], ['dealt', 'Sát thương gây'], ['taken', 'Máu mất'], ['kills', 'Hạ gục'],
   ['dodged', 'Né được'], ['healed', 'Hồi máu'], ['equips', 'Trang bị'], ['targeted', 'Bị nhắm'],
@@ -1232,19 +1554,403 @@ function awardCardHTML(g, award) {
     ${row(award.ranks[0], 0)}${row(award.ranks[1], 1)}</div>`;
 }
 
-function resultAwardsHTML(g, won) {
-  const awards = g.summary?.awards || [];
-  const mine = awards.filter((a) => a.ranks.some((r) => r.players.includes(ME))).length;
+// Server chạy bản cũ (chưa khởi động lại sau khi cập nhật) sẽ không gửi g.summary:
+// báo rõ cho người chơi thay vì để màn Danh hiệu trống và bảng Thống kê toàn số 0.
+function resultMissingSummaryHTML(g, won, back, next) {
   return `${resultHeaderHTML(g, won)}
-    <div class="aw-bar"><span>Bạn lên bục <b>${mine}</b>/${awards.length} danh hiệu</span>
-      <span class="aw-legend"><span><i class="glory"></i>Vinh danh</span><span><i class="tease"></i>Chọc ghẹo</span></span></div>
+    <div class="result-missing" role="alert"><b>⚠️ Không có số liệu cuối ván</b>
+      <p>Server đang chạy bản cũ nên chưa gửi danh hiệu và thống kê.</p>
+      <p>Người làm host hãy chạy lại <code>CHAY-GAME.bat</code>, nhấn <b>Enter</b> để khởi động lại server, rồi mở ván mới.</p></div>
+    <div class="result-foot"><button type="button" class="btn ghost" data-step="${back[0]}">← ${back[1]}</button><span></span>${next}</div>`;
+}
+
+function resultFinalButtonsHTML() {
+  return `<button type="button" class="btn ghost" data-close>Xem bàn chơi</button>
+    ${ROOM.host === ME ? '<button type="button" class="result-continue small" data-reset><span aria-hidden="true">🔁</span> Về phòng chờ</button>' : '<span class="st-wait">Chờ chủ phòng mở ván mới…</span>'}`;
+}
+
+function resultAwardsHTML(g, won) {
+  if (!g.summary) return resultMissingSummaryHTML(g, won, ['result', 'Kết quả'], '<button type="button" class="result-continue small" data-step="stats"><span aria-hidden="true">✺</span> Tiếp tục</button>');
+  // Bỏ qua danh hiệu lạ nếu server và giao diện lệch phiên bản, tránh lỗi làm hỏng cả màn.
+  const awards = (g.summary.awards || []).filter((a) => AWARD_INFO[a.id]);
+  // Đếm riêng Vinh danh và Troll: "lên bục" = có tên ở hạng 1 hoặc 2
+  const podium = (kind) => {
+    const list = awards.filter((a) => AWARD_INFO[a.id][3] === kind);
+    return `<b>${list.filter((a) => a.ranks.some((r) => r.players.includes(ME))).length}</b>/${list.length}`;
+  };
+  return `${resultHeaderHTML(g, won)}
+    <div class="aw-bar"><span>Bạn lên bục ${podium('glory')} danh hiệu vinh danh · ${podium('tease')} danh hiệu troll</span>
+      <span class="aw-legend"><span><i class="glory"></i>Vinh danh</span><span><i class="tease"></i>Troll</span></span></div>
     <div class="aw-grid">${awards.map((a) => awardCardHTML(g, a)).join('')}</div>
     <div class="result-foot"><button type="button" class="btn ghost" data-step="result">← Kết quả</button><span></span>
-      <button type="button" class="result-continue small" data-step="stats"><span aria-hidden="true">✺</span> Tiếp tục</button></div>`;
+      <button type="button" class="result-continue small" data-step="timeline"><span aria-hidden="true">✺</span> Tiếp tục</button></div>`;
+}
+
+// ---------- Diễn biến & Đóng góp: dựa trên cán cân sức mạnh (power.js) game ghi sau mỗi hành động ----------
+const TEAM_OF = { Sheriff: 'law', Deputy: 'law', Outlaw: 'out', Renegade: 'ren' };
+const resultNext = (step, label = 'Tiếp tục') => `<button type="button" class="result-continue small" data-step="${step}"><span aria-hidden="true">✺</span> ${label}</button>`;
+// Màu vai trò (khớp biến CSS --sheriff/--deputy/--outlaw/--renegade trong style.css) cho SVG vẽ bằng JS
+const ROLE_COLOR = { Sheriff: '#1d3a6b', Deputy: '#3d7cc9', Outlaw: '#8a2b1d', Renegade: '#e2b31e', law: '#3d7cc9' };
+// Deputy/Outlaw nhạt dần theo thứ tự đóng góp (sắc đầu = màu vai trò chung)
+const ROLE_SHADES = { Deputy: ['#3d7cc9', '#78a9e0', '#b0cff0'], Outlaw: ['#8a2b1d', '#c0563f', '#e39a7f'] };
+const LIGHT_SLICE = [ROLE_COLOR.Renegade, '#b0cff0', '#e39a7f']; // lát sáng → chữ tối
+const signed = (v, d = 2) => `${v >= 0 ? '+' : '−'}${Math.abs(v).toFixed(d).replace('.', ',')}`;
+
+// Tô tên người chơi trong câu log theo phe (tên dài thay trước để không bị cắt nhầm)
+function teamNames(g, text) {
+  let out = esc(text);
+  const players = [...g.players].sort((a, b) => b.name.length - a.name.length);
+  const marks = [];
+  players.forEach((p, k) => {
+    const re = new RegExp(esc(p.name).replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'g');
+    out = out.replace(re, () => { marks.push(`<span class="tl-who ${p.role.toLowerCase()}">${esc(p.name)}</span>`); return `\u0000${marks.length - 1}\u0000`; });
+  });
+  return out.replace(/\u0000(\d+)\u0000/g, (_, i) => marks[i]);
+}
+
+// Gom các điểm cán cân thành từng lượt: cán cân đầu/cuối lượt, trạng thái từng người trước/sau, log trong lượt
+function timelineTurns(g) {
+  const tl = g.summary?.timeline;
+  if (!tl?.pts?.length) return null;
+  const pts = tl.pts, turns = [];
+  let prevPs = tl.start;
+  pts.forEach((p, k) => {
+    let tr = turns[turns.length - 1];
+    if (!tr || tr.t !== p.t) { tr = { t: p.t, r: p.r, o: p.o, k0: k, start: k ? pts[k - 1].b : 0, before: prevPs, log: [], deaths: [] }; turns.push(tr); }
+    // Ai chết, ai hạ gục (người được ghi công của hành động đó), bằng gì (hành động tấn công gần nhất trước đó trong lượt)
+    p.log.forEach((line, j) => {
+      const m = line.match(/^☠️ (.+) đã chết! Vai trò: (\w+)/);
+      if (!m) return;
+      const before = [...tr.log, ...p.log.slice(0, j)];
+      const killer = p.a >= 0 && g.players[p.a] && g.players[p.a].name !== m[1] ? g.players[p.a].name : null;
+      tr.deaths.push({ name: m[1], role: m[2], killer, weapon: deathWeapon(before) });
+    });
+    tr.k1 = k; tr.end = p.b; tr.log.push(...p.log);
+    if (p.ps) { tr.after = p.ps; prevPs = p.ps; }
+  });
+  for (const tr of turns) {
+    tr.delta = tr.end - tr.start;
+    tr.after = tr.after || tr.before;
+  }
+  return { pts, turns };
+}
+
+// Vũ khí của cái chết: dòng tấn công gần nhất trước dòng ☠️ (đọc ngược lên)
+function deathWeapon(lines) {
+  for (let i = lines.length - 1; i >= 0; i--) {
+    const l = lines[i];
+    if (l.includes('Dynamite nổ')) return 'Dynamite';
+    let m = l.match(/bắn .+ \(([^)]+)\)\.$/);           // kỹ năng bắn (vd. Doc Holyday)
+    if (m) return `kỹ năng ${m[1]}`;
+    m = l.match(/^💥 .+ bắn .+ bằng (.+)!$/);              // lá xanh tấn công (Dodge City)
+    if (m) return m[1];
+    if (/^💥 .+ bắn /.test(l)) return 'Bang!';
+    if (l.includes('thách đấu')) return 'Duel';
+    if (l.startsWith('🪶')) return 'Indians!';
+    m = l.match(/^🔫 .+ dùng (.+)!$/);                     // Gatling / Howitzer
+    if (m) return m[1];
+  }
+  return null;
+}
+
+// Chọn 5 sự kiện: 3 lượt ảnh hưởng nhất (|Δ cán cân| lớn nhất) + lượt Sheriff mất máu lần đầu
+// + 1 khoảnh khắc thú vị nhất ngoài các lượt trên. Trùng lượt thì gộp nhãn và lấy thêm lượt ảnh hưởng kế tiếp cho đủ 5.
+// Bước ngoặt = lần cuối cán cân đổi dấu về phe thắng (chỉ để gắn nhãn).
+function pickTimeline(g, turns) {
+  const lawWon = g.winner === 'Sheriff';
+  let turning = null;
+  if (g.winner !== 'Renegade') for (const tr of turns) if (lawWon ? tr.start <= 0 && tr.end > 0 : tr.start >= 0 && tr.end < 0) turning = tr;
+  const ranked = [...turns].sort((a, b) => Math.abs(b.delta) - Math.abs(a.delta));
+  const chosen = new Map();
+  const add = (tr, kind) => { if (!tr) return; if (chosen.has(tr)) chosen.get(tr).push(kind); else chosen.set(tr, [kind]); };
+  ranked.slice(0, 3).forEach((tr) => add(tr, 'impact'));
+  const sh = g.players.findIndex((p) => p.role === 'Sheriff');
+  const shTurn = sh >= 0 ? turns.find((tr) => tr.after[sh][0] < tr.before[sh][0]) : null;
+  if (shTurn) { shTurn.sheriffLoss = shTurn.before[sh][0] - shTurn.after[sh][0]; add(shTurn, 'sheriff'); }
+  const fun = funMoments(g, turns).find((f) => !chosen.has(f.tr));
+  if (fun) { fun.tr.fun = fun; add(fun.tr, 'fun'); }
+  for (const tr of ranked) { if (chosen.size >= 5) break; if (!chosen.has(tr)) add(tr, 'impact'); }
+  for (const tr of turns) tr.kinds = chosen.get(tr) || [];
+  return { picked: [...chosen.keys()].sort((a, b) => a.t - b.t), turning };
+}
+
+// Khoảnh khắc thú vị, xếp theo điểm (càng lớn càng thú vị):
+//  hồi ≥ 2 máu trong một lượt · mất ≥ 3 máu trong một lượt · Gatling/Indians!/Howitzer gây ≥ 2 sát thương
+//  · rút kiểm tra trúng ≥ 2 lần liền trong một lượt
+function funMoments(g, turns) {
+  const out = [];
+  const ACTION = /^(💥|🔫|🪶|🤠|⛓️|💃|😱|🏪)/;
+  for (const tr of turns) {
+    g.players.forEach((p, i) => {
+      const d = tr.after[i][0] - tr.before[i][0];
+      if (d >= 2) out.push({ tr, score: d + 0.5, title: `🍺 ${p.name} hồi ${d} máu trong một lượt` });
+      if (d <= -3) out.push({ tr, score: -d * 0.9, title: `🩸 ${p.name} mất ${-d} máu trong một lượt` });
+    });
+    tr.log.forEach((l, k) => {
+      const m = l.match(/^(🔫|🪶) (.+?) (dùng (Gatling|Howitzer)!|thả thổ dân tấn công!)/);
+      if (!m) return;
+      let dmg = 0, dead = 0;
+      for (let j = k + 1; j < tr.log.length && !ACTION.test(tr.log[j]); j++) {
+        const h = tr.log[j].match(/ mất (\d+) máu/);
+        if (h && !tr.log[j].includes('Dynamite')) dmg += Number(h[1]);
+        if (tr.log[j].startsWith('☠️')) dead++;
+      }
+      if (dmg >= 2) out.push({ tr, score: dmg * 1.2 + dead * 0.5, title: `${m[1]} ${m[2]} tung ${m[4] || 'Indians!'} gây ${dmg} sát thương${dead ? `, hạ ${dead} người` : ''}` });
+    });
+    const streak = {};
+    for (const l of tr.log) {
+      const m = l.match(/^(.+?) rút kiểm tra \((\w+)\): .*→ (thành công|thất bại)/);
+      if (!m) continue;
+      const s = streak[m[1]] || (streak[m[1]] = { cur: 0, best: 0 });
+      s.cur = m[3] === 'thành công' ? s.cur + 1 : 0;
+      s.best = Math.max(s.best, s.cur);
+    }
+    for (const [name, s] of Object.entries(streak)) if (s.best >= 2) out.push({ tr, score: s.best * 1.3, title: `🍀 ${name} rút kiểm tra trúng ${s.best} lần liền` });
+  }
+  return out.sort((a, b) => b.score - a.score);
+}
+
+function timelineTitle(g, tr, last) {
+  const owner = g.players[tr.o]?.name || '';
+  const own = tr.log.filter((l) => /^(💥|🔫|🪶|🤠|🍺|⛓️|💃|😱|🏪)/.test(l) && l.includes(owner + ' ')).join(' ');
+  if (tr === last) return '🏁 Phát súng cuối';
+  if (tr.deaths.length >= 2) return `💀 Liên hoàn: ${tr.deaths.length} người gục`;
+  if (tr.deaths.length) {
+    const d = tr.deaths[0], ownerP = g.players[tr.o];
+    const tragic = ownerP && ownerP.name !== d.name && d.role !== 'Renegade' && TEAM_OF[ownerP.role] === TEAM_OF[d.role];
+    return `${tragic ? '💔 Bi kịch: ' : '💀 '}${d.role} ${d.name} gục ngã`;
+  }
+  if (tr.log.some((l) => l.includes('Dynamite nổ'))) return '💣 Dynamite phát nổ';
+  if (/Gatling|Howitzer/.test(own)) return '🔫 Gatling quét cả bàn';
+  if (/thổ dân/.test(own)) return '🪶 Thổ dân tràn vào';
+  if (/thách đấu/.test(own)) return '🤠 Đấu tay đôi';
+  if (/bỏ tù/.test(own)) return '⛓️ Song sắt khép lại';
+  if (/buộc .* bỏ|lấy .* của/.test(own)) return '😱 Tước vũ khí đối thủ';
+  if (/uống Beer/.test(own)) return '🍺 Hồi sức đúng lúc';
+  if (/bắn/.test(own)) return '💥 Loạt đạn quyết định';
+  return tr.delta > 0 ? '⚖️ Luật pháp lấy lại thế' : '⚖️ Outlaw dồn ép';
+}
+
+// Chủ lượt đã làm gì (tối đa 3 hành động đáng kể)
+function timelineActions(g, tr) {
+  const owner = g.players[tr.o]?.name;
+  if (!owner) return [];
+  const quiet = (l) => l.startsWith(owner + ' ') && /^(bỏ \d+ lá để hồi|dùng (Stagecoach|Wells Fargo|Saloon)|trang bị)/.test(l.slice(owner.length + 1));
+  return tr.log.filter((l) => (/^(💥|🔫|🪶|🤠|🍺|⛓️|💃|😱|🏪)/.test(l) && l.includes(owner + ' ')) || quiet(l)).slice(0, 3)
+    .map((l) => l.replace(/^(💥|🔫|🪶|🤠|🍺|⛓️|💃|😱|🏪)\s*/, ''));
+}
+
+// Tác động của lượt lên từng người: máu, gục, trang bị, sức mạnh (▲▼)
+function timelineImpact(g, tr) {
+  return g.players.map((p, i) => {
+    const [h0, a0, s0, e0] = tr.before[i], [h1, a1, s1, e1] = tr.after[i];
+    if (a0 && !a1) return { p, ds: s1 - s0, parts: ['💀 gục'] };
+    const E0 = e0 ? e0.split('|') : [], E1 = e1 ? e1.split('|') : [];
+    const parts = [];
+    if (h1 !== h0) parts.push(`${h1 > h0 ? '+' : '−'}${Math.abs(h1 - h0)} máu`);
+    E1.filter((e) => !E0.includes(e)).forEach((e) => parts.push(e === 'Jail' ? '⛓️ vào tù' : e === 'Dynamite' ? '🧨 cầm Dynamite' : `+${e}`));
+    E0.filter((e) => !E1.includes(e)).forEach((e) => parts.push(e === 'Jail' ? 'ra tù' : `mất ${e}`));
+    return { p, ds: s1 - s0, parts };
+  }).filter((x) => Math.abs(x.ds) >= 0.15 && x.parts.length).sort((a, b) => Math.abs(b.ds) - Math.abs(a.ds)).slice(0, 4);
+}
+
+function timelineChartSVG(g, pts, turns, picked, turning) {
+  const n = pts.length - 1, T = Math.max(1, pts[n].t);
+  const pos = [];
+  for (let k = 0; k <= n; k++) {
+    let a = k; while (a > 0 && pts[a - 1].t === pts[k].t) a--;
+    let b = k; while (b < n && pts[b + 1].t === pts[k].t) b++;
+    pos[k] = Math.max(0, pts[k].t - 1) + (k - a + 1) / (b - a + 1);
+  }
+  const x = (k) => 20 + (pos[k] / T) * 960, y = (v) => 92 - v * 78;
+  let h = `<line x1="20" x2="980" y1="${y(0)}" y2="${y(0)}" stroke="#b9a99a" stroke-dasharray="4 4"/>`;
+  for (let k = 1; k <= n; k++) if (pts[k].r !== pts[k - 1].r) h += `<line x1="${x(k)}" x2="${x(k)}" y1="6" y2="178" stroke="#eadbbd"/><text x="${x(k) + 3}" y="194" font-size="11" fill="#8b7355">vòng ${pts[k].r}</text>`;
+  picked.forEach((tr) => { h += `<rect x="${x(tr.k0)}" y="6" width="${Math.max(3, x(tr.k1) - x(tr.k0))}" height="172" fill="${tr === turning ? '#d9a441' : '#c9a46a'}" opacity="${tr === turning ? 0.28 : 0.16}"/>`; });
+  const area = (sign) => `M${x(0)},${y(0)}` + pts.map((p, k) => `L${x(k)},${y(sign > 0 ? Math.max(p.b, 0) : Math.min(p.b, 0))}`).join('') + `L${x(n)},${y(0)}Z`;
+  h += `<path d="${area(1)}" fill="${ROLE_COLOR.law}" opacity=".3"/><path d="${area(-1)}" fill="${ROLE_COLOR.Outlaw}" opacity=".3"/>`;
+  h += `<path d="${pts.map((p, k) => `${k ? 'L' : 'M'}${x(k)},${y(p.b)}`).join('')}" fill="none" stroke="#3d2616" stroke-width="2.5" vector-effect="non-scaling-stroke"/>`;
+  for (const tr of turns) if (tr.deaths.length) h += `<text x="${x(tr.k1)}" y="${y(tr.end) + 18}" font-size="13" text-anchor="middle">💀</text>`;
+  picked.forEach((tr, i) => {
+    const cx = (x(tr.k0) + x(tr.k1)) / 2, cy = Math.max(16, y(Math.max(tr.start, tr.end)) - 16);
+    const fill = tr === turning ? '#d9a441' : tr.delta > 0 ? ROLE_COLOR.law : ROLE_COLOR.Outlaw;
+    h += `<g class="tl-mk" data-ev="${i}"><circle cx="${cx}" cy="${cy}" r="10" fill="${fill}" stroke="#fff" stroke-width="2"/><text x="${cx}" y="${cy + 4}" font-size="11" font-weight="800" text-anchor="middle" fill="${tr === turning ? '#2a160a' : '#fff'}">${i + 1}</text></g>`;
+  });
+  return `<svg class="tl-chart" viewBox="0 0 1000 200" preserveAspectRatio="none" role="img" aria-label="Cán cân trận đấu theo từng lượt">${h}</svg>`;
+}
+
+const RESULT_NO_TIMELINE = `<div class="result-missing" role="status"><b>Không có dữ liệu cán cân</b><p>Ván này được chơi trên server bản cũ nên chưa ghi diễn biến.</p></div>`;
+
+// ---------- Loại trận (kiểu chess.com) từ đường cán cân ----------
+// Nhìn từ phía phe thắng: w > 0 = phe thắng đang dẫn. Mỗi lượt lấy giá trị cuối lượt, bỏ lượt cuối (cán cân chạm trần).
+// Ngưỡng chỉnh bằng 1000 ván mô phỏng: chắc tay ~31% · giằng co ~21% · để thua ~14% · áp đảo ~11% · lật kèo ~10% · Renegade ~8% · điên rồ ~5%.
+const MATCH_TYPES = {
+  renegade: ['🎭', 'Kẻ phản bội cân cả bàn'],
+  chaos: ['🔥', 'Trận điên rồ'],
+  thrown: ['💔', 'Dẫn cả trận vẫn để thua'],
+  comeback: ['🔄', 'Lật kèo'],
+  crush: ['👑', 'Áp đảo một chiều'],
+  close: ['⚖️', 'Giằng co tới phút chót'],
+  steady: ['🎯', 'Thắng chắc tay'],
+};
+const MATCH_RULE = { lead: 0.08, chaosSwaps: 3, thrownShare: 0.65, comebackLow: -0.25, crushShare: 0.9, crushMean: 0.3, closeBand: 0.15, closeShare: 0.7 };
+
+function classifyMatch(g, turns) {
+  const SIDE = { Sheriff: 'Sheriff & Deputy', Outlaw: 'Outlaw' };
+  const winName = SIDE[g.winner], loseName = g.winner === 'Sheriff' ? 'Outlaw' : 'Sheriff & Deputy';
+  if (g.winner === 'Renegade') {
+    const r = g.players.find((p) => p.role === 'Renegade');
+    return { type: 'renegade', text: `${r ? r.name : 'Renegade'} sống sót tới cuối, một mình đứng trên mọi phe.` };
+  }
+  const sign = g.winner === 'Sheriff' ? 1 : -1;
+  const body = turns.slice(0, -1);
+  const w = body.map((tr) => tr.end * sign);
+  const pct = (x) => `${Math.round(x * 100)}%`;
+  const num = (v) => signed(v).replace('+', '');
+  if (w.length < 3) return { type: 'crush', text: `Phe ${winName} kết thúc ván chỉ sau ${turns.length} lượt.` };
+  const R = MATCH_RULE;
+  let state = 0, swaps = 0;
+  for (const v of w) { const s = v > R.lead ? 1 : v < -R.lead ? -1 : 0; if (s && state && s !== state) swaps++; if (s) state = s; }
+  const low = Math.min(...w), lowTr = body[w.indexOf(low)];
+  const share = (f) => w.filter(f).length / w.length;
+  const mean = w.reduce((a, b) => a + b, 0) / w.length;
+  if (swaps >= R.chaosSwaps) return { type: 'chaos', text: `Thế dẫn đổi chủ ${swaps} lần — không phe nào giữ được lợi thế lâu.` };
+  const behind = share((v) => v < -0.05);
+  if (behind >= R.thrownShare) return { type: 'thrown', text: `Phe ${loseName} nắm lợi thế ${pct(behind)} thời gian của ván nhưng để tuột chiến thắng ở cuối.` };
+  if (low <= R.comebackLow) return { type: 'comeback', text: `Phe ${winName} từng bị dẫn tới ${num(Math.abs(low))} ở lượt ${lowTr.t} (vòng ${lowTr.r}) rồi lật ngược thế trận.` };
+  const ahead = share((v) => v >= -0.05);
+  if (ahead >= R.crushShare && mean >= R.crushMean) return { type: 'crush', text: `Phe ${winName} dẫn ${pct(ahead)} thời gian của ván, đối thủ gần như không có cửa.` };
+  if (share((v) => Math.abs(v) <= R.closeBand) >= R.closeShare) return { type: 'close', text: `Hai phe ngang ngửa gần cả ván, chỉ ngã ngũ ở những lượt cuối.` };
+  return { type: 'steady', text: `Phe ${winName} tạo được lợi thế rồi giữ vững tới cuối.` };
+}
+
+function resultTimelineHTML(g, won) {
+  const data = timelineTurns(g);
+  const foot = `<div class="result-foot"><button type="button" class="btn ghost" data-step="awards">← Danh hiệu</button><span></span>${resultNext('contrib')}</div>`;
+  if (!data) return `${resultHeaderHTML(g, won)}${RESULT_NO_TIMELINE}${foot}`;
+  const { pts, turns } = data;
+  const { picked, turning } = pickTimeline(g, turns);
+  const mt = classifyMatch(g, turns);
+  const [mtIcon, mtName] = MATCH_TYPES[mt.type];
+  const last = turns[turns.length - 1];
+  const maxD = Math.max(...picked.map((t) => Math.abs(t.delta)), 0.01);
+  const rows = picked.map((tr, i) => {
+    const side = tr.delta > 0 ? 'law' : 'out';
+    const owner = g.players[tr.o];
+    const acts = timelineActions(g, tr);
+    const boom = tr.log.find((l) => l.includes('Dynamite nổ'));
+    // Lượt có người chết: ghi thẳng "X hạ gục Y bằng …"; còn lại: hành động chính của chủ lượt (không có nhãn)
+    const kills = tr.deaths.map((d) => d.killer
+      ? `☠️ ${teamNames(g, d.killer)} hạ gục ${teamNames(g, d.name)}${d.weapon ? ` bằng <b>${esc(d.weapon)}</b>` : ''}`
+      : `☠️ ${teamNames(g, d.name)} chết${d.weapon === 'Dynamite' ? ' vì <b>Dynamite</b> nổ' : ''}`);
+    const did = kills.length ? kills.join(' · ')
+      : acts.length ? acts.map((a) => teamNames(g, a)).join(' · ') : boom ? teamNames(g, boom.replace(/^💥\s*/, '')) : 'Không có hành động tấn công';
+    // Tiêu đề: khoảnh khắc thú vị / Sheriff mất máu dùng tiêu đề riêng nếu lượt đó không lọt vì ảnh hưởng
+    const sheriff = g.players.find((p) => p.role === 'Sheriff');
+    const title = tr.kinds.includes('impact') ? timelineTitle(g, tr, last)
+      : tr.kinds.includes('fun') ? tr.fun.title
+      : `🎯 Sheriff ${sheriff?.name || ''} mất máu lần đầu (−${tr.sheriffLoss})`;
+    const tags = [
+      tr.kinds.includes('impact') ? '<span class="tl-tag impact">ẢNH HƯỞNG LỚN</span>' : '',
+      tr.kinds.includes('sheriff') ? `<span class="tl-tag sheriff">SHERIFF MẤT MÁU ĐẦU TIÊN${tr.kinds.includes('impact') ? ` (−${tr.sheriffLoss})` : ''}</span>` : '',
+      tr.kinds.includes('fun') ? `<span class="tl-tag fun">★ THÚ VỊ</span>` : '',
+      tr === turning ? '<span class="tl-tag">BƯỚC NGOẶT</span>' : '',
+    ].join('');
+    const funLine = tr.kinds.includes('fun') && tr.kinds.includes('impact') ? `<div class="tl-did">★ ${teamNames(g, tr.fun.title.replace(/^\S+\s/, ''))}</div>` : '';
+    const imp = timelineImpact(g, tr).map((x) => `<span class="tl-chip ${x.ds > 0 ? 'up' : 'down'}">${teamNames(g, x.p.name)} ${esc(x.parts.join(', '))} <i>${x.ds > 0 ? '▲' : '▼'} ${Math.abs(x.ds).toFixed(1).replace('.', ',')}</i></span>`).join('');
+    return `<div class="tl-ev ${side} ${tr === turning ? 'turning' : ''}" id="tlEv${i}">
+      <span class="tl-num">${i + 1}</span>
+      <div class="tl-when">Lượt ${tr.t} · vòng ${tr.r}<b>Lượt của ${owner ? teamNames(g, owner.name) : '?'}</b>${owner ? `<span class="aw-role role-${owner.role.toLowerCase()}">${esc(owner.role)}</span>` : ''}</div>
+      <div class="tl-body"><div class="tl-title">${teamNames(g, title)}${tags}</div>
+        <div class="tl-did">${did}</div>${funLine}${imp ? `<div class="tl-imp">${imp}</div>` : ''}</div>
+      <div class="tl-swing ${side}">${side === 'law' ? 'nghiêng về Luật pháp' : 'nghiêng về Outlaw'}<b>${signed(tr.delta)}</b><div class="tl-bar"><i style="width:${Math.min(100, Math.abs(tr.delta) / maxD * 100)}%"></i></div></div>
+    </div>`;
+  }).join('');
+  return `${resultHeaderHTML(g, won)}
+    <div class="tl-type ${mt.type}"><span class="tl-type-ic">${mtIcon}</span><div><div class="tl-type-k">Loại trận</div><b>${esc(mtName)}</b><p>${teamNames(g, mt.text)}</p></div></div>
+    <section class="tl-panel"><div class="tl-head"><h3>Cán cân trận đấu</h3>
+      <div class="tl-legend"><span><i class="law"></i>Sheriff &amp; Deputy lợi thế</span><span><i class="out"></i>Outlaw lợi thế</span><span>💀 có người gục</span><span><i class="turn"></i>Bước ngoặt</span></div></div>
+      ${timelineChartSVG(g, pts, turns, picked, turning)}</section>
+    <section class="tl-panel tl-events"><div class="tl-head"><h3>Diễn biến</h3><span class="tl-legend">3 lượt ảnh hưởng nhất · Sheriff mất máu đầu tiên · 1 khoảnh khắc thú vị · ▲▼ sức mạnh người đó tăng/giảm</span></div>
+      <div class="tl-list">${rows}</div></section>
+    ${foot}`;
+}
+
+// Đóng góp: Δ cán cân của mỗi hành động cộng cho người được ghi công, đổi dấu theo đội,
+// KHÔNG tính phát súng cuối (cán cân "chạm trần" ±1), chia cho số lượt người đó được chơi.
+// Renegade có mặt ở cả 2 đội: phần đẩy về Luật pháp vào đội Luật pháp, phần đẩy về Outlaw vào đội Outlaw.
+function contribData(g) {
+  const tl = g.summary?.timeline;
+  if (!tl?.pts?.length) return null;
+  const N = g.players.length, last = tl.pts.length - 1;
+  const raw = Array(N).fill(0), renToward = { law: 0, out: 0 };
+  let fate = 0, prev = 0;
+  tl.pts.forEach((p, k) => {
+    const d = p.b - prev; prev = p.b;
+    if (k === last) return;
+    if (p.a == null || p.a < 0) { fate += d; return; }
+    raw[p.a] += d;
+    if (g.players[p.a]?.role === 'Renegade') { if (d > 0) renToward.law += d; else renToward.out -= d; }
+  });
+  const byName = Object.fromEntries((g.summary.stats || []).map((s) => [s.name, s]));
+  const turns = g.players.map((p) => Math.max(1, byName[p.name]?.turns || 1));
+  return { raw, renToward, fate, turns };
+}
+
+function contribPieSVG(rows, posSum, team, teamTotal) {
+  const arc = (a0, a1) => {
+    const pt = (a) => [105 + 95 * Math.sin(a), 105 - 95 * Math.cos(a)];
+    const [x0, y0] = pt(a0), [x1, y1] = pt(a1);
+    return `M105,105 L${x0},${y0} A95,95 0 ${a1 - a0 > Math.PI ? 1 : 0} 1 ${x1},${y1} Z`;
+  };
+  const pos = rows.filter((m) => m.v > 0);
+  let a = 0, svg = pos.length ? '' : '<circle cx="105" cy="105" r="95" fill="#e6dccb"/>';
+  pos.forEach((m) => {
+    const sweep = (m.v / posSum) * Math.PI * 2;
+    svg += pos.length === 1 ? `<circle cx="105" cy="105" r="95" fill="${m.col}"/>` : `<path d="${arc(a, a + sweep)}" fill="${m.col}" stroke="#fffaf0" stroke-width="2"/>`;
+    const mid = a + sweep / 2;
+    if (sweep > 0.35) svg += `<text x="${105 + 62 * Math.sin(mid)}" y="${109 - 62 * Math.cos(mid)}" text-anchor="middle" font-size="13" font-weight="800" fill="${LIGHT_SLICE.includes(m.col) ? '#2a1a0e' : '#fff'}">${Math.round(m.v / posSum * 100)}%</text>`;
+    a += sweep;
+  });
+  svg += `<circle cx="105" cy="105" r="42" fill="#fffaf0"/><text x="105" y="100" text-anchor="middle" font-size="10.5" fill="#8b7355">cả đội /lượt</text>
+    <text x="105" y="120" text-anchor="middle" font-size="17" font-weight="900" fill="${team === 'law' ? ROLE_COLOR.law : ROLE_COLOR.Outlaw}">${signed(teamTotal, 3)}</text>`;
+  return `<svg class="cg-pie" viewBox="0 0 210 210" role="img" aria-label="Tỉ lệ đóng góp">${svg}</svg>`;
+}
+
+function resultContribHTML(g, won) {
+  const data = contribData(g);
+  const foot = `<div class="result-foot"><button type="button" class="btn ghost" data-step="timeline">← Diễn biến</button><span></span>${resultNext('stats')}</div>`;
+  if (!data) return `${resultHeaderHTML(g, won)}${RESULT_NO_TIMELINE}${foot}`;
+  const { raw, renToward, fate, turns } = data;
+  const SIGN = { law: 1, out: -1 };
+    const ren = g.players.findIndex((p) => p.role === 'Renegade');
+  const panel = (team) => {
+    const rows = g.players.map((p, i) => ({ p, i, t: turns[i], v: raw[i] * SIGN[team] / turns[i] }))
+      .filter((m) => TEAM_OF[m.p.role] === team).sort((a, b) => b.v - a.v);
+    // màu vai trò chung; trong cùng vai trò, người đóng góp nhiều hơn màu đậm hơn (rows đã xếp giảm dần)
+    const shade = { Deputy: 0, Outlaw: 0 };
+    rows.forEach((m) => { m.col = ROLE_SHADES[m.p.role] ? ROLE_SHADES[m.p.role][Math.min(shade[m.p.role]++, ROLE_SHADES[m.p.role].length - 1)] : ROLE_COLOR[m.p.role]; });
+    if (ren >= 0) rows.push({ p: g.players[ren], i: ren, t: turns[ren], v: renToward[team] / turns[ren], col: ROLE_COLOR.Renegade, ren: true });
+    const posSum = rows.filter((m) => m.v > 0).reduce((s, m) => s + m.v, 0) || 1;
+    const teamTotal = rows.filter((m) => !m.ren).reduce((s, m) => s + m.v, 0);
+    const winTeam = (g.winner === 'Sheriff') === (team === 'law') && g.winner !== 'Renegade';
+    const share = (m) => (m.v > 0 ? `${Math.round(m.v / posSum * 100)}% công` : m.ren ? 'không tác động' : m.v === 0 ? '0% công' : 'kéo lùi đội');
+    const legend = rows.map((m) => `<div class="cg-li ${m.v < 0 ? 'neg' : ''} ${m.p.name === ME ? 'me' : ''} ${m.ren ? 'ren' : ''}">
+        <i style="background:${m.v > 0 ? m.col : '#d9d0c4'}"></i>
+        <span class="cg-nm">${esc(m.p.name)}${m.p.name === ME ? ' (bạn)' : ''}<small>${esc(m.p.role)}${m.ren ? ' · giúp gián tiếp' : ''}</small></span>
+        <span class="cg-v">${m.ren && m.v === 0 ? '0' : signed(m.v, 3)}<small class="u">/lượt</small><small>${share(m)} · ${m.t} lượt</small></span></div>`).join('');
+    return `<section class="cg-team ${team} ${winTeam ? 'win' : ''}"><h3>${team === 'law' ? 'Luật pháp' : 'Tội phạm (Outlaw)'}${winTeam ? '<span class="cg-wtag">THẮNG</span>' : ''}</h3>
+      <div class="cg-sub">Trung bình mỗi lượt được chơi, người đó đẩy cán cân về phía ${team === 'law' ? 'Luật pháp' : 'Outlaw'} bao nhiêu (không tính phát súng cuối)</div>
+      <div class="cg-row">${contribPieSVG(rows, posSum, team, teamTotal)}<div class="cg-legend">${legend}</div></div></section>`;
+  };
+  return `${resultHeaderHTML(g, won)}
+    <div class="cg-teams">${panel('law')}${panel('out')}</div>
+    <p class="cg-note">${ren >= 0 ? `Renegade ${esc(g.players[ren].name)} (vàng) có mặt ở cả hai đội: phần hành động có lợi cho mỗi đội tính riêng. · ` : ''}Số phận (Dynamite, Jail) ${fate >= 0 ? 'có lợi cho Luật pháp' : 'có lợi cho Outlaw'} ${Math.abs(fate).toFixed(2).replace('.', ',')}</p>
+    ${foot}`;
 }
 
 function resultStatsHTML(g, won) {
-  const sum = g.summary || { stats: [], turns: 0 };
+  if (!g.summary) return resultMissingSummaryHTML(g, won, ['awards', 'Danh hiệu'], resultFinalButtonsHTML());
+  const sum = g.summary;
   const byName = Object.fromEntries(sum.stats.map((s) => [s.name, s]));
   const rows = [...g.players].sort((a, b) => b.winner - a.winner);
   const best = Object.fromEntries(STAT_COLUMNS.map(([k]) => [k, Math.max(0, ...sum.stats.map((s) => s[k]))]));
@@ -1253,7 +1959,7 @@ function resultStatsHTML(g, won) {
   const body = rows.map((p) => {
     const s = byName[p.name] || {};
     return `<tr class="${p.winner ? 'win' : 'lose'} ${p.name === ME ? 'st-me' : ''}">
-      <td><div class="st-player"><span class="st-av">${p.alive ? playerAvatarHTML(p) : '💀'}</span>
+      <td><div class="st-player"><span class="st-av">${playerAvatarHTML(p)}</span>
         <div><b>${esc(p.name)}</b>${p.name === ME ? ' <i>(bạn)</i>' : ''}<small>${esc(p.char || '')}</small></div></div></td>
       <td><span class="aw-role role-${p.role.toLowerCase()}">${esc(p.role)}</span></td>
       <td><span class="st-res ${p.winner ? 'w' : 'l'}">${p.winner ? 'Thắng' : 'Thua'}</span></td>
@@ -1266,14 +1972,13 @@ function resultStatsHTML(g, won) {
       <thead><tr><th>Người chơi</th><th>Vai trò</th><th>Kết quả</th>${STAT_COLUMNS.map(([, l]) => `<th>${l}</th>`).join('')}<th>Rút kiểm tra</th></tr></thead>
       <tbody>${body}</tbody></table></div>
       <div class="st-note">Ô tô vàng = cao nhất ván · Rút kiểm tra = số lần thành công / số lần rút (Barrel, Jail, Dynamite)</div></div>
-    <div class="result-foot"><button type="button" class="btn ghost" data-step="awards">← Danh hiệu</button><span></span>
-      <button type="button" class="btn ghost" data-close>Xem bàn chơi</button>
-      ${ROOM.host === ME ? '<button type="button" class="result-continue small" data-reset><span aria-hidden="true">🔁</span> Về phòng chờ</button>' : '<span class="st-wait">Chờ chủ phòng mở ván mới…</span>'}</div>`;
+    <div class="result-foot"><button type="button" class="btn ghost" data-step="contrib">← Đóng góp</button><span></span>
+      ${resultFinalButtonsHTML()}</div>`;
 }
 
 function resultMainHTML(g, won, team) {
   const names = { Sheriff: 'Sheriff & Deputy', Outlaw: 'Outlaw', Renegade: 'Renegade' };
-  return `<h2 id="resultHeadline" class="result-headline">${won ? 'CHIẾN THẮNG' : 'THUA CUỘC'}</h2>
+  return `<h2 id="resultHeadline" class="result-headline">${!g.me ? 'KẾT QUẢ VÁN ĐẤU' : won ? 'CHIẾN THẮNG' : 'THUA CUỘC'}</h2>
     <div class="result-emblem" aria-hidden="true"><span></span><img src="/result-revolvers.svg" alt=""><span></span></div>
     <p id="resultSummary" class="result-summary">Phe ${names[g.winner]} chiến thắng!</p>
     <div class="result-team">${team.map((p) => `<div class="result-member ${p.name === ME ? 'result-you' : ''}">
@@ -1306,7 +2011,7 @@ function fitMatchResult(dialog) {
   }
 }
 
-// Màn kết thúc: ① Kết quả → Tiếp tục → ② Danh hiệu → Tiếp tục → ③ Thống kê
+// Màn kết thúc: ① Kết quả → ② Danh hiệu → ③ Diễn biến → ④ Đóng góp → ⑤ Thống kê (nút Tiếp tục đi lần lượt)
 function renderMatchResult(g) {
   if (!g.winner || ui.resultDismissed || $('#matchResult')) return;
   const me = g.players.find((p) => p.name === ME);
@@ -1332,9 +2037,19 @@ function renderMatchResult(g) {
   const show = (step) => {
     ui.resultStep = step;
     dialog.dataset.step = step;
-    const html = step === 'awards' ? resultAwardsHTML(g, won) : step === 'stats' ? resultStatsHTML(g, won) : resultMainHTML(g, won, team);
+    const render = { awards: resultAwardsHTML, timeline: resultTimelineHTML, contrib: resultContribHTML, stats: resultStatsHTML }[step];
+    const html = render ? render(g, won) : resultMainHTML(g, won, team);
     dialog.innerHTML = `<div class="result-frame step-${step}"><div class="result-body">${html}</div></div>`;
     dialog.scrollTop = 0;
+    // Diễn biến: bấm số trên biểu đồ → cuộn tới diễn biến tương ứng trong danh sách
+    dialog.querySelectorAll('.tl-mk').forEach((mk) => {
+      mk.onclick = () => {
+        const ev = dialog.querySelector(`#tlEv${mk.dataset.ev}`);
+        dialog.querySelectorAll('.tl-ev.hl').forEach((e) => e.classList.remove('hl'));
+        ev?.classList.add('hl');
+        ev?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+      };
+    });
     dialog.querySelectorAll('[data-step]').forEach((b) => { b.onclick = () => show(b.dataset.step); });
     const close = dialog.querySelector('[data-close]');
     if (close) close.onclick = dismiss;
@@ -1407,8 +2122,11 @@ function animatePlayedCard(card, origin, action, player) {
 }
 
 function bindGame(g, meIdx, meP, canPlay, myPrompt) {
+  if (!g.me) return;
   const main = $('#mainArea');
   const pend = g.pending;
+  const infoBtn = $('#meInfoToggle');
+  if (infoBtn) infoBtn.onclick = () => { ui.meInfo = !ui.meInfo; renderGame(); };
 
   main.querySelectorAll('#hand .card').forEach((el) => el.onclick = run(async () => {
     const id = Number(el.dataset.card);
@@ -1426,6 +2144,21 @@ function bindGame(g, meIdx, meP, canPlay, myPrompt) {
       return sendAction({ type: 'respond', cardId: id });
     }
     if (!canPlay) return toast(myPrompt ? 'Hãy xử lý yêu cầu ở giữa bàn trước.' : 'Chưa đến lượt bạn.');
+    if (ui.mode?.kind === 'cost') {
+      const cardId = ui.mode.cardId;
+      if (id === cardId) { ui.mode = null; return renderGame(); }
+      const paidCard = g.me.hand.find((card) => card.id === cardId);
+      if (cardInfo(paidCard).effect === 'discardAll') {
+        ui.mode = { kind: 'brawl', cardId, costCardId: id, choices: new Map() };
+        return renderGame();
+      }
+      if (targetFilter(paidCard, g, meP)) {
+        ui.mode = { kind: 'target', cardId, costCardId: id };
+        return renderGame();
+      }
+      ui.mode = null;
+      return sendAction({ type: 'play', cardId, costCardId: id });
+    }
     if (ui.mode?.kind === 'target' && ui.mode.cardId === id) { ui.mode = null; return renderGame(); }
     if (!isClickable(c, g, meP)) {
       const nm = effectiveName(c, meP);
@@ -1434,7 +2167,12 @@ function bindGame(g, meIdx, meP, canPlay, myPrompt) {
       if (nm === 'Beer') return toast('Không dùng Beer được lúc này.');
       return toast('Không dùng được lá này lúc này.');
     }
-    if (targetFilter(c, g, meP)) { ui.mode = { kind: 'target', cardId: id }; return renderGame(); }
+    if (cardInfo(c).discardCost) { ui.mode = { kind: 'cost', cardId: id }; return renderGame(); }
+    if (targetFilter(c, g, meP)) {
+      if (c.name === 'Bang') gameAudio.play('bangload');
+      ui.mode = { kind: 'target', cardId: id };
+      return renderGame();
+    }
     ui.mode = null;
     await sendAction({ type: 'play', cardId: id });
   }));
@@ -1459,12 +2197,13 @@ function bindGame(g, meIdx, meP, canPlay, myPrompt) {
     if (!tf || !tf(p)) return toast('Không chọn được người này.');
     const nm = effectiveName(card, meP);
     const type = ui.mode.activate ? 'activate' : 'play';
+    const costCardId = ui.mode.costCardId;
     if (nm === 'Panic' || nm === 'Cat Balou' || ['take', 'discard'].includes(cardInfo(card).effect)) {
-      if (!p.eq.length) { ui.mode = null; return sendAction({ type, cardId: card.id, target: p.name, targetCard: 'hand' }); }
-      return chooseTargetCard(card, p, type);
+      if (!p.eq.length) { ui.mode = null; return sendAction({ type, cardId: card.id, costCardId, target: p.name, targetCard: 'hand' }); }
+      return chooseTargetCard(card, p, type, costCardId);
     }
     ui.mode = null;
-    await sendAction({ type, cardId: card.id, target: p.name });
+    await sendAction({ type, cardId: card.id, costCardId, target: p.name });
   }));
 
   const deckEl = main.querySelector('#deck.ready');
@@ -1475,10 +2214,6 @@ function bindGame(g, meIdx, meP, canPlay, myPrompt) {
   const discardEl = main.querySelector('#discardPile.draw-source');
   if (discardEl) discardEl.onclick = run(() => sendAction({ type: 'drawChoice', from: 'discard' }));
 
-  main.querySelectorAll('#storeCards .card').forEach((el) => el.onclick = run(async () => {
-    if (!myPrompt) return;
-    await sendAction({ type: 'pick', cardId: Number(el.dataset.card) });
-  }));
   main.querySelectorAll('#kitCards .kit-choice').forEach((el) => el.onclick = () => {
     if (!myPrompt || pend.type !== 'kit') return;
     const id = Number(el.dataset.kitId);
@@ -1486,10 +2221,20 @@ function bindGame(g, meIdx, meP, canPlay, myPrompt) {
     else if (ui.selected.length < 2) ui.selected.push(id);
     renderGame();
   });
+  main.querySelectorAll('[data-brawl-target]').forEach((el) => el.onchange = () => {
+    if (ui.mode?.kind === 'brawl') ui.mode.choices.set(el.dataset.brawlTarget, el.value);
+  });
 
   main.querySelectorAll('[data-act]').forEach((el) => el.onclick = run(async (event) => {
     const act = el.dataset.act;
     if (act === 'cancel') { ui.mode = null; ui.selected = []; return renderGame(); }
+    if (act === 'confirmBrawl' && ui.mode?.kind === 'brawl') {
+      const { cardId, costCardId } = ui.mode;
+      const targets = [...main.querySelectorAll('[data-brawl-target]')].map((select) => ({
+        target: select.dataset.brawlTarget, targetCard: select.value === 'hand' ? 'hand' : Number(select.value),
+      }));
+      return sendAction({ type: 'play', cardId, costCardId, targets });
+    }
     if (act === 'discardMode') { ui.mode = { kind: 'discard' }; ui.selected = []; return renderGame(); }
     if (act === 'sidMode') { ui.mode = { kind: 'sid' }; ui.selected = []; return renderGame(); }
     if (act === 'skill') {
@@ -1532,7 +2277,7 @@ function bindGame(g, meIdx, meP, canPlay, myPrompt) {
   }));
 }
 
-function chooseTargetCard(card, p, type) {
+function chooseTargetCard(card, p, type, costCardId) {
   const modal = $('#modal');
   modal.innerHTML = `<div class="panel"><h3>${esc(card.name)}: chọn lá của ${esc(p.name)}</h3>
     <div class="row">
@@ -1548,7 +2293,7 @@ function chooseTargetCard(card, p, type) {
     modal.classList.add('hidden');
     if (b.dataset.tc === 'cancel') return;
     ui.mode = null;
-    await sendAction({ type, cardId: card.id, target: p.name, targetCard: b.dataset.tc === 'hand' ? 'hand' : Number(b.dataset.tc) });
+    await sendAction({ type, cardId: card.id, costCardId, target: p.name, targetCard: b.dataset.tc === 'hand' ? 'hand' : Number(b.dataset.tc) });
   }));
 }
 

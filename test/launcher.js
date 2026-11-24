@@ -12,10 +12,10 @@ test('Windows launcher starts current source, recognizes an existing server, and
   skip: process.platform !== 'win32', timeout: 30000,
 }, async () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'bang-launcher with spaces-'));
-  const files = ['server.js', 'game.js', 'room-timer.js', 'room-pause.js'];
+  const files = ['server.js', 'game.js', 'power.js', 'room-timer.js', 'room-pause.js', 'room-bots.js'];
   for (const file of files) fs.copyFileSync(path.join(__dirname, '..', file), path.join(root, file));
-  const greenCardsFile = path.join(root, 'green-cards.json');
-  fs.copyFileSync(path.join(__dirname, '../green-cards.json'), greenCardsFile);
+  const dodgeCityFile = path.join(root, 'dodge-city.json');
+  fs.copyFileSync(path.join(__dirname, '../dodge-city.json'), dodgeCityFile);
   fs.mkdirSync(path.join(root, 'tools'));
   fs.copyFileSync(path.join(__dirname, '../tools/start.ps1'), path.join(root, 'tools/start.ps1'));
   const probe = net.createServer();
@@ -26,6 +26,7 @@ test('Windows launcher starts current source, recognizes an existing server, and
     '-NoBrowser', '-SkipFirewall', '-Port', String(port)];
   const env = { ...process.env };
   delete env.BANG_GREEN_CARDS_FILE;
+  delete env.BANG_DODGE_CITY_FILE;
   const child = spawn('powershell.exe', args, { env, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] });
   let output = '', serverPid;
   child.stdout.on('data', (chunk) => { output += chunk; });
@@ -47,9 +48,11 @@ test('Windows launcher starts current source, recognizes an existing server, and
     assert.equal(health.pid, serverPid);
     assert.equal(health.revision, revision);
     assert.equal(health.greenCardCount, 14);
-    assert.equal(health.greenCardsRevision, crypto.createHash('sha256').update(fs.readFileSync(greenCardsFile)).digest('hex'));
+    assert.equal(health.dodgeCityCardCount, 34);
+    assert.equal(health.greenCardsRevision, crypto.createHash('sha256').update(fs.readFileSync(dodgeCityFile)).digest('hex'));
     const meta = await (await fetch(`http://127.0.0.1:${port}/api/meta`)).json();
     assert.equal(meta.greenCardCount, 14);
+    assert.equal(meta.dodgeCityCardCount, 34);
     assert.equal(meta.cards.Bible.type, 'green');
     assert.equal(Object.keys(meta.chars).length, 31);
     const cookies = [];
@@ -77,19 +80,19 @@ test('Windows launcher starts current source, recognizes an existing server, and
     const room = JSON.parse(event.split('\n\n')[0].slice(6)).room;
     assert.equal(room.dodgeCity, true);
     const g = room.game;
-    assert.equal(g.deckCount + g.players.reduce((sum, p) => sum + p.handCount + p.eq.length, 0), 94);
+    assert.equal(g.deckCount + g.players.reduce((sum, p) => sum + p.handCount + p.eq.length, 0), 114);
     const reused = spawnSync('powershell.exe', args, { env, windowsHide: true, encoding: 'utf8', timeout: 8000 });
     assert.equal(reused.status, 0, reused.stdout + reused.stderr);
     assert.match(reused.stdout, /Server đang chạy ở cửa sổ khác/u);
     const customCardsFile = path.join(root, 'custom cards.json');
-    fs.copyFileSync(greenCardsFile, customCardsFile);
+    fs.copyFileSync(dodgeCityFile, customCardsFile);
     const custom = spawnSync('powershell.exe', [...args, '-CheckOnly'], {
       env: { ...env, BANG_GREEN_CARDS_FILE: customCardsFile }, windowsHide: true, encoding: 'utf8', timeout: 8000,
     });
     assert.equal(custom.status, 0, custom.stdout + custom.stderr);
     assert.ok(custom.stdout.includes(customCardsFile));
     assert.match(custom.stdout, /Server đã nạp dữ liệu Dodge City mới nhất: True/u);
-    fs.appendFileSync(greenCardsFile, '\n');
+    fs.appendFileSync(dodgeCityFile, '\n');
     const staleData = spawnSync('powershell.exe', [...args, '-CheckOnly'], { env, windowsHide: true, encoding: 'utf8', timeout: 8000 });
     assert.equal(staleData.status, 0, staleData.stdout + staleData.stderr);
     assert.match(staleData.stdout, /Server đã nạp mã mới nhất: True/u);
@@ -108,7 +111,7 @@ test('Windows launcher starts current source, recognizes an existing server, and
     fs.writeFileSync(path.join(root, 'game.js'), 'module.exports = {};\n');
     const unsupported = spawnSync('powershell.exe', [...args, '-CheckOnly'], { env, windowsHide: true, encoding: 'utf8', timeout: 5000 });
     assert.equal(unsupported.status, 1, unsupported.stdout + unsupported.stderr);
-    assert.match(unsupported.stdout, /Game chưa nạp đủ 14 lá Dodge City/u);
+    assert.match(unsupported.stdout, /Game chưa nạp dữ liệu Dodge City/u);
   } finally {
     if (serverPid) { try { process.kill(serverPid); } catch {} }
     child.kill();

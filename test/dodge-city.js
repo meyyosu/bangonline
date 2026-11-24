@@ -1,14 +1,37 @@
 'use strict';
 const assert = require('node:assert/strict');
-const { join } = require('node:path');
 const { test } = require('node:test');
 
-process.env.BANG_GREEN_CARDS_FILE = join(__dirname, '..', 'green-cards.json');
+delete process.env.BANG_DODGE_CITY_FILE;
+delete process.env.BANG_GREEN_CARDS_FILE;
 const { Game, GameError, CARD_INFO, CHAR_INFO } = require('../game');
 const { syncTimer, tickTimer } = require('../room-timer');
 
 const names = ['Alice', 'Bobby', 'Carol', 'David', 'Elena'];
 const makeGame = (opts) => new Game(names, { rng: () => 0.4, dodgeCity: true, ...opts });
+
+test('only Dodge City accepts eight players and only the surviving Renegade wins', () => {
+  const eight = [...names, 'Frank', 'Grace', 'Henry'];
+  assert.throws(() => new Game(eight), /4–7/);
+  assert.throws(() => new Game([...eight, 'Irene'], { dodgeCity: true }), /4–8/);
+  const g = new Game(eight, { dodgeCity: true, characterChoices: 4 });
+  while (g.phase === 'character') g.timeout();
+  assert.equal(new Set(g.players.map((p) => p.char)).size, 8);
+  assert.deepEqual(g.players.reduce((counts, p) => {
+    counts[p.role] = (counts[p.role] || 0) + 1;
+    return counts;
+  }, {}), { Sheriff: 1, Deputy: 2, Outlaw: 3, Renegade: 2 });
+  assertDeck(g);
+  const renegades = g.players.filter((p) => p.role === 'Renegade');
+  for (const p of g.players) p.alive = renegades.includes(p);
+  g.checkWin();
+  assert.equal(g.winner, 'Outlaw');
+  renegades[0].alive = false;
+  g.checkWin();
+  assert.equal(g.winner, 'Renegade');
+  assert.equal(g.isWinner(renegades[0]), false);
+  assert.equal(g.isWinner(renegades[1]), true);
+});
 
 function setup(skill) {
   const g = makeGame();
@@ -46,8 +69,8 @@ function play(g, p, name, target, suit) {
 function assertDeck(g) {
   const cards = [...g.deck, ...g.discard, ...g.players.flatMap((p) => [...p.hand, ...p.eq]),
     ...(g.pending?.cards || []), ...g.queue.flatMap((step) => step.cards || [])];
-  assert.equal(cards.length, 94);
-  assert.equal(new Set(cards.map((c) => c.id)).size, 94);
+  assert.equal(cards.length, 114);
+  assert.equal(new Set(cards.map((c) => c.id)).size, 114);
 }
 
 test('Dodge City adds 15 characters only to the expansion pool', () => {
@@ -56,7 +79,7 @@ test('Dodge City adds 15 characters only to the expansion pool', () => {
   assert.equal(regular.characterPool.length, 16);
   assert.equal(regular.deck.length, 80);
   assert.equal(expansion.characterPool.length, 31);
-  assert.equal(expansion.deck.length, 94);
+  assert.equal(expansion.deck.length, 114);
   assert.ok(expansion.characterPool.includes('Vera Custer'));
   assert.ok(expansion.characterPool.includes('Apache Kid'));
   assert.ok(!regular.characterPool.includes('Vera Custer'));
@@ -64,6 +87,191 @@ test('Dodge City adds 15 characters only to the expansion pool', () => {
   assert.equal(new Set(expansion.players.map((p) => p.char)).size, names.length);
   for (const p of expansion.players) assert.equal(p.hp, CHAR_INFO[p.char].hp + Number(p.role === 'Sheriff'));
   assertDeck(expansion);
+});
+
+test('Dodge City appends distinct name, rank and suit copies without changing the base deck', () => {
+  const base = makeGame({ dodgeCity: false, characterChoices: 4 }).fullDeck;
+  const expanded = makeGame({ characterChoices: 4 }).fullDeck;
+  assert.deepEqual(expanded.slice(0, 80), base);
+  const extra = expanded.slice(80);
+  const actual = extra.filter((c) => CARD_INFO[c.name].type !== 'green').map((c) => `${c.name} ${c.rank}${c.suit}`).sort();
+  assert.deepEqual(actual, [
+    'Bang 8S', 'Barrel AC', 'Binocular 10D', 'Brawl JS', 'Cat Balou 8C', 'Dodge 7D', 'Dodge KH', 'Dynamite 10C',
+    'General Store AS', 'Hideout KD', 'Indians 5D', 'Missed 8D', 'Mustang 5H', 'Punch 10S', 'Rag Time 9H',
+    'Remington 6D', 'Rev. Carabine 5S', 'Springfield KS', 'Tequila 9C', 'Whisky QH',
+  ].sort());
+  const key = (c) => `${c.name} ${c.rank}${c.suit}`;
+  assert.equal(new Set(extra.map(key)).size, 34);
+  assert.ok(extra.every((c) => !base.some((b) => key(b) === key(c))));
+  assert.equal(extra.filter((c) => c.name === 'Bible' && c.rank === '10' && c.suit === 'H').length, 1);
+  assert.deepEqual(extra.filter((c) => c.name === 'Iron Plate').map(key).sort(), ['Iron Plate AD', 'Iron Plate QS']);
+});
+
+test('Rag Time and Springfield require a distinct hand cost and reach across the table', () => {
+  const { g, p, distant } = setup('Slab the Killer');
+  g.timeout();
+  const barrel = equip(g, distant, 'Barrel');
+  const rag = deal(g, p, 'Rag Time');
+  const rifle = deal(g, p, 'Springfield');
+  const cost = deal(g, p, 'Beer');
+  const ragAction = { type: 'play', cardId: rag.id, target: distant.name, targetCard: barrel.id };
+  assert.throws(() => g.act(p.name, { ...ragAction, costCardId: rag.id }), GameError);
+  assert.throws(() => g.act(p.name, { ...ragAction, costCardId: cost.id, targetCard: -1 }), GameError);
+  assert.ok(p.hand.includes(rag) && p.hand.includes(cost));
+  g.act(p.name, { ...ragAction, costCardId: cost.id });
+  assert.ok(p.hand.includes(barrel));
+  assert.ok(!distant.eq.includes(barrel));
+  g.bangsPlayed = 1;
+  g.act(p.name, { type: 'play', cardId: rifle.id, costCardId: barrel.id, target: distant.name });
+  assert.equal(g.pending.player, g.idx(distant.name));
+  assert.equal(g.pending.need, 1);
+  assert.equal(g.bangsPlayed, 1);
+  assertDeck(g);
+});
+
+test('Brawl validates all choices before consuming cards and skips a player with no cards', () => {
+  const { g, p, adjacent, distant } = setup('Willy the Kid');
+  g.timeout();
+  const brawl = deal(g, p, 'Brawl');
+  const cost = deal(g, p, 'Beer');
+  const barrel = equip(g, adjacent, 'Barrel');
+  const empty = g.players.find((q) => q !== p && q !== adjacent && q !== distant);
+  g.deck.push(...empty.hand.splice(0));
+  const targets = g.players.filter((q) => q !== p && q !== empty).map((q) => ({ target: q.name, targetCard: q === adjacent ? barrel.id : 'hand' }));
+  const action = { type: 'play', cardId: brawl.id, costCardId: cost.id, targets };
+  const before = g.players.map((q) => q.hand.length + q.eq.length);
+  const soundBefore = g.soundSeq;
+  assert.throws(() => g.act(p.name, { ...action, targets: [targets[0], ...targets.slice(0, -1)] }), GameError);
+  assert.deepEqual(g.players.map((q) => q.hand.length + q.eq.length), before);
+  g.act(p.name, action);
+  assert.equal(g.soundSeq, soundBefore);
+  assert.ok(g.discard.includes(barrel));
+  assert.deepEqual(g.players.map((q, i) => before[i] - q.hand.length - q.eq.length), g.players.map((q) => q === p ? 2 : q === empty ? 0 : 1));
+  assertDeck(g);
+});
+
+test('Dodge draws after the shot and Molly cannot use the draw to finish the same defense', () => {
+  const { g, p, adjacent: molly } = setup('Slab the Killer');
+  molly.char = 'Molly Stark';
+  g.timeout();
+  const dodge = deal(g, molly, 'Dodge', 'D');
+  const second = deal(g, molly, 'Dodge', 'H');
+  const top = deal(g, p, 'Missed');
+  g.deck.push(g.takeFromHand(p, top.id));
+  play(g, p, 'Bang', molly, 'C');
+  const before = molly.hand.length;
+  g.act(molly.name, { type: 'respond', cardId: dodge.id });
+  assert.equal(molly.hand.length, before - 1);
+  assert.ok(!g.viewFor(molly.name).pending.responseCardIds.includes(top.id));
+  g.act(molly.name, { type: 'respond', cardId: second.id });
+  assert.equal(g.pending, null);
+  assert.equal(molly.hand.length, before + 2);
+  assertDeck(g);
+});
+
+test('Tequila heals someone else and Whisky heals its owner without exceeding max HP', () => {
+  const { g, p, distant } = setup('Tequila Joe');
+  g.timeout();
+  const tequila = deal(g, p, 'Tequila');
+  const whisky = deal(g, p, 'Whisky');
+  const cost = [deal(g, p, 'Bang', 'C'), deal(g, p, 'Bang', 'D')];
+  p.hp = p.maxHp - 1;
+  distant.hp = distant.maxHp - 2;
+  const heal = { type: 'play', cardId: tequila.id, costCardId: cost[0].id };
+  assert.throws(() => g.act(p.name, { ...heal, target: p.name }), GameError);
+  g.act(p.name, { ...heal, target: distant.name });
+  assert.equal(distant.hp, distant.maxHp - 1);
+  g.act(p.name, { type: 'play', cardId: whisky.id, costCardId: cost[1].id });
+  assert.equal(p.hp, p.maxHp);
+  assertDeck(g);
+});
+
+test('Punch uses distance one and existing defenses, and distance equipment stacks', () => {
+  const { g, p, adjacent, distant } = setup('Slab the Killer');
+  g.timeout();
+  const punch = deal(g, p, 'Punch');
+  const missed = deal(g, adjacent, 'Missed');
+  equip(g, adjacent, 'Barrel');
+  assert.throws(() => g.act(p.name, { type: 'play', cardId: punch.id, target: distant.name }), GameError);
+  g.act(p.name, { type: 'play', cardId: punch.id, target: adjacent.name });
+  assert.equal(g.pending.need, 1);
+  assert.equal(g.pending.barrels, 1);
+  g.act(adjacent.name, { type: 'respond', cardId: missed.id });
+  assert.equal(g.bangsPlayed, 0);
+  equip(g, distant, 'Hideout');
+  equip(g, distant, 'Mustang');
+  assert.equal(g.distance(g.turn, g.idx(distant.name)), 4);
+  equip(g, p, 'Binocular');
+  equip(g, p, 'Scope');
+  assert.equal(g.distance(g.turn, g.idx(distant.name)), 2);
+  assertDeck(g);
+});
+
+test('a safe Dynamite passes over a player who already has one', () => {
+  const { g, p, adjacent, distant } = setup('Willy the Kid');
+  const original = equip(g, p, 'Dynamite');
+  const second = equip(g, adjacent, 'Dynamite');
+  const heart = deal(g, p, 'Bang', 'H');
+  g.deck.push(g.takeFromHand(p, heart.id));
+  g.startTurn();
+  assert.equal(g.pending.kind, 'Dynamite');
+  g.timeout();
+  assert.ok(!p.eq.includes(original));
+  assert.deepEqual(adjacent.eq, [second]);
+  assert.ok(distant.eq.includes(original));
+  assert.equal(g.pending.type, 'draw');
+  assert.deepEqual(g.viewFor(p.name).sounds.at(-1).files, ['dynamitearmed']);
+  assertDeck(g);
+});
+
+test('confirmed Bang attacks alternate audio, responses use a dodge cue, and turn audio stays private', () => {
+  const { g, p, adjacent } = setup('Willy the Kid');
+  assert.deepEqual(g.viewFor(p.name).sounds.at(-1).files, ['yourturn1']);
+  assert.ok(!g.viewFor(adjacent.name).sounds.some((cue) => cue.files.includes('yourturn1')));
+  g.timeout();
+  const first = deal(g, p, 'Bang', 'C');
+  const second = deal(g, p, 'Bang', 'H');
+  const missed = deal(g, adjacent, 'Missed');
+  const before = g.soundSeq;
+  assert.throws(() => g.act(p.name, { type: 'play', cardId: first.id, target: p.name }), GameError);
+  assert.equal(g.soundSeq, before);
+  g.act(p.name, { type: 'play', cardId: first.id, target: adjacent.name });
+  g.act(adjacent.name, { type: 'respond', cardId: missed.id });
+  g.act(p.name, { type: 'play', cardId: second.id, target: adjacent.name });
+  assert.deepEqual(g.viewFor(adjacent.name).sounds.map((cue) => cue.files), [['bangsound1'], ['missedsound1'], ['bangsound2']]);
+  assertDeck(g);
+});
+
+test('Indians plays one sound for everyone as the Bang responses begin', () => {
+  const { g, p, adjacent, distant } = setup('Willy the Kid');
+  g.timeout();
+  const response = deal(g, adjacent, 'Bang');
+  const before = g.soundSeq;
+  play(g, p, 'Indians');
+  assert.equal(g.pending.type, 'indians');
+  assert.equal(g.pending.player, g.idx(adjacent.name));
+  assert.equal(g.soundSeq, before + 1);
+
+  g.act(adjacent.name, { type: 'respond', cardId: response.id });
+  assert.equal(g.pending.player, g.idx(distant.name));
+  g.act(distant.name, { type: 'take' });
+  for (const player of g.players) {
+    const cues = g.viewFor(player.name).sounds.filter((cue) => cue.seq > before);
+    assert.deepEqual(cues, [{ seq: before + 1, files: ['indian1'] }]);
+  }
+  assertDeck(g);
+});
+
+test('an Outlaw bounty appends its sound after the elimination cue', () => {
+  for (const rewarded of [true, false]) {
+    const { g, p } = setup('Willy the Kid');
+    const outlaw = g.players.find((q) => q.role === 'Outlaw');
+    const before = p.hand.length;
+    g.kill(g.idx(outlaw.name), rewarded ? g.idx(p.name) : null);
+    assert.equal(p.hand.length - before, rewarded ? 3 : 0);
+    assert.deepEqual(g.viewFor(p.name).sounds.at(-1).files, rewarded ? ['playereliminated', 'outlawkilled1'] : ['playereliminated']);
+    assertDeck(g);
+  }
 });
 
 test('Apache Kid ignores diamonds aimed at him, including group attacks, except Duel', () => {
@@ -273,8 +481,22 @@ test('Pat Brennan takes equipment from any seat including his own', () => {
     assert.equal(p.hand.length, before + 1);
     assert.ok(p.hand.includes(card));
     assert.equal(target.eq.length, 0);
+    assert.throws(() => g.act(p.name, { type: 'drawChoice', from: 'deck' }), GameError);
     assertDeck(g);
   }
+});
+
+test('Pat Brennan can draw two from the deck even when equipment is available', () => {
+  const { g, p, distant } = setup('Pat Brennan');
+  const card = equip(g, distant, 'Barrel');
+  g.startTurn();
+  assert.deepEqual(g.pending.options, ['deck', 'equipment']);
+  const before = p.hand.length;
+  g.act(p.name, { type: 'drawChoice', from: 'deck' });
+  assert.equal(p.hand.length, before + 2);
+  assert.ok(distant.eq.includes(card));
+  assert.equal(g.phase, 'play');
+  assertDeck(g);
 });
 
 test('Sean Mallory can keep 10 at end of turn, including on timeout', () => {
