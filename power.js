@@ -177,4 +177,58 @@ function balance(g, cardInfo = CARD_INFO) {
   return law + out ? (law - out) / (law + out) : 0;
 }
 
-module.exports = { W, CARD, strength, balance };
+// ---------- Tỉ lệ thắng 3 phe (Luật pháp / Outlaw / Renegade) ----------
+// Hồi quy logistic 3 lớp trên trạng thái bàn (ps[i] = [máu, còn sống, sức mạnh, trang bị] như game.powerState).
+// Trọng số học từ 4000 ván bot ngẫu nhiên: node drafts/ty-le-thang-hoc.js → drafts/ty-le-thang-trong-so.json (chép vào đây).
+// Phân tích độ chuẩn: node drafts/ty-le-thang-phan-tich.js
+const WIN_MODEL = {
+  prior: { // tỉ lệ thắng gốc theo số người
+    4: { law: 0.533, out: 0.384, ren: 0.083 }, 5: { law: 0.441, out: 0.488, ren: 0.071 },
+    6: { law: 0.414, out: 0.537, ren: 0.049 }, 7: { law: 0.384, out: 0.573, ren: 0.043 },
+  },
+  // đặc trưng: hằng số, rL, rO, rR, shHpF, shRel, lawA, outA, renA, aliveFrac, renLate, ln(gốc L/O), ln(gốc R/O)
+  W: {
+    law: [-0.2894, 0.799, -1.2863, -1.2771, 0.5998, 1.6166, -0.5207, 0.5591, 0.2629, -0.2015, -0.7085, 0.4074, -0.1606],
+    out: [0.4512, -0.1028, 2.7049, -0.6557, -0.7392, -1.8922, 0.7771, -0.7026, -0.1011, 0.3953, 0.6765, -0.4404, -0.3684],
+    ren: [-0.1618, -0.6962, -1.4187, 1.9328, 0.1394, 0.2757, -0.2564, 0.1436, -0.1618, -0.1938, 0.032, 0.0329, 0.5289],
+  },
+};
+const WIN_FACS = ['law', 'out', 'ren'];
+
+// Ván đã ngã ngũ theo luật Bang! chưa (theo danh sách còn sống)? → 'law' | 'out' | 'ren' | null
+function decidedWinner(alive, roles) {
+  const has = (f) => alive.some((a, i) => a && FACTION[roles[i]] === f);
+  if (!alive[roles.indexOf('Sheriff')]) return alive.filter(Boolean).length === 1 && has('ren') ? 'ren' : 'out';
+  return !has('out') && !has('ren') ? 'law' : null;
+}
+
+// Xác suất thắng của 3 phe ở trạng thái ps (start = ps đầu ván, maxHp theo người)
+function winProb(ps, start, roles, maxHp) {
+  const done = decidedWinner(ps.map((x) => x[1]), roles);
+  if (done) return { law: +(done === 'law'), out: +(done === 'out'), ren: +(done === 'ren') };
+  const n = roles.length, sh = roles.indexOf('Sheriff');
+  const st = { law: 0, out: 0, ren: 0 }, s0 = { law: 0, out: 0, ren: 0 }, alive = { law: 0, out: 0, ren: 0 }, cnt = { law: 0, out: 0, ren: 0 };
+  ps.forEach((x, i) => { const f = FACTION[roles[i]]; st[f] += x[2]; s0[f] += start[i][2]; alive[f] += x[1]; cnt[f]++; });
+  const aliveFrac = ps.filter((x) => x[1]).length / n, renA = alive.ren > 0 ? 1 : 0;
+  const pr = WIN_MODEL.prior[Math.min(7, Math.max(4, n))];
+  const x = [1, st.law / (s0.law || 1), st.out / (s0.out || 1), cnt.ren ? st.ren / (s0.ren || 1) : 0,
+    ps[sh][0] / (maxHp[sh] || 1), ps[sh][2] / (start[sh][2] || 1), alive.law / cnt.law, cnt.out ? alive.out / cnt.out : 0,
+    renA, aliveFrac, renA * (1 - aliveFrac), Math.log(pr.law / pr.out), Math.log(pr.ren / pr.out)];
+  // phe hết người thì không thể thắng: loại khỏi softmax
+  const ok = { law: true, out: alive.out > 0, ren: renA > 0 };
+  const z = WIN_FACS.map((f) => WIN_MODEL.W[f].reduce((a, w, j) => a + w * x[j], 0));
+  const m = Math.max(...z), e = z.map((v, k) => (ok[WIN_FACS[k]] ? Math.exp(v - m) : 0)), s = e[0] + e[1] + e[2];
+  return { law: e[0] / s, out: e[1] / s, ren: e[2] / s };
+}
+
+// Trạng thái giả định "người i mất 1 máu" (dùng cho kịch bản Barrel ngược lại): sức mạnh trừ đúng giá trị
+// giọt máu đó (máu thứ 2: 1,2 · còn lại 1; Sheriff ×1,5); còn 1 máu thì gục.
+function hurtState(ps, i, roles) {
+  const q = ps.map((x) => [...x]), hp = q[i][0];
+  if (hp <= 1) { q[i] = [0, 0, 0, q[i][3]]; return q; }
+  q[i][0] = hp - 1;
+  q[i][2] = Math.max(0, q[i][2] - (hp === 2 ? W.hpSecond : W.hpRest) * (roles[i] === 'Sheriff' ? W.sheriff : 1));
+  return q;
+}
+
+module.exports = { W, CARD, strength, balance, WIN_MODEL, winProb, hurtState, decidedWinner };

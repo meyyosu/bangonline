@@ -22,7 +22,9 @@ const runtimeRevision = readRevision();
 // Giao diện dùng 2 thông tin này để cảnh báo trước khi chơi:
 // - SERVER_FEATURES: server cũ không gửi trường này → giao diện biết server chưa có thống kê/danh hiệu cuối ván.
 // - codeChanged: code trên ổ đĩa đã mới hơn code server đang chạy (cập nhật mà quên khởi động lại).
-const SERVER_FEATURES = ['endSummary'];
+// - freeReset: hết ván thì mọi người (không chỉ chủ phòng) đều đưa phòng về phòng chờ được.
+// - winProb3: timeline cuối ván có tỉ lệ thắng 3 phe từng hành động (tab Diễn biến mới).
+const SERVER_FEATURES = ['endSummary', 'freeReset', 'winProb3'];
 let codeChanged = false;
 setInterval(() => {
   try { codeChanged = readRevision() !== runtimeRevision; } catch { codeChanged = true; }
@@ -325,8 +327,10 @@ const server = http.createServer(async (req, res) => {
         r.status = 'playing';
         r.chat.push({ system: true, text: 'Ván đấu bắt đầu!' });
       } else if (sub === 'reset') {
-        if (r.host !== user) return err(res, 'Chỉ chủ phòng mới làm được.');
+        // Ván đã có người thắng: ai trong phòng cũng đưa phòng về phòng chờ được (người khác vẫn xem tiếp màn kết quả).
+        if (r.host !== user && !r.game?.winner) return err(res, 'Chỉ chủ phòng mới làm được.');
         if (r.status === 'playing' && !r.game?.winner) return err(res, 'Ván chưa kết thúc.');
+        if (r.game) r.chat.push({ system: true, text: `${user} đã đưa phòng về phòng chờ.` });
         r.game = null; r.status = 'waiting'; r.pause = null;
       } else if (sub === 'pause') {
         if (r.spectators.includes(user)) return err(res, 'Khán giả không thể yêu cầu hoặc biểu quyết tạm dừng.', 403);

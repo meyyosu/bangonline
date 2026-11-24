@@ -1,0 +1,51 @@
+﻿Đã chạy 4000 ván (34 giây), 759690 điểm.
+
+Tỉ lệ thắng gốc (bot ngẫu nhiên):
+  4 người: Luật pháp 53% · Outlaw 39% · Renegade 7%
+  5 người: Luật pháp 45% · Outlaw 48% · Renegade 7%
+  6 người: Luật pháp 41% · Outlaw 53% · Renegade 5%
+  7 người: Luật pháp 40% · Outlaw 56% · Renegade 4%
+
+=== Độ chuẩn trên tập test (thấp hơn = tốt hơn) ===
+  Chỉ tỉ lệ gốc (không nhìn bàn)     log-loss 0.872  Brier 0.546  đoán đúng phe thắng 54%
+  Công thức hiện tại (γ2, a.6, b2.5) log-loss 0.786  Brier 0.479  đoán đúng phe thắng 63%
+  Bỏ 2 điều chỉnh (γ2, a0, b0)       log-loss 0.797  Brier 0.491  đoán đúng phe thắng 61%
+
+Theo giai đoạn ván (log-loss: gốc → công thức):
+  đầu (0–25%)      0.872 → 0.859  (đoán đúng 55%)
+  giữa sớm         0.872 → 0.823  (đoán đúng 60%)
+  giữa muộn        0.872 → 0.784  (đoán đúng 63%)
+  cuối (75–100%)   0.872 → 0.675  (đoán đúng 73%)
+
+Hiệu chuẩn (công thức nói X% → thực tế thắng):
+  law   6%→10% 16%→17% 25%→23% 36%→33% 45%→43% 55%→52% 65%→60% 75%→68% 85%→82% 94%→92%
+  out   3%→12% 15%→25% 25%→35% 35%→39% 45%→48% 55%→58% 64%→69% 74%→79% 84%→84% 94%→93%
+  ren   4%→ 4% 14%→10% 24%→14% 34%→17% 45%→23% 55%→34% 65%→48% 75%→65% 84%→79% 94%→87%
+
+Hệ số tốt nhất trên train: γ=2, a=3, b=1
+  Công thức đã chỉnh (test)          log-loss 0.755  Brier 0.458  đoán đúng phe thắng 64%
+  Hiệu chuẩn công thức đã chỉnh (Renegade):
+  ren   4%→ 4% 14%→14% 24%→19% 34%→30% 45%→43% 54%→55% 65%→68% 74%→79% 85%→86% 92%→90%
+  Hồi quy logistic (test)            log-loss 0.730  Brier 0.439  đoán đúng phe thắng 66%
+  Hiệu chuẩn logistic (test):
+  law   6%→ 7% 15%→18% 25%→28% 35%→38% 45%→46% 55%→55% 65%→62% 75%→73% 84%→84% 93%→93%
+  out   2%→10% 15%→15% 25%→26% 35%→33% 45%→42% 55%→51% 65%→60% 75%→71% 85%→83% 93%→94%
+  ren   3%→ 4% 14%→15% 24%→29% 34%→37% 45%→42% 55%→56% 65%→73% 75%→80% 83%→89%    ·   
+  Trọng số (Luật pháp − Outlaw, lớn = đặc trưng đẩy về Luật pháp):
+   hằng số -1.02 · rL 1.17 · rO -4.03 · rR -0.53 · shHpF 1.33 · shRel 3.28 · lawA -1.28 · outA 1.15 · renA 0.34 · aliveFrac -0.61 · renLate -1.39 · gốc L/O 1.11 · gốc R/O 0.03
+  Trọng số (Renegade − Outlaw):
+   hằng số -0.72 · rL -0.36 · rO -4.32 · rR 2.64 · shHpF 0.92 · shRel 1.85 · lawA -0.92 · outA 0.75 · renA -0.04 · aliveFrac -0.54 · renLate -0.67 · gốc L/O 0.59 · gốc R/O 0.84
+
+Xác suất Luật pháp thay đổi trung bình mỗi hành động (logistic):
+  khác      260717 lần · TB 1.11 điểm % · chiếm 13% số cú nhảy > 5 điểm %
+  mất máu    43568 lần · TB 6.26 điểm % · chiếm 51% số cú nhảy > 5 điểm %
+  rút bài    53882 lần · TB 2.52 điểm % · chiếm 18% số cú nhảy > 5 điểm %
+  hồi máu    15526 lần · TB 4.49 điểm % · chiếm 11% số cú nhảy > 5 điểm %
+  chết        5294 lần · TB 6.55 điểm % · chiếm 7% số cú nhảy > 5 điểm %
+
+Câu hỏi cụ thể (tất cả ván):
+  Phe dẫn ở giữa ván (theo logistic) thắng 64% số ván
+  Sheriff từng xuống 1 máu: 61% số ván, phe Luật pháp vẫn thắng 16% (gốc 44%)
+  Hết Outlaw mà Renegade còn sống: 22% số ván → Renegade thắng 28%
+  Còn đúng Sheriff vs Renegade: 16% số ván → Renegade thắng 38%
+  Số lần đổi phe dẫn mỗi ván: trung vị 6, 90% ván ≤ 15

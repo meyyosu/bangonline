@@ -294,7 +294,8 @@ class Game {
       this.characterPool = chars;
       for (const p of this.players) { p.char = null; p.hp = 0; p.maxHp = 0; }
       this.phase = 'character';
-      this.offerCharacters(0);
+      // Sheriff (đã lộ vai trò) chọn trước, rồi lần lượt theo chiều lượt chơi.
+      this.offerCharacters(this.turn);
     } else this.beginGame();
   }
 
@@ -311,7 +312,8 @@ class Game {
     p.hp = p.maxHp;
     this.characterPool = this.characterPool.filter((c) => c !== character);
     this.addLog(`${p.name} đã chọn ${character}.`);
-    if (pi + 1 < this.players.length) this.offerCharacters(pi + 1);
+    const next = (pi + 1) % this.players.length;
+    if (next !== this.turn) this.offerCharacters(next);
     else {
       this.pending = null;
       this.characterPool = null;
@@ -1375,18 +1377,42 @@ class Game {
 
   // Gửi cho màn kết thúc: trạng thái từng người chỉ giữ ở điểm cuối mỗi lượt (đủ để tính "tác động" của lượt),
   // bỏ các dòng log thủ tục cho nhẹ.
+  // Kèm tỉ lệ thắng 3 phe mỗi điểm (w = [Luật pháp, Outlaw, Renegade], power.winProb), máu mọi người (h),
+  // và với mỗi lần rút Barrel: tỉ lệ thắng nếu Barrel ra ngược lại (cf = [[người, đỡ được?, law, out, ren]]) để đo hên/xui.
+  // Tính một lần khi hết ván rồi giữ lại (viewFor gọi lại nhiều lần).
   compactTimeline() {
     if (!this.timeline?.length) return null;
-    const boring = /^(— |.+ rút \d+ lá\.$|.+ kết thúc lượt\.$|.+ đã chọn |Chồng bài đã được xáo)/;
     const T = this.timeline;
-    return {
+    if (this._tlCompact && this._tlCompact.n === T.length) return this._tlCompact.v;
+    const boring = /^(— |.+ rút \d+ lá\.$|.+ kết thúc lượt\.$|.+ đã chọn |Chồng bài đã được xáo)/;
+    const roles = this.players.map((p) => p.role), maxHp = this.players.map((p) => p.maxHp);
+    const r3 = (v) => Math.round(v * 1000) / 1000;
+    const arr = (q) => [r3(q.law), r3(q.out), r3(q.ren)];
+    const prob = (ps) => power.winProb(ps, this.tlStart, roles, maxHp);
+    const fin = { law: +(this.winner === 'Sheriff'), out: +(this.winner === 'Outlaw'), ren: +(this.winner === 'Renegade') };
+    const v = {
       start: this.tlStart,
-      pts: T.map((p, k) => ({
-        t: p.t, r: p.r, o: p.o, a: p.a, b: p.b,
-        log: p.log.filter((l) => !boring.test(l)),
-        ...(k === T.length - 1 || T[k + 1].t !== p.t ? { ps: p.ps } : {}),
-      })),
+      w0: arr(prob(this.tlStart)),
+      pts: T.map((p, k) => {
+        const prev = k ? T[k - 1].ps : this.tlStart;
+        const cf = [];
+        for (const l of p.log) {
+          const m = l.match(/^(.+?) rút kiểm tra \(Barrel\): .+ → (thành công|thất bại)/);
+          if (!m) continue;
+          const i = this.idx(m[1]), ok = m[2] === 'thành công';
+          if (i >= 0) cf.push([i, ok ? 1 : 0, ...arr(ok ? prob(power.hurtState(p.ps, i, roles)) : prob(prev))]);
+        }
+        return {
+          t: p.t, r: p.r, o: p.o, a: p.a, b: p.b,
+          w: arr(k === T.length - 1 && this.winner ? fin : prob(p.ps)), h: p.ps.map((x) => x[0]),
+          ...(cf.length ? { cf } : {}),
+          log: p.log.filter((l) => !boring.test(l)),
+          ...(k === T.length - 1 || T[k + 1].t !== p.t ? { ps: p.ps } : {}),
+        };
+      }),
     };
+    if (this.winner) this._tlCompact = { n: T.length, v };
+    return v;
   }
 
   // 12 danh hiệu, mỗi cái tối đa 2 hạng (top 1, top 2). Bằng điểm thì chung một hạng.
