@@ -142,7 +142,7 @@ test('auto draw fires at five seconds; Kit then gets twenty seconds to choose', 
   }
 });
 
-test('Panic and Cat Balou publish transfers from hands and equipment without exposing stolen hands', () => {
+test('Panic and Cat Balou publish sounds and transfers without exposing stolen hands', () => {
   for (const name of ['Panic', 'Cat Balou']) {
     for (const zone of ['hand', 'eq']) {
       const g = game();
@@ -159,6 +159,7 @@ test('Panic and Cat Balou publish transfers from hands and equipment without exp
       }
       const equipment = target.eq[0];
       const before = g.transferSeq || 0;
+      const beforeSound = g.soundSeq;
       g.act(p.name, { type: 'play', cardId: card.id, target: target.name, targetCard: zone === 'hand' ? 'hand' : equipment.id });
       const event = g.viewFor(p.name).transfers.at(-1);
       assert.ok(event.seq > before);
@@ -172,6 +173,10 @@ test('Panic and Cat Balou publish transfers from hands and equipment without exp
       for (const viewer of [...names, null]) {
         const visible = g.viewFor(viewer).transfers.at(-1).cards[0];
         assert.equal(visible?.id ?? null, name === 'Panic' && zone === 'hand' && viewer !== p.name ? null : moved.id);
+        const cue = g.viewFor(viewer).sounds.at(-1);
+        assert.equal(cue.seq, beforeSound + 1);
+        assert.equal(cue.files.length, 1);
+        assert.match(cue.files[0], name === 'Panic' ? /^cardswap2?$/ : /^catbalou1$/);
       }
       assert.equal(count(g), 80);
     }
@@ -539,10 +544,16 @@ for (const dodgeCity of [false, true]) test(`room API protects settings and pass
     assert.equal((await request(4, url + '/leave', {})).status, 200);
     assert.equal((await view(0, code)).game.phase, 'character');
     for (let i = 0; i < 4; i++) {
-      const user = names.indexOf(room.game.players[room.game.pending.player].name);
+      const player = room.game.players[room.game.pending.player];
+      const user = names.indexOf(player.name);
       const own = await view(user, code);
-      assert.equal(own.game.pending.options.length, 4);
-      assert.equal((await request(user, url + '/action', { action: { type: 'chooseCharacter', character: own.game.pending.options[0] } })).status, 200);
+      const { options } = own.game.pending;
+      assert.equal(options.length, 4);
+      // This flow expects a deck draw of at least two cards and no pre-draw choice.
+      const character = player.role === 'Sheriff'
+        ? options.find((name) => name !== 'Bill Noface' && name !== 'Vera Custer')
+        : options[0];
+      assert.equal((await request(user, url + '/action', { action: { type: 'chooseCharacter', character } })).status, 200);
       room = await view(0, code);
     }
     assert.equal((await request(0, url + '/settings', { turnSeconds: 0 })).status, 400);
@@ -562,11 +573,13 @@ for (const dodgeCity of [false, true]) test(`room API protects settings and pass
     const handBefore = drawingView.game.me.hand.length;
     assert.equal((await request(drawingUser, url + '/action', { action: { type: 'drawChoice', from: 'deck' } })).status, 200);
     let drawn = await view(drawingUser, code);
+    let revealedCardId;
     if (drawn.game.pending?.type === 'kit') {
       assert.equal((await request(drawingUser, url + '/action', { action: { type: 'kit', cardIds: drawn.game.pending.cards.slice(0, 2).map((c) => c.id) } })).status, 200);
       drawn = await view(drawingUser, code);
     }
     if (drawn.game.pending?.type === 'blackJack') {
+      revealedCardId = drawn.game.pending.card.id;
       assert.equal(drawn.timer.seconds, 3);
       await new Promise((resolve) => setTimeout(resolve, 3300));
       drawn = await view(drawingUser, code);
@@ -582,7 +595,10 @@ for (const dodgeCity of [false, true]) test(`room API protects settings and pass
     assert.ok(publicRoom.spectators.includes('Watcher'));
     assert.ok(publicRoom.game.players.every((p) => !('hand' in p)));
     assert.equal(publicRoom.game.players.filter((p) => p.role).length, 1);
-    assert.ok(publicRoom.game.transfers.every((e) => e.from === 'discard' || e.cards.every((c) => c === null)));
+    const revealedCards = publicRoom.game.transfers.filter((e) => e.from === 'reveal').flatMap((e) => e.cards);
+    assert.deepEqual(revealedCards.map((c) => c?.id), revealedCardId === undefined ? [] : [revealedCardId]);
+    const privateTransfers = publicRoom.game.transfers.filter((e) => !['discard', 'reveal'].includes(e.from));
+    assert.ok(privateTransfers.every((e) => e.cards.every((c) => c === null)));
     assert.equal((await request(4, url + '/action', { action: { type: 'endTurn' } })).status, 403);
     assert.equal((await request(4, url + '/pause', { type: 'request' })).status, 403);
     assert.equal((await request(4, url + '/chat', { text: 'Watching!' })).status, 200);

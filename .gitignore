@@ -7,6 +7,9 @@ node_modules/
 !/data/sounds/dynamite_explode.wav
 /data/sounds/dynamite.mp3
 /data/sounds/emote_disappointed.mp3
+/data/sounds/hurt_g.mp3
+/data/sounds/hurtsound_g.mp3
+/data/sounds/Bullet Hit Metals - Sound effect(HD).mp3
 test/*.png
 node/
 node-tmp/

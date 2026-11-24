@@ -6,6 +6,7 @@ const os = require('node:os');
 const path = require('node:path');
 const net = require('node:net');
 const { spawn } = require('node:child_process');
+const { SOUND_FILES } = require('../game');
 
 const root = path.join(__dirname, '..');
 const localBrowsers = path.join(root, 'node-tmp', 'pw-browsers');
@@ -63,18 +64,19 @@ test('browser: lobby spectator and mid-game spectator follow the same live match
     }
     const [host, , , , lobby, late] = pages;
     // Decode the actual main assets and verify playback after a user gesture.
-    const soundFiles = fs.readdirSync(path.join(root, 'data', 'sounds')).filter((file) => file.endsWith('.mp3') && !['dynamite.mp3', 'emote_disappointed.mp3'].includes(file));
+    const soundFiles = [...SOUND_FILES];
     const durations = await host.evaluate(async (files) => {
       const audio = new AudioContext();
       try {
         return await Promise.all(files.map(async (file) => {
           const response = await fetch('/sounds/' + file);
-          if (!response.ok || response.headers.get('Content-Type') !== 'audio/mpeg') throw new Error(file);
+          const contentType = file.endsWith('.wav') ? 'audio/wav' : 'audio/mpeg';
+          if (!response.ok || response.headers.get('Content-Type') !== contentType) throw new Error(file);
           return (await audio.decodeAudioData(await response.arrayBuffer())).duration;
         }));
       } finally { await audio.close(); }
     }, soundFiles);
-    assert.equal(durations.length, 21);
+    assert.equal(durations.length, soundFiles.length);
     assert.ok(durations.every((duration) => duration > 0));
     await host.locator('#soundToggle').click();
     await host.locator('#soundVolume').evaluate((el) => { el.value = '25'; el.dispatchEvent(new Event('input')); });

@@ -21,17 +21,19 @@ function give(g, p, name) {
   return card;
 }
 
-test('turn cues stay private; Bang alternates clips and successful dodges are public', () => {
+test('turn cues stay private; random Bang and dodge clips are public', (t) => {
   const g = setup(), p = g.players[g.turn], target = g.players[g.nextAlive(g.turn)];
   assert.ok(g.viewFor(p.name).sounds.some((cue) => cue.files.includes('yourturn1')));
   for (const viewer of [target.name, null]) assert.ok(g.viewFor(viewer).sounds.every((cue) => !cue.files.includes('yourturn1')));
-  for (const clip of ['bangsound1', 'bangsound2']) {
+  const rng = t.mock.method(Math, 'random', () => 0);
+  for (const [sample, shot, dodge] of [[0, 'bangsound1', 'missedsound1'], [0.99, 'bangsound7', 'missedsound6']]) {
+    rng.mock.mockImplementation(() => sample);
     const bang = give(g, p, 'Bang');
     g.act(p.name, { type: 'play', cardId: bang.id, target: target.name });
-    assert.deepEqual(g.viewFor(null).sounds.at(-1).files, [clip]);
+    assert.deepEqual(g.viewFor(null).sounds.at(-1).files, [shot]);
     const missed = give(g, target, 'Missed');
     g.act(target.name, { type: 'respond', cardId: missed.id });
-    assert.deepEqual(g.viewFor(null).sounds.at(-1).files, ['missedsound1']);
+    assert.deepEqual(g.viewFor(null).sounds.at(-1).files, [dodge]);
   }
 });
 
