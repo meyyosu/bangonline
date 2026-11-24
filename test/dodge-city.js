@@ -10,6 +10,29 @@ const { syncTimer, tickTimer } = require('../room-timer');
 const names = ['Alice', 'Bobby', 'Carol', 'David', 'Elena'];
 const makeGame = (opts) => new Game(names, { rng: () => 0.4, dodgeCity: true, ...opts });
 
+test('only Dodge City accepts eight players and only the surviving Renegade wins', () => {
+  const eight = [...names, 'Frank', 'Grace', 'Henry'];
+  assert.throws(() => new Game(eight), /4–7/);
+  assert.throws(() => new Game([...eight, 'Irene'], { dodgeCity: true }), /4–8/);
+  const g = new Game(eight, { dodgeCity: true, characterChoices: 4 });
+  while (g.phase === 'character') g.timeout();
+  assert.equal(new Set(g.players.map((p) => p.char)).size, 8);
+  assert.deepEqual(g.players.reduce((counts, p) => {
+    counts[p.role] = (counts[p.role] || 0) + 1;
+    return counts;
+  }, {}), { Sheriff: 1, Deputy: 2, Outlaw: 3, Renegade: 2 });
+  assertDeck(g);
+  const renegades = g.players.filter((p) => p.role === 'Renegade');
+  for (const p of g.players) p.alive = renegades.includes(p);
+  g.checkWin();
+  assert.equal(g.winner, 'Outlaw');
+  renegades[0].alive = false;
+  g.checkWin();
+  assert.equal(g.winner, 'Renegade');
+  assert.equal(g.isWinner(renegades[0]), false);
+  assert.equal(g.isWinner(renegades[1]), true);
+});
+
 function setup(skill) {
   const g = makeGame();
   for (const player of g.players) player.char = 'Willy the Kid';
