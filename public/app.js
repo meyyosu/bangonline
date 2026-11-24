@@ -310,7 +310,7 @@ function showLobby() {
           <input type="text" name="code" placeholder="VD: AB12" maxlength="4" style="flex:1;text-transform:uppercase">
           <button class="btn blue">Vào</button>
         </form>
-        <p class="muted" style="margin-top:18px">Bang! cần 4–7 người. Tạo phòng rồi gửi mã hoặc đường link cho bạn bè.</p>
+        <p class="muted" style="margin-top:18px">Bang! cần 4–7 người, tối đa 8 người khi bật Dodge City. Tạo phòng rồi gửi mã hoặc đường link cho bạn bè.</p>
       </div>
       <div class="panel">
         <h2>Các phòng đang mở</h2>
@@ -339,12 +339,12 @@ function showLobby() {
       <div class="room-item">
         <div>
           <div><b>${esc(r.name)}</b> <span class="code">${r.code}</span> ${r.hasPassword ? '🔒' : ''} ${r.dodgeCity ? '· Dodge City' : ''}</div>
-          <div class="muted">Chủ phòng: ${esc(r.host)} · ${r.players.length}/7 người · ${r.turnSeconds ? r.turnSeconds + ' giây/lượt' : 'Không giới hạn giờ'}</div>
+          <div class="muted">Chủ phòng: ${esc(r.host)} · ${r.players.length}/${r.max} người chơi · ${(r.spectators || []).length} khán giả · ${r.turnSeconds ? r.turnSeconds + ' giây/lượt' : 'Không giới hạn giờ'}</div>
         </div>
         <div class="row">
           <span class="badge ${r.status}">${r.status === 'waiting' ? 'Đang chờ' : r.status === 'playing' ? 'Đang chơi' : 'Đã xong'}</span>
-          ${r.players.includes(ME) ? `<button class="btn small green" data-join="${r.code}">Quay lại</button>`
-            : r.status === 'waiting' && r.players.length < 7 ? `<button class="btn small" data-join="${r.code}">Tham gia</button>` : ''}
+          ${(r.players.includes(ME) || r.spectators?.includes(ME)) ? `<button class="btn small green" data-join="${r.code}">Quay lại</button>`
+            : `<button class="btn small" data-join="${r.code}">${r.status === 'waiting' && r.players.length < r.max ? 'Tham gia' : 'Vào xem'}</button>`}
         </div>
       </div>`).join('');
     list.querySelectorAll('[data-join]').forEach((b) => b.onclick = run(async () => {
@@ -407,18 +407,19 @@ function enterRoom(code) {
     const d = JSON.parse(ev.data);
     if (d.type === 'closed') { toast('Phòng đã đóng.'); return showLobby(); }
     if (d.type !== 'room') return;
-    if (!d.room.players.includes(ME)) { toast('Bạn không còn ở trong phòng.'); return showLobby(); }
+    if (!d.room.players.includes(ME) && !d.room.spectators?.includes(ME)) { toast('Bạn không còn ở trong phòng.'); return showLobby(); }
     const previous = ROOM;
     const previousGame = previous?.game;
     const handOrigins = Object.fromEntries([...document.querySelectorAll('#hand [data-card]')].map((el) => [el.dataset.card, el.getBoundingClientRect()]));
     const drawOrigins = [...document.querySelectorAll('.draw-stage .draw-slot')].map((el) => el.getBoundingClientRect());
+    const transferOrigins = captureTransferOrigins(previousGame);
     ROOM = d.room;
     if (receivedSnapshot) showRoomSounds(ROOM, previous);
     receivedSnapshot = true;
     ui.serverOffset = ROOM.serverNow - Date.now();
     renderRoom();
     showPlayedCards(ROOM.game, previousGame, handOrigins);
-    showCardTransfers(ROOM.game, previousGame, drawOrigins);
+    showCardTransfers(ROOM.game, previousGame, drawOrigins, transferOrigins);
   };
   stream.onerror = () => {
     receivedSnapshot = false;
@@ -456,9 +457,10 @@ function renderRoom() {
   const isHost = r.host === ME;
   const g = r.game;
   btns.innerHTML = `
+    ${g && r.spectators?.length ? `<span class="muted" title="${esc(r.spectators.join(', '))}">👁️ ${r.spectators.length} khán giả</span>` : ''}
     ${isHost && g?.winner ? '<button class="btn green" id="resetBtn">🔁 Về phòng chờ</button>' : ''}
-    ${g && !g.winner ? `<button class="btn" id="pauseBtn" ${r.pause ? 'disabled' : ''}>Tạm dừng</button><button class="btn ghost small" id="pauseNotifications">Bật thông báo Windows</button>` : ''}
-    <button class="btn secondary" id="leaveBtn">Rời phòng${g && !g.winner ? ' giữa ván' : ''}</button>`;
+    ${g?.me && !g.winner ? `<button class="btn" id="pauseBtn" ${r.pause ? 'disabled' : ''}>Tạm dừng</button><button class="btn ghost small" id="pauseNotifications">Bật thông báo Windows</button>` : ''}
+    <button class="btn secondary" id="leaveBtn">Rời phòng${g?.me && !g.winner ? ' giữa ván' : ''}</button>`;
   $('#pauseBtn') && ($('#pauseBtn').onclick = run(() => api(`/api/rooms/${r.code}/pause`, { type: 'request' })));
   $('#pauseNotifications') && ($('#pauseNotifications').onclick = run(enablePauseNotifications));
   $('#leaveBtn') && ($('#leaveBtn').onclick = run(async () => { await api(`/api/rooms/${r.code}/leave`, {}); showLobby(); }));
@@ -510,15 +512,21 @@ function renderWaiting() {
   const r = ROOM;
   const isHost = r.host === ME;
   const n = r.players.length;
+  const spectator = r.spectators?.includes(ME);
   $('#mainArea').innerHTML = `
     ${serverWarningHTML(r)}
     <div class="panel">
-      <h2>Phòng chờ (${n}/7)</h2>
+      <h2>Phòng chờ (${n}/${r.max})</h2>
       <ul class="seat-list">
         ${r.players.map((p) => `<li><span class="dot ${r.online.includes(p) ? 'on' : ''}"></span>
-          <b>${esc(p)}</b> ${p === r.host ? '👑' : ''} ${p === ME ? '<span class="muted">(bạn)</span>' : ''}
+          <b>${esc(p)}</b> ${r.bots?.includes(p) ? '<span class="muted">🤖 Bot</span>' : ''} ${p === r.host ? '👑' : ''} ${p === ME ? '<span class="muted">(bạn)</span>' : ''}
           ${isHost && p !== ME ? `<button class="btn small secondary" style="margin-left:auto" data-kick="${esc(p)}">Mời ra</button>` : ''}</li>`).join('')}
       </ul>
+      ${isHost ? `<button class="btn secondary" id="addBotBtn" ${n >= r.max ? 'disabled' : ''}>🤖 Thêm bot</button>` : ''}
+      <h3>Khán giả (${(r.spectators || []).length})</h3>
+      <ul class="seat-list">${(r.spectators || []).map((p) => `<li><span class="dot ${r.online.includes(p) ? 'on' : ''}"></span><b>${esc(p)}</b> ${p === r.host ? '👑' : ''} ${p === ME ? '(bạn)' : ''}${isHost && p !== ME ? `<button class="btn small secondary" data-kick="${esc(p)}">Mời ra</button>` : ''}</li>`).join('')}</ul>
+      <button class="btn secondary" id="spectatorBtn" ${spectator && n >= r.max ? 'disabled' : ''}>${spectator ? 'Tham gia chơi' : 'Làm khán giả'}</button>
+      <p class="muted">${spectator ? 'Bạn đang làm khán giả.' : 'Bạn đang là người chơi.'} Khán giả không chiếm ghế và chỉ xem thông tin công khai.</p>
       <div class="room-settings">
         <h3>Cài đặt phòng</h3>
         ${r.dodgeCity ? '<p>Bản mở rộng: Dodge City</p>' : ''}
@@ -556,6 +564,8 @@ function renderWaiting() {
     await api(`/api/rooms/${r.code}/start`, settings);
     ui.settingsDraft = null;
   }));
+  $('#addBotBtn') && ($('#addBotBtn').onclick = run(() => api(`/api/rooms/${r.code}/add-bot`, {})));
+  $('#spectatorBtn').onclick = run(() => api(`/api/rooms/${r.code}/spectator`, { spectator: !spectator }));
   const settings = $('#settingsForm');
   if (settings) {
     settings.oninput = () => {
@@ -804,8 +814,8 @@ function targetingCard(g, meP) {
 const ROLE_ICON = { Sheriff: '⭐', Deputy: '🛡️', Outlaw: '💀', Renegade: '🎭' };
 function renderCharacterSelection() {
   const g = ROOM.game;
-  const meP = g.players[g.me.index];
-  const mine = g.pending.player === g.me.index;
+  const meP = g.players[g.me?.index] || {};
+  const mine = g.pending.player === g.me?.index;
   const options = mine ? g.pending.options : meP.char ? [meP.char] : [];
   const choiceKey = `${ROOM.code}:${g.pending.player}`;
   if (ui.chooseFor !== choiceKey) { ui.chooseFor = choiceKey; ui.choosePick = null; }
@@ -822,17 +832,17 @@ function renderCharacterSelection() {
       <div class="ab">${esc(ch.desc)}</div></div>`;
   }).join('');
   $('#mainArea').innerHTML = `<div class="panel choose">
-    <div class="rolecard ${meP.role}"><div class="rstar">${ROLE_ICON[meP.role]}</div>
+    ${g.me ? `<div class="rolecard ${meP.role}"><div class="rstar">${ROLE_ICON[meP.role]}</div>
       <div><h3>Bạn là ${esc(ROLE_VI[meP.role])} · ${esc(role.vi)}</h3><p>${esc(role.goal)}${meP.role === 'Sheriff' ? ' Bạn được +1 máu.' : ''}</p></div>
-      <span class="secret">${meP.role === 'Sheriff' ? '👁️ Mọi người đều biết' : '🔒 Chỉ bạn thấy'}</span></div>
+      <span class="secret">${meP.role === 'Sheriff' ? '👁️ Mọi người đều biết' : '🔒 Chỉ bạn thấy'}</span></div>` : '<h2>👁️ Bạn đang xem trận đấu</h2>'}
     <div class="choose-head"><h2>Chọn nhân vật</h2><span class="muted">${mine ? `Bạn được chia ${options.length} lá — bấm vào 1 lá rồi xác nhận.` : `Đang chờ ${esc(g.players[g.pending.player].name)} chọn nhân vật…`}</span></div>
     <div class="room-clock" data-room-clock role="timer"></div>
     <div class="chars ${selected ? 'has-sel' : ''} ${mine ? '' : 'locked'}">${cards}</div>
-    <div class="actions" style="justify-content:center">${mine ? `<button class="btn" id="confirmCharacter" ${selected ? '' : 'disabled'}>✔ Chọn ${esc(selected || 'nhân vật')}</button>` : meP.char ? `<span class="muted">✔ Bạn chơi <b>${esc(meP.char)}</b>. Đang chờ những người khác…</span>` : '<span class="muted">Chờ tới lượt của bạn.</span>'}
+    <div class="actions" style="justify-content:center">${mine ? `<button class="btn" id="confirmCharacter" ${selected ? '' : 'disabled'}>✔ Chọn ${esc(selected || 'nhân vật')}</button>` : meP.char ? `<span class="muted">✔ Bạn chơi <b>${esc(meP.char)}</b>. Đang chờ những người khác…</span>` : `<span class="muted">${g.me ? 'Chờ tới lượt của bạn.' : 'Đang chờ người chơi chọn nhân vật.'}</span>`}
       ${mine && ROOM.characterSeconds ? '<span class="muted">Hết giờ sẽ tự chọn ngẫu nhiên.</span>' : ''}</div>
     <h3 style="margin-top:18px">Người chơi (${done}/${g.players.length} đã chọn)</h3>
     <div class="cprogress"><i style="width:${done / g.players.length * 100}%"></i></div>
-    <ul class="plist">${g.players.map((p, i) => `<li>${roleBadge(p)} <b>${esc(p.name)}</b>${i === g.me.index ? ' (bạn)' : ''}<span class="st ${p.char ? 'done' : 'wait'}">${p.char ? '✔ Đã chọn' : i === g.pending.player ? 'Đang chọn' : 'Chờ tới lượt'}</span></li>`).join('')}</ul>
+    <ul class="plist">${g.players.map((p, i) => `<li>${roleBadge(p)} <b>${esc(p.name)}</b>${i === g.me?.index ? ' (bạn)' : ''}<span class="st ${p.char ? 'done' : 'wait'}">${p.char ? '✔ Đã chọn' : i === g.pending.player ? 'Đang chọn' : 'Chờ tới lượt'}</span></li>`).join('')}</ul>
     <p class="muted">Ván đấu và timer lượt bắt đầu khi mọi người đã chọn xong.</p>
   </div>`;
   document.querySelectorAll('[data-character]').forEach((el) => {
@@ -862,6 +872,7 @@ function renderGame() {
   const canPlay = myTurn && !pend && g.phase === 'play' && meP.alive;
   const patDraw = myPrompt && pend.type === 'draw' && pend.options.includes('equipment');
 
+  if (!g.me) { ui.mode = null; ui.selected = []; }
   // validate mode
   if (['target', 'cost', 'brawl'].includes(ui.mode?.kind) && !canPlay) ui.mode = null;
   if (ui.mode?.costCardId && !g.me.hand.some((c) => c.id === ui.mode.costCardId)) ui.mode = null;
@@ -927,6 +938,7 @@ function renderGame() {
     </div>`;
   }).join('');
 
+  const promptBoxHTML = `<div class="prompt ${myPrompt || (canPlay && !ui.mode) ? 'mine' : ''}" id="prompt">${!g.me ? '<h4>👁️ Bạn đang xem trận đấu</h4><p class="muted">Bạn chỉ xem thông tin công khai.</p>' : ''}${promptHTML(g, meIdx, meP)}</div>`;
   const tableHTML = `
     <div class="arena">
       <div class="felt"></div>
@@ -939,7 +951,6 @@ function renderGame() {
       ${seatsHTML}
       ${drawStageHTML(g)}
     </div>`;
-  const promptBoxHTML = `<div class="prompt ${myPrompt || (canPlay && !ui.mode) ? 'mine' : ''}" id="prompt">${promptHTML(g, meIdx, meP)}</div>`;
 
   let meHTML = '';
   if (meP) {
@@ -1195,7 +1206,26 @@ function animateDrawStage(g) {
 }
 
 // Transfers come from the server so steals animate on every player's screen.
-function showCardTransfers(g, previous, drawOrigins = []) {
+function captureTransferOrigins(g) {
+  const origins = {};
+  for (const [index, player] of (g?.players || []).entries()) {
+    const seat = [...document.querySelectorAll('.player[data-player]')].find((el) => el.dataset.player === player.name);
+    const hand = index === g.me?.index ? $('#hand') : seat?.querySelector('.hand-fan');
+    origins[`${index}:hand`] = (hand || seat)?.getBoundingClientRect();
+    for (const el of seat?.querySelectorAll('[data-eq]') || []) {
+      const rect = el.getBoundingClientRect();
+      if (rect.width && rect.height) origins[`${index}:eq:${el.dataset.eq}`] = rect;
+    }
+    if (index === g.me?.index) {
+      for (const el of document.querySelectorAll('#hand [data-card]')) {
+        origins[`${index}:hand:${el.dataset.card}`] = el.getBoundingClientRect();
+      }
+    }
+  }
+  return origins;
+}
+
+function showCardTransfers(g, previous, drawOrigins = [], transferOrigins = {}) {
   if (!g || !previous || window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
   const lastSeq = previous.transfers?.at(-1)?.seq || 0;
   const seatHand = (index) => {
@@ -1209,8 +1239,10 @@ function showCardTransfers(g, previous, drawOrigins = []) {
       : event.from === 'discard' ? $('.arena .pile:last-child .discard-stack') || $('.arena .pile:last-child .card-back')
       : seatHand(event.from);
     for (const [index, card] of event.cards.entries()) {
-      const target = event.to === 'deck' ? $('#deck .card-back') : event.to === g.me?.index ? (card && $(`#hand [data-card="${card.id}"]`)) || $('#hand') : seatHand(event.to);
-      const origin = ['kit', 'reveal'].includes(event.from) ? drawOrigins[event.slots?.[index] ?? 0] : null;
+      const target = event.to === 'discard' ? $('#discardPile .ds-slot:last-child .card') || $('#discardPile')
+        : event.to === 'deck' ? $('#deck .card-back') : event.to === g.me?.index ? (card && $(`#hand [data-card="${card.id}"]`)) || $('#hand') : seatHand(event.to);
+      const origin = ['kit', 'reveal'].includes(event.from) ? drawOrigins[event.slots?.[index] ?? 0]
+        : event.sourceZone ? transferOrigins[`${event.from}:${event.sourceZone}:${card?.id}`] || transferOrigins[`${event.from}:hand`] : null;
       if ((!source && !origin) || !target) continue;
       const start = origin || source.getBoundingClientRect(), end = target.getBoundingClientRect();
       const flyer = document.createElement('div');
@@ -1226,7 +1258,7 @@ function showCardTransfers(g, previous, drawOrigins = []) {
         { transform: 'translate(0, 0) rotate(-8deg) scale(1)', opacity: 1 },
         { transform: `translate(${dx * .5}px, ${dy * .5 - 45}px) rotate(5deg) scale(1.15)`, opacity: 1, offset: .5 },
         { transform: `translate(${dx}px, ${dy}px) rotate(0deg) scale(.85)`, opacity: 0 },
-      ], { duration: 650, delay: (event.from === 'deck' && previous.pending?.type === 'blackJack' ? 650 : 0) + order++ * 130, easing: 'ease-in-out', fill: 'both' });
+      ], { duration: 650, delay: (event.sourceZone ? 220 : event.from === 'deck' && previous.pending?.type === 'blackJack' ? 650 : 0) + order++ * 130, easing: 'ease-in-out', fill: 'both' });
       animation.onfinish = () => flyer.remove();
       animation.oncancel = () => flyer.remove();
     }
@@ -1459,9 +1491,9 @@ function winnerHTML(g) {
   const names = { Sheriff: 'Phe Sheriff', Outlaw: 'Phe Outlaw', Renegade: 'Renegade' };
   const winners = g.players.filter((p) => p.winner).map((p) => esc(p.name)).join(', ');
   const iWon = g.players.find((p) => p.name === ME)?.winner;
-  return `<div class="panel winner-banner"><div style="font-size:40px">${iWon ? '🏆' : '💀'}</div>
+  return `<div class="panel winner-banner"><div style="font-size:40px">${!g.me || iWon ? '🏆' : '💀'}</div>
     <h3>${names[g.winner]} chiến thắng!</h3><div>${winners}</div>
-    <div class="muted" style="margin-top:6px">${iWon ? 'Chúc mừng, cao bồi!' : 'Lần sau may mắn hơn nhé.'} ${ROOM.host === ME ? 'Bấm “Về phòng chờ” để chơi ván mới.' : 'Chờ chủ phòng mở ván mới.'}</div></div>`;
+    <div class="muted" style="margin-top:6px">${!g.me ? 'Bạn đã theo dõi ván đấu.' : iWon ? 'Chúc mừng, cao bồi!' : 'Lần sau may mắn hơn nhé.'} ${ROOM.host === ME ? 'Bấm “Về phòng chờ” để chơi ván mới.' : 'Chờ chủ phòng mở ván mới.'}</div></div>`;
 }
 
 // Kết quả dùng cờ winner do server tính, kể cả đồng đội đã bị loại.
@@ -1946,7 +1978,7 @@ function resultStatsHTML(g, won) {
 
 function resultMainHTML(g, won, team) {
   const names = { Sheriff: 'Sheriff & Deputy', Outlaw: 'Outlaw', Renegade: 'Renegade' };
-  return `<h2 id="resultHeadline" class="result-headline">${won ? 'CHIẾN THẮNG' : 'THUA CUỘC'}</h2>
+  return `<h2 id="resultHeadline" class="result-headline">${!g.me ? 'KẾT QUẢ VÁN ĐẤU' : won ? 'CHIẾN THẮNG' : 'THUA CUỘC'}</h2>
     <div class="result-emblem" aria-hidden="true"><span></span><img src="/result-revolvers.svg" alt=""><span></span></div>
     <p id="resultSummary" class="result-summary">Phe ${names[g.winner]} chiến thắng!</p>
     <div class="result-team">${team.map((p) => `<div class="result-member ${p.name === ME ? 'result-you' : ''}">
@@ -2090,6 +2122,7 @@ function animatePlayedCard(card, origin, action, player) {
 }
 
 function bindGame(g, meIdx, meP, canPlay, myPrompt) {
+  if (!g.me) return;
   const main = $('#mainArea');
   const pend = g.pending;
   const infoBtn = $('#meInfoToggle');

@@ -4,6 +4,8 @@ Phiên bản web của board game **Bang!** (bản gốc) để chơi cùng bạ
 
 **Không cần cài thư viện nào.** Chỉ cần Node.js 18 trở lên.
 
+Giao diện có chân dung nhân vật, bài cùng tên đứng cạnh nhau, vòng đếm ngược quanh avatar, popup General Store/Indians/Gatling, âm thanh với nút chỉnh âm lượng và bố cục riêng cho điện thoại. Màn kết thúc gồm **Kết quả → Danh hiệu → Diễn biến → Đóng góp → Thống kê**. Khi mã trên ổ đĩa mới hơn server đang chạy, phòng hiển thị cảnh báo cần khởi động lại.
+
 ## Cách nhanh nhất (Windows): bấm đúp `CHAY-GAME.bat`
 
 Giải nén rồi bấm đúp **`CHAY-GAME.bat`**. Script sẽ tự:
@@ -14,7 +16,7 @@ Giải nén rồi bấm đúp **`CHAY-GAME.bat`**. Script sẽ tự:
 
 Giữ cửa sổ đen mở trong lúc chơi; đóng nó là tắt server. Bạn bè chỉ cần mở link bằng trình duyệt, không phải cài gì.
 
-Launcher hiển thị thư mục đang chạy, kiểm tra server đã nạp đúng mã mới nhất trước khi mở trình duyệt và giữ cửa sổ để đọc lỗi. Nếu server cũ vẫn giữ cổng 3000, nhập **R** khi được hỏi để khởi động lại (các phòng/ván trong bộ nhớ sẽ mất, tài khoản được giữ). Nếu server đã ở bản mới nhất, file BAT chỉ mở lại trình duyệt và báo server đang chạy ở cửa sổ khác. Lỗi khởi động được lưu tại `data/launcher.log`. File BAT trong thư mục con `bangonline/` chuyển về launcher chính để tránh mở bản sao cũ.
+Launcher hiển thị thư mục đang chạy, kiểm tra server đã nạp đúng mã mới nhất trước khi mở trình duyệt và giữ cửa sổ để đọc lỗi. Nếu server cũ vẫn giữ cổng 3000, nhấn **Enter** khi được hỏi để khởi động lại, hoặc nhập **K** để giữ server cũ (các phòng/ván trong bộ nhớ sẽ mất, tài khoản được giữ). Nếu server đã ở bản mới nhất, file BAT chỉ mở lại trình duyệt và báo server đang chạy ở cửa sổ khác. Lỗi khởi động được lưu tại `data/launcher.log`. File BAT trong thư mục con `bangonline/` chuyển về launcher chính để tránh mở bản sao cũ.
 
 Chẩn đoán mà không khởi động/dừng server: `powershell -NoProfile -ExecutionPolicy Bypass -File tools/start.ps1 -CheckOnly`. Có thể truyền `-Port 3001` để dùng cổng khác; `-NoBrowser -SkipFirewall` dành cho kiểm thử cục bộ.
 
@@ -61,13 +63,29 @@ Tệp JSON là một mảng khai báo từng loại lá. Mỗi loại có `name`
 
 Khi dùng khoảng cách cố định, `maxDistance` nhận giá trị từ 1 đến 7. Bỏ trường này để chọn mục tiêu ở mọi khoảng cách. Lá xanh lá sẵn sàng từ đầu lượt tiếp theo của người đặt, rồi được bỏ sau khi dùng.
 
+## Chế độ khán giả
+
+Trong phòng chờ, chủ phòng bấm **Thêm bot** để thêm một bot mỗi lần (tổng tối đa 7 ghế, hoặc 8 ghế khi bật Dodge City). Bot tự chọn nhân vật và chơi bài; bấm **Mời ra** cạnh bot để kick giống người chơi. Bot tự đồng ý biểu quyết tạm dừng. Nếu chủ phòng rời đi, quyền chủ phòng chỉ chuyển cho người thật; phòng tự đóng khi không còn người thật.
+
+Trong phòng chờ, bấm **Làm khán giả** hoặc **Tham gia chơi** để đổi chỗ. Chỉ người chơi được tính vào giới hạn 4–7 người bắt đầu ván (4–8 khi bật Dodge City). Người vào phòng giữa trận (hoặc khi đủ ghế) tự vào làm khán giả. Khán giả xem diễn biến trực tiếp, chat và kết quả; bài trên tay, vai trò bí mật và lựa chọn riêng vẫn được ẩn. Khán giả không đánh bài hay biểu quyết tạm dừng. Sau ván, chủ phòng có thể về phòng chờ để mọi người đổi chỗ.
+
+### Kiểm thử khán giả trên trình duyệt
+
+```powershell
+npm install
+npx playwright install chromium
+npm run test:spectator:browser
+```
+
+Bài test tự mở Chromium với 6 phiên đăng nhập độc lập và server tạm, kiểm tra đổi sang khán giả trong phòng chờ, vào xem giữa trận, ẩn thông tin bí mật, kết nối lại, chat, cập nhật lượt và rời phòng. Tài khoản test nằm trong thư mục tạm và được dọn sau khi chạy. Ảnh chụp lưu ở `test/shot-spectator-lobby.png` và `test/shot-spectator-midgame.png`. Bài test dùng font dự phòng để chạy độc lập với Google Fonts. Playwright chỉ là công cụ phát triển; chạy game vẫn không cần cài thư viện.
+
 ## Chơi với bạn bè
 
 - **Cùng mạng Wi-Fi/LAN:** bạn bè mở `http://<IP-máy-bạn>:3000` (xem IP bằng `ipconfig` trên Windows hoặc `ifconfig`/`ip a` trên macOS/Linux).
 - **Qua Internet, nhanh nhất:** chạy server rồi mở một đường hầm, ví dụ `cloudflared tunnel --url http://localhost:3000` hoặc `ngrok http 3000`, sau đó gửi link cho bạn bè.
 - **Lâu dài:** deploy lên một dịch vụ chạy Node như Render, Railway, Fly.io hoặc một VPS. Lệnh khởi động là `node server.js`; dịch vụ tự đặt biến `PORT`.
 
-Cách chơi: mỗi người tự đăng ký tài khoản → chủ phòng bấm **Tạo phòng** → bấm **Copy link mời** gửi cho bạn bè (hoặc gửi mã 4 ký tự) → đủ 4–7 người thì chủ phòng bấm **Bắt đầu ván**.
+Cách chơi: mỗi người tự đăng ký tài khoản → chủ phòng bấm **Tạo phòng** → bấm **Copy link mời** gửi cho bạn bè (hoặc gửi mã 4 ký tự) → đủ 4–7 người (tối đa 8 khi bật Dodge City) thì chủ phòng bấm **Bắt đầu ván**.
 
 ## Tính năng
 

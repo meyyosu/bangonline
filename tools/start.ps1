@@ -71,7 +71,7 @@ try {
   if ($LASTEXITCODE -ne 0) { throw 'Game chưa nạp dữ liệu Dodge City. Hãy kiểm tra mã game và tệp dữ liệu.' }
   $dodgeCityData = $dodgeCityData | ConvertFrom-Json
   Say "Dữ liệu Dodge City: $dodgeCityFile ($($dodgeCityData.count) lá)" Green
-  $revision = & $node -e "const fs=require('fs'),crypto=require('crypto'); console.log(crypto.createHash('sha256').update(Buffer.concat(['server.js','game.js','power.js','room-timer.js','room-pause.js'].map(f=>fs.readFileSync(f)))).digest('hex'));"
+  $revision = & $node -e "const fs=require('fs'),crypto=require('crypto'); console.log(crypto.createHash('sha256').update(Buffer.concat(['server.js','game.js','power.js','room-timer.js','room-pause.js','room-bots.js'].map(f=>fs.readFileSync(f)))).digest('hex'));"
   if ($LASTEXITCODE -ne 0) { throw 'Không đọc được mã nguồn game trong thư mục hiện tại.' }
 
   $localUrl = "http://127.0.0.1:$Port"

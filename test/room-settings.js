@@ -138,6 +138,47 @@ test('auto draw fires at five seconds; Kit then gets twenty seconds to choose', 
   }
 });
 
+test('Panic and Cat Balou publish sounds and transfers without exposing stolen hands', () => {
+  for (const name of ['Panic', 'Cat Balou']) {
+    for (const zone of ['hand', 'eq']) {
+      const g = game();
+      while (g.pending) g.timeout();
+      for (const player of g.players) player.char = 'Willy the Kid';
+      const pi = g.turn, p = g.players[pi], ti = g.nextAlive(pi), target = g.players[ti];
+      const piles = [g.deck, g.discard, ...g.players.map((player) => player.hand)];
+      const pile = piles.find((cards) => cards.some((c) => c.name === name));
+      const [card] = pile.splice(pile.findIndex((c) => c.name === name), 1);
+      p.hand.push(card);
+      if (zone === 'eq') {
+        const equipmentPile = piles.find((cards) => cards.some((c) => c.name === 'Barrel'));
+        target.eq.push(equipmentPile.splice(equipmentPile.findIndex((c) => c.name === 'Barrel'), 1)[0]);
+      }
+      const equipment = target.eq[0];
+      const before = g.transferSeq || 0;
+      const beforeSound = g.soundSeq;
+      g.act(p.name, { type: 'play', cardId: card.id, target: target.name, targetCard: zone === 'hand' ? 'hand' : equipment.id });
+      const event = g.viewFor(p.name).transfers.at(-1);
+      assert.ok(event.seq > before);
+      assert.equal(event.from, ti);
+      assert.equal(event.to, name === 'Panic' ? pi : 'discard');
+      assert.equal(event.sourceZone, zone);
+      const moved = event.cards[0];
+      assert.ok(moved);
+      assert.ok((name === 'Panic' ? p.hand : g.discard).some((c) => c.id === moved.id));
+      assert.ok(![...target.hand, ...target.eq].some((c) => c.id === moved.id));
+      for (const viewer of [...names, null]) {
+        const visible = g.viewFor(viewer).transfers.at(-1).cards[0];
+        assert.equal(visible?.id ?? null, name === 'Panic' && zone === 'hand' && viewer !== p.name ? null : moved.id);
+        const cue = g.viewFor(viewer).sounds.at(-1);
+        assert.equal(cue.seq, beforeSound + 1);
+        assert.equal(cue.files.length, 1);
+        assert.match(cue.files[0], name === 'Panic' ? /^cardswap2?$/ : /^catbalou1$/);
+      }
+      assert.equal(count(g), 80);
+    }
+  }
+});
+
 test('draw transfers preserve source and keep hidden card identities private', () => {
   for (const source of ['deck', 'player', 'discard']) {
     const g = game();
@@ -360,10 +401,10 @@ test('forfeiting resolves choices and advances past departed players without los
   assert.equal(count(g), 80);
 });
 
-test('room API protects settings and passwords, supports reconnect and games', async () => {
+for (const dodgeCity of [false, true]) test(`room API protects settings and passwords, supports reconnect and games (Dodge City: ${dodgeCity})`, async () => {
   // Isolate generated accounts and sessions from the user's server data.
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'bang-settings-'));
-  for (const file of ['server.js', 'game.js', 'power.js', 'room-timer.js', 'room-pause.js']) fs.copyFileSync(path.join(__dirname, '..', file), path.join(dir, file));
+  for (const file of ['server.js', 'game.js', 'power.js', 'room-timer.js', 'room-pause.js', 'room-bots.js']) fs.copyFileSync(path.join(__dirname, '..', file), path.join(dir, file));
   const soundsDir = path.join(dir, 'data', 'sounds');
   fs.mkdirSync(soundsDir, { recursive: true });
   const soundFixture = Buffer.from([0xff, 0xfb, 0x90, 0x00]);
@@ -379,7 +420,7 @@ test('room API protects settings and passwords, supports reconnect and games', a
   await new Promise((resolve) => probe.listen(0, '127.0.0.1', resolve));
   const port = probe.address().port;
   await new Promise((resolve) => probe.close(resolve));
-  const child = spawn(process.execPath, [path.join(dir, 'server.js')], { env: { ...process.env, PORT: String(port) }, stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true });
+  const child = spawn(process.execPath, [path.join(dir, 'server.js')], { env: { ...process.env, PORT: String(port), BANG_DODGE_CITY_FILE: path.join(__dirname, '..', 'dodge-city.json') }, stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true });
   try {
     await new Promise((resolve, reject) => {
       const timeout = setTimeout(() => reject(new Error('Server startup timed out')), 10000);
@@ -415,7 +456,9 @@ test('room API protects settings and passwords, supports reconnect and games', a
     assert.equal((await request(0, '/api/rooms', { turnSeconds: 5 })).status, 400);
     for (const characterChoices of [0, 5, 1.5, '2']) assert.equal((await request(0, '/api/rooms', { characterChoices })).status, 400);
     for (const characterSeconds of [-1, 5, 601, '30']) assert.equal((await request(0, '/api/rooms', { characterSeconds })).status, 400);
-    const created = await request(0, '/api/rooms', { password: 'room-secret', turnSeconds: 10 });
+    assert.equal((await request(4, '/api/register', { username: 'Watcher', password: 'secret' })).status, 200);
+    const max = dodgeCity ? 8 : 7;
+    const created = await request(0, '/api/rooms', { password: 'room-secret', turnSeconds: 10, dodgeCity });
     assert.equal(created.status, 200);
     const code = created.body.code;
     const url = `/api/rooms/${code}`;
@@ -425,6 +468,33 @@ test('room API protects settings and passwords, supports reconnect and games', a
     assert.equal((await request(1, url + '/join', { password: 'wrong' })).status, 403);
     assert.equal((await request(1, url + '/join', { password: 'room-secret' })).status, 200);
     assert.equal((await request(1, url + '/settings', { password: '' })).status, 403);
+    assert.equal((await request(1, url + '/add-bot', {})).status, 403);
+    for (let i = 1; i <= max - 2; i++) {
+      assert.equal((await request(0, url + '/add-bot', {})).status, 200);
+      const state = await view(0, code);
+      assert.equal(state.players.length, 2 + i);
+      assert.equal(state.max, max);
+      assert.equal(state.bots.length, i);
+      assert.ok(state.online.includes(`Bot ${i}`));
+    }
+    assert.equal((await request(0, url + '/add-bot', {})).status, 400);
+    assert.equal((await request(4, url + '/join', { password: 'room-secret' })).status, 200);
+    assert.ok((await view(4, code)).spectators.includes('Watcher'));
+    assert.equal((await request(4, url + '/spectator', { spectator: false })).status, 400);
+    assert.equal((await request(0, url + '/kick', { player: 'Bot 1' })).status, 200);
+    assert.equal((await request(4, url + '/spectator', { spectator: false })).status, 200);
+    assert.equal((await view(4, code)).players.length, max);
+    assert.equal((await request(0, url + '/start', { characterChoices: 3 })).status, 200);
+    assert.equal((await view(0, code)).game.players.length, max);
+    assert.equal((await request(4, url + '/leave', {})).status, 200);
+    assert.equal((await request(0, url + '/add-bot', {})).status, 200);
+    assert.equal((await request(1, url + '/kick', { player: 'Bot 1' })).status, 400);
+    assert.equal((await request(0, url + '/kick', { player: 'Bot 1' })).status, 200);
+    assert.equal((await request(0, url + '/add-bot', {})).status, 200);
+    const withBots = await view(0, code);
+    assert.equal(new Set(withBots.players).size, max);
+    for (const player of withBots.bots) assert.equal((await request(0, url + '/kick', { player })).status, 200);
+    assert.deepEqual((await view(0, code)).bots, []);
     assert.equal((await request(0, url + '/settings', { turnSeconds: 601, password: '' })).status, 400);
     let room = await view(0, code);
     assert.deepEqual(room.server, { features: ['endSummary'], stale: false });
@@ -438,6 +508,18 @@ test('room API protects settings and passwords, supports reconnect and games', a
     assert.equal((await request(2, url + '/join', { password: 'changed' })).status, 200);
     assert.equal((await request(0, url + '/settings', { password: '' })).status, 200);
     assert.equal((await request(3, url + '/join', {})).status, 200);
+    // A spectator host retains room controls, but does not count toward starting.
+    assert.equal((await request(0, url + '/spectator', { spectator: 'yes' })).status, 400);
+    assert.equal((await request(0, url + '/spectator', { spectator: true })).status, 200);
+    room = await view(0, code);
+    assert.equal(room.host, names[0]);
+    assert.equal(room.players.length, 3);
+    assert.deepEqual(room.spectators, [names[0]]);
+    assert.equal((await request(0, url + '/start', {})).status, 400);
+    assert.equal((await request(0, url + '/spectator', { spectator: false })).status, 200);
+    assert.equal((await request(4, url + '/join', {})).status, 200);
+    assert.equal((await request(4, url + '/spectator', { spectator: true })).status, 200);
+    assert.equal((await request(4, '/api/rooms', {})).status, 400);
     assert.equal((await request(0, url + '/chat', { text: 'hello' })).status, 200);
     assert.equal((await request(1, url + '/settings', { characterChoices: 4 })).status, 403);
     assert.equal((await request(0, url + '/start', { characterChoices: 4, characterSeconds: 45 })).status, 200);
@@ -447,6 +529,16 @@ test('room API protects settings and passwords, supports reconnect and games', a
     assert.equal(room.game.phase, 'character');
     assert.equal(room.timer.character, true);
     assert.ok(room.timer.deadline - room.serverNow > 40000);
+    const watching = await view(4, code);
+    assert.equal(watching.game.me, null);
+    assert.equal(watching.game.pending.options, undefined);
+    assert.equal(watching.game.players.length, 4);
+    assert.equal(watching.game.players.filter((p) => p.role).length, 1);
+    assert.equal((await request(4, url + '/spectator', { spectator: false })).status, 400);
+    assert.equal((await request(4, url + '/action', { action: { type: 'chooseCharacter', character: 'Bart Cassidy' } })).status, 403);
+    // Leaving while characters are being chosen must not reset the game.
+    assert.equal((await request(4, url + '/leave', {})).status, 200);
+    assert.equal((await view(0, code)).game.phase, 'character');
     for (let i = 0; i < 4; i++) {
       const user = names.indexOf(room.game.players[room.game.pending.player].name);
       const own = await view(user, code);
@@ -455,6 +547,7 @@ test('room API protects settings and passwords, supports reconnect and games', a
       room = await view(0, code);
     }
     assert.equal((await request(0, url + '/settings', { turnSeconds: 0 })).status, 400);
+    assert.equal((await request(0, url + '/add-bot', {})).status, 400);
     room = await view(1, code);
     assert.equal(room.hasPassword, false);
     assert.equal(room.turnSeconds, 20);
@@ -483,10 +576,25 @@ test('room API protects settings and passwords, supports reconnect and games', a
     assert.ok(drawn.game.me.hand.length >= handBefore + 2);
     assert.ok(drawn.timer.deadline - drawn.serverNow > 19000);
     assert.ok(drawn.game.transfers.length);
+    // Mid-game joining becomes spectating, with public views on reconnect.
+    assert.equal((await request(4, url + '/join', {})).status, 200);
+    const publicRoom = await view(4, code);
+    assert.equal(publicRoom.game.me, null);
+    assert.ok(publicRoom.spectators.includes('Watcher'));
+    assert.ok(publicRoom.game.players.every((p) => !('hand' in p)));
+    assert.equal(publicRoom.game.players.filter((p) => p.role).length, 1);
+    assert.ok(publicRoom.game.transfers.every((e) => e.from === 'discard' || e.cards.every((c) => c === null)));
+    assert.equal((await request(4, url + '/action', { action: { type: 'endTurn' } })).status, 403);
+    assert.equal((await request(4, url + '/pause', { type: 'request' })).status, 403);
+    assert.equal((await request(4, url + '/chat', { text: 'Watching!' })).status, 200);
     // Pause state is shared on reconnect; only unanimous votes stop game actions.
     assert.equal((await request(0, url + '/pause', { type: 'request' })).status, 200);
     room = await view(1, code);
     const pauseId = room.pause.id;
+    assert.ok(!room.pause.voters.includes('Watcher'));
+    assert.equal((await request(4, url + '/pause', { type: 'vote', id: pauseId, agree: true })).status, 403);
+    assert.equal((await request(4, url + '/leave', {})).status, 200);
+    assert.equal((await view(1, code)).pause.id, pauseId);
     assert.equal(room.pause.requester, names[0]);
     assert.equal(room.pause.frozen, false);
     assert.equal((await request(0, url + '/pause', { type: 'vote', id: pauseId, agree: true })).status, 400);
@@ -528,6 +636,16 @@ test('room API protects settings and passwords, supports reconnect and games', a
     assert.equal(room.status, 'waiting');
     assert.equal(room.game, null);
     assert.equal(room.timer, null);
+    // Host succession skips bots, and the last human leaving deletes a bot room.
+    for (let i = 1; i < 4; i++) assert.equal((await request(i, nextUrl + '/leave', {})).status, 200);
+    const botRoom = await request(0, '/api/rooms', {});
+    const botUrl = `/api/rooms/${botRoom.body.code}`;
+    assert.equal((await request(0, botUrl + '/add-bot', {})).status, 200);
+    assert.equal((await request(1, botUrl + '/join', {})).status, 200);
+    assert.equal((await request(0, botUrl + '/leave', {})).status, 200);
+    assert.equal((await view(1, botRoom.body.code)).host, names[1]);
+    assert.equal((await request(1, botUrl + '/leave', {})).status, 200);
+    assert.equal((await request(0, botUrl + '/join', {})).status, 404);
   } finally {
     child.kill();
     await new Promise((resolve) => child.exitCode !== null ? resolve() : child.once('exit', resolve));
@@ -538,7 +656,7 @@ test('room API protects settings and passwords, supports reconnect and games', a
 test('room view warns when the code on disk is newer than the running server', async () => {
   // Bản sao riêng để sửa game.js mà không đụng vào mã thật.
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'bang-stale-'));
-  for (const file of ['server.js', 'game.js', 'power.js', 'room-timer.js', 'room-pause.js']) fs.copyFileSync(path.join(__dirname, '..', file), path.join(dir, file));
+  for (const file of ['server.js', 'game.js', 'power.js', 'room-timer.js', 'room-pause.js', 'room-bots.js']) fs.copyFileSync(path.join(__dirname, '..', file), path.join(dir, file));
   const probe = net.createServer();
   await new Promise((resolve) => probe.listen(0, '127.0.0.1', resolve));
   const port = probe.address().port;

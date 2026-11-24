@@ -86,6 +86,7 @@ const ROLE_SETS = {
   5: ['Sheriff', 'Renegade', 'Outlaw', 'Outlaw', 'Deputy'],
   6: ['Sheriff', 'Renegade', 'Outlaw', 'Outlaw', 'Outlaw', 'Deputy'],
   7: ['Sheriff', 'Renegade', 'Outlaw', 'Outlaw', 'Outlaw', 'Deputy', 'Deputy'],
+  8: ['Sheriff', 'Renegade', 'Renegade', 'Outlaw', 'Outlaw', 'Outlaw', 'Deputy', 'Deputy'],
 };
 
 const RULES_PREVIEW = process.env.BANG_RULES_PREVIEW === '1';
@@ -257,7 +258,8 @@ const cardStr = (c) => `${c.name} ${c.rank}${SUIT_SYMBOL[c.suit]}`;
 
 class Game {
   constructor(names, opts = {}) {
-    if (names.length < 4 || names.length > 7) fail('Cần 4–7 người chơi.');
+    const maxPlayers = opts.dodgeCity ? 8 : 7;
+    if (names.length < 4 || names.length > maxPlayers) fail(`Cần 4–${maxPlayers} người chơi.`);
     this.rng = opts.rng || Math.random;
     const roles = shuffle([...ROLE_SETS[names.length]], this.rng);
     const chars = shuffle(opts.dodgeCity ? Object.keys(CHAR_INFO) : [...BASE_CHARACTERS], this.rng);
@@ -375,10 +377,10 @@ class Game {
     }
     return out;
   }
-  recordTransfer(p, cards, from = 'deck', destination = null, publicCards = false, slots = null) {
+  recordTransfer(p, cards, from = 'deck', destination = null, publicCards = false, slots = null, sourceZone = null) {
     if (!cards.length) return;
     this.transferSeq = (this.transferSeq || 0) + 1;
-    this.transfers = [...(this.transfers || []), { seq: this.transferSeq, to: destination ?? this.idx(p.name), owner: this.idx(p.name), from, cards, publicCards, slots }].slice(-40);
+    this.transfers = [...(this.transfers || []), { seq: this.transferSeq, to: destination ?? this.idx(p.name), owner: this.idx(p.name), from, cards, publicCards, slots, sourceZone }].slice(-40);
   }
   give(p, n) {
     const cards = this.draw(n);
@@ -766,6 +768,7 @@ class Game {
   isWinner(p) {
     if (!this.winner) return false;
     if (this.winner === 'Sheriff') return p.role === 'Sheriff' || p.role === 'Deputy';
+    if (this.winner === 'Renegade') return p.role === 'Renegade' && p.alive;
     return p.role === this.winner;
   }
 
@@ -1213,12 +1216,15 @@ class Game {
         this.noteTarget(pi, ti, name === 'Panic' ? 'Panic!' : card.name);
         if (this.ignoredCard(t, card)) return;
         const taken = this.removeTargetCard(t, selected);
+        const sourceZone = a.targetCard === 'hand' ? 'hand' : 'eq';
         if (name === 'Panic' || info.effect === 'take') {
           p.hand.push(taken);
+          this.recordTransfer(p, [taken], ti, null, sourceZone === 'eq', null, sourceZone);
           this.recordSound(randomSound(STEAL_SOUNDS));
           this.addLog(`😱 ${p.name} lấy ${a.targetCard === 'hand' ? '1 lá trên tay' : cardStr(taken)} của ${t.name}.`);
         } else {
           this.toDiscard(taken);
+          this.recordTransfer(t, [taken], ti, 'discard', true, null, sourceZone);
           this.addLog(`💃 ${p.name} buộc ${t.name} bỏ ${cardStr(taken)}.`);
         }
         return;
@@ -1503,7 +1509,7 @@ class Game {
       transfers: (this.transfers || []).map((event) => ({
         seq: event.seq, to: event.to, from: event.from,
         cards: event.cards.map((c) => event.owner === me || event.publicCards || event.from === 'discard' ? c : null),
-        slots: event.slots,
+        slots: event.slots, sourceZone: event.sourceZone,
       })),
     };
   }
