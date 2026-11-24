@@ -474,7 +474,10 @@ function renderRoom() {
   $('#logPanel').style.display = g ? '' : 'none';
   renderPause();
   if (!g?.winner) clearMatchResult();
-  if (!g) return renderWaiting();
+  if (!g) {
+    ui.lastCheckSeq = null;
+    return renderWaiting();
+  }
   renderGame();
   renderMatchResult(g);
   updateClock();
@@ -1238,11 +1241,13 @@ const CHECK_INFO = {
 };
 function showCheckReveal(g) {
   const lc = g.lastCheck;
-  if (ui.lastCheckSeq == null) { ui.lastCheckSeq = lc ? lc.seq : 0; return; } // mới vào phòng: không phát lại lần rút cũ
-  if (!lc || lc.seq <= ui.lastCheckSeq) return;
-  ui.lastCheckSeq = lc.seq;
+  // Mỗi ván đếm seq lại từ 1; không giữ mốc của ván trước khi chưa có lần rút nào.
+  if (!lc) { ui.lastCheckSeq = 0; return; }
+  if (ui.lastCheckSeq == null) { ui.lastCheckSeq = lc.seq; return; } // mới vào phòng: không phát lại lần rút cũ
+  if (lc.seq <= ui.lastCheckSeq) return;
   const deck = $('#deck'), arena = $('.arena');
   if (!deck || !arena) return;
+  ui.lastCheckSeq = lc.seq;
   const info = CHECK_INFO[lc.kind] || CHECK_INFO.Barrel;
   const sx = window.scrollX, sy = window.scrollY;
   const ar = arena.getBoundingClientRect(), dr = deck.getBoundingClientRect();
