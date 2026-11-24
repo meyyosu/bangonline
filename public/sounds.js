@@ -52,18 +52,18 @@ const gameAudio = (() => {
   function play(...files) {
     if (!context || slider.value === '0') return;
     const session = generation;
+    const barrelAt = context.currentTime + 1;
     Promise.all(files.map(load)).then((clips) => {
       if (session !== generation || context.state !== 'running') return;
-      let start = context.currentTime;
-      for (const clip of clips) {
+      const start = context.currentTime;
+      for (const [index, clip] of clips.entries()) {
         if (!clip) continue;
         const source = context.createBufferSource();
         source.buffer = clip;
         source.connect(gain);
         playing.add(source);
         source.onended = () => playing.delete(source);
-        source.start(start);
-        start += clip.duration;
+        source.start(files[index] === 'missedsound_barrel' ? Math.max(start, barrelAt) : start);
       }
     });
   }
