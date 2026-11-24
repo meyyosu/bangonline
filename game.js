@@ -86,6 +86,7 @@ const ROLE_SETS = {
   5: ['Sheriff', 'Renegade', 'Outlaw', 'Outlaw', 'Deputy'],
   6: ['Sheriff', 'Renegade', 'Outlaw', 'Outlaw', 'Outlaw', 'Deputy'],
   7: ['Sheriff', 'Renegade', 'Outlaw', 'Outlaw', 'Outlaw', 'Deputy', 'Deputy'],
+  8: ['Sheriff', 'Renegade', 'Renegade', 'Outlaw', 'Outlaw', 'Outlaw', 'Deputy', 'Deputy'],
 };
 
 const RULES_PREVIEW = process.env.BANG_RULES_PREVIEW === '1';
@@ -196,37 +197,9 @@ function buildDeck(dodgeCity) {
 }
 
 const MIN_CHECKS = 3; // Nhân phẩm tốt / Kiếp trước đốt chùa: cần rút kiểm tra ít nhất 3 lần
-const numberedSounds = (prefix, count) => Array.from({ length: count }, (_, i) => prefix + (i + 1));
-const randomSound = (sounds) => Array.isArray(sounds) ? sounds[Math.floor(Math.random() * sounds.length)] : sounds;
-const GUN_SOUNDS = {
-  default: numberedSounds('bangsound', 7),
-  Schofield: numberedSounds('bangsound_schofield', 3),
-  Remington: numberedSounds('bangsound_remington', 3),
-  'Rev. Carabine': numberedSounds('bangsound_revcarabine', 3),
-  Winchester: numberedSounds('bangsound_winchester', 3),
-};
-const MISSED_SOUNDS = numberedSounds('missedsound', 6);
-const IRON_PLATE_SOUNDS = [
-  'missedsound_ironplate', 'missedsound_ironplate2', 'missedsound_ironplate3', 'missedsound_ironplate4',
-];
-const BARREL_SOUND = 'missedsound_barrel';
-const STEAL_SOUNDS = ['cardswap', 'cardswap2'];
-const HURT_SOUNDS = { female: numberedSounds('hurt_f', 4), male: numberedSounds('hurt_m', 4) };
-const FEMALE_CHARACTERS = new Set([
-  'Calamity Janet', 'Rose Doolan', 'Suzy Lafayette', 'Belle Star', 'Elena Fuente', 'Molly Stark', 'Vera Custer',
-]);
 const PLAY_SOUNDS = { Punch: 'punch1', Gatling: 'gatling', Howitzer: 'howitzer1', Duel: 'duelo1',
-  'Cat Balou': 'catbalou1', 'Can Can': 'catbalou1', 'General Store': 'generalstore1', Indians: 'indian1',
-  'Buffalo Rifle': 'bangsound_buffalorifle', Derringer: 'bangsound_derringer', Pepperbox: 'bangsound_pepperbox',
-  Beer: 'beerdrink', Saloon: numberedSounds('saloon', 4), Whisky: numberedSounds('whiskey', 2) };
+  'Cat Balou': 'catbalou1', 'Can Can': 'catbalou1', 'General Store': 'generalstore1', Indians: 'indian1' };
 const EQUIP_SOUNDS = { Mustang: 'mustang1', Dynamite: 'dynamite_start.wav', Jail: 'prison1' };
-const SOUND_FILES = new Set([
-  'bangload', 'playerjoin', 'yourturn1', 'equipment1', 'prisonfree', 'playereliminated', 'outlawkilled1', 'dynamite_explode.wav',
-  'victory', 'defeat',
-  BARREL_SOUND, ...MISSED_SOUNDS, ...IRON_PLATE_SOUNDS, ...STEAL_SOUNDS,
-  ...Object.values(HURT_SOUNDS).flat(), ...Object.values(GUN_SOUNDS).flat(),
-  ...Object.values(PLAY_SOUNDS).flat(), ...Object.values(EQUIP_SOUNDS),
-].map((file) => file.includes('.') ? file : `${file}.mp3`));
 const FACTION = { Sheriff: 'law', Deputy: 'law', Outlaw: 'outlaw', Renegade: 'renegade' };
 const sameFaction = (a, b) => a !== 'Renegade' && FACTION[a] === FACTION[b]; // Renegade không có đồng đội
 const newStats = () => ({
@@ -257,7 +230,8 @@ const cardStr = (c) => `${c.name} ${c.rank}${SUIT_SYMBOL[c.suit]}`;
 
 class Game {
   constructor(names, opts = {}) {
-    if (names.length < 4 || names.length > 7) fail('Cần 4–7 người chơi.');
+    const maxPlayers = opts.dodgeCity ? 8 : 7;
+    if (names.length < 4 || names.length > maxPlayers) fail(`Cần 4–${maxPlayers} người chơi.`);
     this.rng = opts.rng || Math.random;
     const roles = shuffle([...ROLE_SETS[names.length]], this.rng);
     const chars = shuffle(opts.dodgeCity ? Object.keys(CHAR_INFO) : [...BASE_CHARACTERS], this.rng);
@@ -273,8 +247,6 @@ class Game {
     this.deck = shuffle([...this.fullDeck], this.rng);
     this.discard = [];
     this.log = [];
-    this.sounds = [];
-    this.soundSeq = 0;
     this.queue = [];
     this.pending = null;
     this.winner = null;
@@ -375,10 +347,10 @@ class Game {
     }
     return out;
   }
-  recordTransfer(p, cards, from = 'deck', destination = null, publicCards = false, slots = null) {
+  recordTransfer(p, cards, from = 'deck', destination = null, publicCards = false, slots = null, sourceZone = null) {
     if (!cards.length) return;
     this.transferSeq = (this.transferSeq || 0) + 1;
-    this.transfers = [...(this.transfers || []), { seq: this.transferSeq, to: destination ?? this.idx(p.name), owner: this.idx(p.name), from, cards, publicCards, slots }].slice(-40);
+    this.transfers = [...(this.transfers || []), { seq: this.transferSeq, to: destination ?? this.idx(p.name), owner: this.idx(p.name), from, cards, publicCards, slots, sourceZone }].slice(-40);
   }
   give(p, n) {
     const cards = this.draw(n);
@@ -392,8 +364,10 @@ class Game {
     return recipient;
   }
   recordSound(files, player = null) {
-    this.sounds.push({ seq: ++this.soundSeq, files: Array.isArray(files) ? files : [files], player });
-    if (this.sounds.length > 40) this.sounds.shift();
+    this.soundSeq = (this.soundSeq || 0) + 1;
+    const sounds = this.sounds ??= [];
+    sounds.push({ seq: this.soundSeq, files: Array.isArray(files) ? files : [files], player });
+    if (sounds.length > 40) sounds.shift();
   }
   toDiscard(...cards) { this.discard.push(...cards); }
   ability(p) { return p.char === 'Vera Custer' ? p.copiedAbility : p.char; }
@@ -463,7 +437,6 @@ class Game {
     const c = from.hand.splice(Math.floor(this.rng() * from.hand.length), 1)[0];
     to.hand.push(c);
     this.recordTransfer(to, [c], this.idx(from.name));
-    this.recordSound(randomSound(STEAL_SOUNDS));
     return c;
   }
   // "Rút kiểm tra" (Draw!). Kết quả lần rút gần nhất lưu ở lastCheck để giao diện lật bài cho mọi người xem.
@@ -563,7 +536,7 @@ class Game {
     if (this.check(p, (c) => c.suit === 'H', 'Barrel')) {
       bang.got++;
       this.stats[pi].dodged++;
-      this.recordSound(BARREL_SOUND);
+      this.recordSound('missedsound1');
       if (bang.got >= bang.need) this.noteAvoid(pi);
     }
     if (bang.got >= bang.need) { this.addLog(`${p.name} đã né được!`); this.noteMass(bang, { barrel: true }); return this.finishResponse(bang); }
@@ -616,7 +589,6 @@ class Game {
     this.addLog(`${t.name} mất ${amount} máu (còn ${Math.max(t.hp, 0)}).`);
     if (t.hp <= 0) this.trySave(t, response);
     if (t.hp <= 0) return this.kill(ti, src);
-    this.recordSound(randomSound(FEMALE_CHARACTERS.has(t.char) ? HURT_SOUNDS.female : HURT_SOUNDS.male));
     if (this.ability(t) === 'Bart Cassidy') { this.give(t, amount); this.addLog(`${t.name} rút ${amount} lá (Bart Cassidy).`); }
     if (this.ability(t) === 'El Gringo' && src != null && src !== ti) {
       for (let k = 0; k < amount; k++) {
@@ -635,7 +607,6 @@ class Game {
         t.hp += heal;
         this.stats[this.idx(t.name)].healed += heal;
         this.addLog(`🍺 ${t.name} uống Beer để sống sót!`);
-        this.recordSound(PLAY_SOUNDS.Beer);
         this.mollyDraw(t, beer, response);
       } else if (this.ability(t) === 'Sid Ketchum' && t.hand.length >= 2) {
         this.toDiscard(...t.hand.splice(0, 2));
@@ -731,9 +702,6 @@ class Game {
       }
     }
     this.recordSound(sounds);
-    if (won) {
-      this.players.forEach((p, i) => this.recordSound(this.isWinner(p) ? 'victory' : 'defeat', i));
-    }
     for (const [i, p] of this.players.entries()) {
       if (!p.alive) continue;
       const skill = this.ability(p);
@@ -766,6 +734,7 @@ class Game {
   isWinner(p) {
     if (!this.winner) return false;
     if (this.winner === 'Sheriff') return p.role === 'Sheriff' || p.role === 'Deputy';
+    if (this.winner === 'Renegade') return p.role === 'Renegade' && p.alive;
     return p.role === this.winner;
   }
 
@@ -898,7 +867,7 @@ class Game {
       this.playCard(pi, p, a);
       const recipient = this.recordPlay(pi, played, a.type === 'activate' ? 'discard' : 'play');
       const sound = recipient >= 0 ? (EQUIP_SOUNDS[played.name] || 'equipment1') : PLAY_SOUNDS[played.name];
-      if (sound) this.recordSound(randomSound(sound));
+      if (sound) this.recordSound(sound);
     }
     else if (a.type === 'discard') {
       const ids = a.cardIds || [];
@@ -999,7 +968,6 @@ class Game {
           target.coolingGreen.delete(c.id);
           p.hand.push(c);
           this.recordTransfer(p, [c], ti, null, true);
-          if (pi !== ti) this.recordSound(randomSound(STEAL_SOUNDS));
           this.addLog(`${p.name} lấy ${cardStr(c)} của ${target.name} (Pat Brennan).`);
         } else {
           this.normalDraw(p);
@@ -1046,8 +1014,7 @@ class Game {
         } else if (a.type === 'respond') {
           const c = this.dodgeCards(p).find((x) => x.id === a.cardId);
           if (!c) fail('Lá này không thể dùng để né đòn.');
-          const equipped = p.eq.includes(c);
-          if (equipped) {
+          if (p.eq.includes(c)) {
             p.eq.splice(p.eq.indexOf(c), 1);
             this.toDiscard(c);
             this.recordPlay(pi, c, 'discard');
@@ -1060,7 +1027,7 @@ class Game {
           }
           pend.got++;
           this.stats[pi].dodged++;
-          this.recordSound(randomSound(equipped && c.name === 'Iron Plate' ? IRON_PLATE_SOUNDS : MISSED_SOUNDS));
+          this.recordSound('missedsound1');
           if (pend.got >= pend.need) this.noteAvoid(pi);
           this.addLog(`${p.name} dùng ${c.name === 'Bang' ? 'Bang! (như Missed!)' : c.name === 'Missed' ? 'Missed!' : c.name}.`);
           if (pend.got >= pend.need) this.noteMass(pend, { card: c });
@@ -1148,7 +1115,8 @@ class Game {
         if (regularBang) {
           this.bangsPlayed++;
           this.stats[pi].bangs++;
-          this.recordSound(randomSound(GUN_SOUNDS[this.gun(p)?.name] || GUN_SOUNDS.default));
+          this.bangSoundCount = (this.bangSoundCount || 0) + 1;
+          this.recordSound(this.bangSoundCount % 2 ? 'bangsound1' : 'bangsound2');
         }
         if (info.draw) this.give(p, info.draw);
         if (this.ignoredCard(t, card)) return;
@@ -1213,12 +1181,14 @@ class Game {
         this.noteTarget(pi, ti, name === 'Panic' ? 'Panic!' : card.name);
         if (this.ignoredCard(t, card)) return;
         const taken = this.removeTargetCard(t, selected);
+        const sourceZone = a.targetCard === 'hand' ? 'hand' : 'eq';
         if (name === 'Panic' || info.effect === 'take') {
           p.hand.push(taken);
-          this.recordSound(randomSound(STEAL_SOUNDS));
+          this.recordTransfer(p, [taken], ti, null, sourceZone === 'eq', null, sourceZone);
           this.addLog(`😱 ${p.name} lấy ${a.targetCard === 'hand' ? '1 lá trên tay' : cardStr(taken)} của ${t.name}.`);
         } else {
           this.toDiscard(taken);
+          this.recordTransfer(t, [taken], ti, 'discard', true, null, sourceZone);
           this.addLog(`💃 ${p.name} buộc ${t.name} bỏ ${cardStr(taken)}.`);
         }
         return;
@@ -1497,17 +1467,17 @@ class Game {
       store: this.store ? { ...this.store, order: [...this.store.order], revealed: [...this.store.revealed], picks: this.store.picks.map((x) => ({ ...x })) } : null, // General Store gần nhất cho pop-up
       mass: this.mass ? { ...this.mass, targets: this.mass.targets.map((t) => ({ ...t })) } : null, // lá đánh chung gần nhất + kết quả từng người (công khai) cho pop-up
       lastCheck: this.lastCheck || null, // lá rút kiểm tra gần nhất (đã công khai ở chồng bài bỏ)
-      soundSeq: this.soundSeq,
-      sounds: this.sounds.filter((cue) => cue.player === null || cue.player === me).map(({ seq, files }) => ({ seq, files })),
+      soundSeq: this.soundSeq || 0,
+      sounds: (this.sounds || []).filter((cue) => cue.player === null || cue.player === me).map(({ seq, files }) => ({ seq, files })),
       plays: (this.plays || []).map((event) => ({ ...event })),
       transfers: (this.transfers || []).map((event) => ({
         seq: event.seq, to: event.to, from: event.from,
         cards: event.cards.map((c) => event.owner === me || event.publicCards || event.from === 'discard' ? c : null),
-        slots: event.slots,
+        slots: event.slots, sourceZone: event.sourceZone,
       })),
     };
   }
 }
 
-module.exports = { Game, GameError, CARD_INFO, CHAR_INFO, ROLE_INFO, SUIT_SYMBOL, RULES_PREVIEW, SOUND_FILES,
+module.exports = { Game, GameError, CARD_INFO, CHAR_INFO, ROLE_INFO, SUIT_SYMBOL, RULES_PREVIEW,
   greenCardCount: DODGE_CITY.greenCount, dodgeCityCardCount: DODGE_CITY.cards.length, dodgeCityRevision: DODGE_CITY.revision };

@@ -4,10 +4,10 @@ const http = require('http');
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
-const { Game, GameError, CARD_INFO, CHAR_INFO, ROLE_INFO, RULES_PREVIEW, SOUND_FILES,
-  greenCardCount, dodgeCityCardCount, dodgeCityRevision } = require('./game');
+const { Game, GameError, CARD_INFO, CHAR_INFO, ROLE_INFO, RULES_PREVIEW, greenCardCount, dodgeCityCardCount, dodgeCityRevision } = require('./game');
 const { syncTimer, tickTimer } = require('./room-timer');
 const { pauseAction, finishPause, pauseView } = require('./room-pause');
+const { tickBots } = require('./room-bots');
 
 const PORT = Number(process.env.PORT) || 3000;
 const DATA_DIR = path.join(__dirname, 'data', RULES_PREVIEW ? 'preview' : '');
@@ -15,7 +15,13 @@ const sessionCookie = RULES_PREVIEW ? 'bang_preview_sid' : 'sid';
 const sessionPattern = new RegExp('(?:^|;\\s*)' + sessionCookie + '=([a-f0-9]+)');
 const PUBLIC_DIR = path.join(__dirname, 'public');
 const SOUNDS_DIR = path.join(__dirname, 'data', 'sounds');
-const RUNTIME_FILES = ['server.js', 'game.js', 'power.js', 'room-timer.js', 'room-pause.js'];
+const SOUND_FILES = new Set([
+  'bangload.mp3', 'bangsound1.mp3', 'bangsound2.mp3', 'catbalou1.mp3', 'duelo1.mp3',
+  'dynamite_start.wav', 'dynamite_explode.wav', 'equipment1.mp3', 'gatling.mp3', 'generalstore1.mp3',
+  'howitzer1.mp3', 'indian1.mp3', 'missedsound1.mp3', 'mustang1.mp3', 'outlawkilled1.mp3',
+  'playereliminated.mp3', 'playerjoin.mp3', 'prison1.mp3', 'prisonfree.mp3', 'punch1.mp3', 'yourturn1.mp3',
+]);
+const RUNTIME_FILES = ['server.js', 'game.js', 'power.js', 'room-timer.js', 'room-pause.js', 'room-bots.js'];
 const readRevision = () => crypto.createHash('sha256').update(Buffer.concat(RUNTIME_FILES.map((file) => fs.readFileSync(path.join(__dirname, file))))).digest('hex');
 const runtimeRevision = readRevision();
 // Giao diện dùng 2 thông tin này để cảnh báo trước khi chơi:
@@ -51,8 +57,10 @@ function newCode() {
   return c;
 }
 
+function roomCapacity(r) { return r.dodgeCity ? 8 : 7; }
+
 function roomSummary(r) {
-  return { code: r.code, name: r.name, host: r.host, players: r.players, status: r.status, max: 7, hasPassword: !!r.passwordHash, turnSeconds: r.turnSeconds, characterChoices: r.characterChoices, characterSeconds: r.characterSeconds, dodgeCity: r.dodgeCity };
+  return { code: r.code, name: r.name, host: r.host, players: r.players, bots: r.bots, spectators: r.spectators, status: r.status, max: roomCapacity(r), hasPassword: !!r.passwordHash, turnSeconds: r.turnSeconds, characterChoices: r.characterChoices, characterSeconds: r.characterSeconds, dodgeCity: r.dodgeCity };
 }
 
 function roomView(r, user) {
@@ -60,9 +68,9 @@ function roomView(r, user) {
   const online = [...(roomClients.get(r.code) || [])].map((c) => c.user);
   return {
     ...roomSummary(r),
-    online: [...new Set(online)],
+    online: [...new Set([...online, ...(r.bots || [])])],
     chat: r.chat.slice(-60),
-    game: r.game ? r.game.viewFor(user) : null,
+    game: r.game ? r.game.viewFor(r.spectators.includes(user) ? null : user) : null,
     serverNow: Date.now(),
     server: { features: SERVER_FEATURES, stale: codeChanged },
     pause: pauseView(r),
@@ -73,13 +81,17 @@ function roomView(r, user) {
 function sse(res, data) { res.write(`data: ${JSON.stringify(data)}\n\n`); }
 
 function broadcastRoom(r) {
-  for (const c of roomClients.get(r.code) || []) sse(c.res, { type: 'room', room: roomView(r, c.user) });
+  for (const c of roomClients.get(r.code) || []) {
+    if (isMember(r, c.user)) sse(c.res, { type: 'room', room: roomView(r, c.user) });
+    else { sse(c.res, { type: 'closed' }); roomClients.get(r.code).delete(c); c.res.end(); }
+  }
 }
 function broadcastLobby() {
   const list = [...rooms.values()].map(roomSummary);
   for (const res of lobbyClients) sse(res, { type: 'lobby', rooms: list });
 }
-function findRoomOf(user) { return [...rooms.values()].find((r) => r.players.includes(user)); }
+function isMember(r, user) { return r.players.includes(user) || r.spectators.includes(user); }
+function findRoomOf(user) { return [...rooms.values()].find((r) => isMember(r, user)); }
 
 function updateSettings(r, body) {
   if (body.characterChoices !== undefined && (!Number.isInteger(body.characterChoices) || body.characterChoices < 1 || body.characterChoices > 4)) {
@@ -107,8 +119,11 @@ function updateSettings(r, body) {
 
 function leaveRoom(r, user) {
   r.players = r.players.filter((p) => p !== user);
-  if (!r.players.length) { rooms.delete(r.code); return; }
-  if (r.host === user) r.host = r.players[0];
+  r.spectators = r.spectators.filter((p) => p !== user);
+  r.bots = (r.bots || []).filter((p) => p !== user);
+  const humans = [...r.players, ...r.spectators].filter((p) => !r.bots.includes(p));
+  if (!humans.length) { rooms.delete(r.code); return; }
+  if (r.host === user) r.host = humans[0];
   r.chat.push({ system: true, text: `${user} đã rời phòng.` });
 }
 
@@ -223,7 +238,7 @@ const server = http.createServer(async (req, res) => {
       if (body.dodgeCity && !dodgeCityCardCount) return err(res, 'Máy chủ chưa nạp dữ liệu Dodge City.');
       const { name } = body;
       const code = newCode();
-      const r = { code, name: String(name || `Phòng của ${user}`).slice(0, 40), host: user, players: [user], status: 'waiting', game: null, chat: [] };
+      const r = { code, name: String(name || `Phòng của ${user}`).slice(0, 40), host: user, players: [user], bots: [], spectators: [], status: 'waiting', game: null, chat: [] };
       r.turnSeconds = 60;
       r.characterChoices = 3;
       r.characterSeconds = 60;
@@ -241,7 +256,7 @@ const server = http.createServer(async (req, res) => {
       const sub = parts[3];
 
       if (sub === 'stream') {
-        if (!r.players.includes(user)) return err(res, 'Bạn không ở trong phòng này.', 403);
+        if (!isMember(r, user)) return err(res, 'Bạn không ở trong phòng này.', 403);
         res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', Connection: 'keep-alive' });
         if (!roomClients.has(r.code)) roomClients.set(r.code, new Set());
         const client = { res, user };
@@ -254,26 +269,35 @@ const server = http.createServer(async (req, res) => {
       const body = await readBody(req);
 
       if (sub === 'join') {
-        if (r.players.includes(user)) return send(res, 200, { code: r.code });
+        if (isMember(r, user)) return send(res, 200, { code: r.code });
         if (findRoomOf(user)) return err(res, 'Bạn đang ở trong một phòng khác.');
-        if (r.status !== 'waiting') return err(res, 'Phòng đang chơi, không thể vào.');
-        if (r.players.length >= 7) return err(res, 'Phòng đã đủ 7 người.');
         if (r.passwordHash && (typeof body.password !== 'string' || body.password.length > 64 ||
           !crypto.timingSafeEqual(Buffer.from(hashPw(body.password, r.passwordSalt), 'hex'), Buffer.from(r.passwordHash, 'hex')))) {
           return send(res, 403, { error: 'Phòng yêu cầu mật khẩu hoặc mật khẩu chưa đúng.', passwordRequired: true });
         }
-        r.players.push(user);
-        r.chat.push({ system: true, text: `${user} đã vào phòng.` });
-      } else if (!r.players.includes(user)) {
+        const spectator = r.status !== 'waiting' || r.players.length >= roomCapacity(r);
+        (spectator ? r.spectators : r.players).push(user);
+        r.chat.push({ system: true, text: `${user} đã vào phòng${spectator ? ' để xem trận' : ''}.` });
+      } else if (!isMember(r, user)) {
         return err(res, 'Bạn không ở trong phòng này.', 403);
+      } else if (sub === 'spectator') {
+        if (r.status !== 'waiting') return err(res, 'Chỉ có thể đổi chỗ trong phòng chờ.');
+        if (typeof body.spectator !== 'boolean') return err(res, 'Lựa chọn khán giả không hợp lệ.');
+        if (!body.spectator && !r.players.includes(user) && r.players.length >= roomCapacity(r)) return err(res, `Đã đủ ${roomCapacity(r)} người chơi.`);
+        if (body.spectator !== r.spectators.includes(user)) {
+          r.players = r.players.filter((p) => p !== user);
+          r.spectators = r.spectators.filter((p) => p !== user);
+          (body.spectator ? r.spectators : r.players).push(user);
+          r.chat.push({ system: true, text: `${user} chuyển sang ${body.spectator ? 'khán giả' : 'người chơi'}.` });
+        }
       } else if (sub === 'settings') {
         if (r.host !== user) return err(res, 'Chỉ chủ phòng mới đổi được cài đặt.', 403);
         if (r.status !== 'waiting') return err(res, 'Chỉ có thể đổi cài đặt trong phòng chờ.');
         updateSettings(r, body);
         r.chat.push({ system: true, text: 'Chủ phòng đã cập nhật cài đặt phòng.' });
       } else if (sub === 'leave') {
-        finishPause(r, r.pause ? `${user} rời phòng. Yêu cầu tạm dừng bị huỷ.` : null);
-        if (r.status === 'playing' && r.game) {
+        if (r.players.includes(user)) finishPause(r, r.pause ? `${user} rời phòng. Yêu cầu tạm dừng bị huỷ.` : null);
+        if (r.status === 'playing' && r.game && r.players.includes(user)) {
           if (r.game.phase === 'character') {
             r.game = null; r.status = 'waiting';
             r.chat.push({ system: true, text: 'Có người rời khi chọn nhân vật. Phòng trở về trạng thái chờ.' });
@@ -283,6 +307,16 @@ const server = http.createServer(async (req, res) => {
           }
         }
         leaveRoom(r, user);
+      } else if (sub === 'add-bot') {
+        if (r.host !== user) return err(res, 'Chỉ chủ phòng mới thêm được bot.', 403);
+        if (r.status !== 'waiting') return err(res, 'Chỉ có thể thêm bot trong phòng chờ.');
+        if (r.players.length >= roomCapacity(r)) return err(res, `Đã đủ ${roomCapacity(r)} người chơi.`);
+        let number = 1;
+        while (r.bots.includes(`Bot ${number}`)) number++;
+        const name = `Bot ${number}`; // Spaces cannot appear in account names.
+        r.bots.push(name);
+        r.players.push(name);
+        r.chat.push({ system: true, text: `Chủ phòng đã thêm ${name}.` });
       } else if (sub === 'kick') {
         if (r.host !== user || r.status === 'playing') return err(res, 'Chỉ chủ phòng mới mời ra được (khi chưa chơi).');
         if (body.player && body.player !== user) leaveRoom(r, body.player);
@@ -291,7 +325,7 @@ const server = http.createServer(async (req, res) => {
         if (r.status === 'playing') return err(res, 'Ván đã bắt đầu.');
         if (r.players.length < 4) return err(res, 'Cần ít nhất 4 người để chơi Bang!.');
         updateSettings(r, body);
-        r.pause = null; r.clock = null;
+        r.pause = null; r.clock = null; r.botNextAt = null;
         r.game = new Game(r.players, { characterChoices: r.characterChoices, dodgeCity: r.dodgeCity });
         r.status = 'playing';
         r.chat.push({ system: true, text: 'Ván đấu bắt đầu!' });
@@ -300,9 +334,11 @@ const server = http.createServer(async (req, res) => {
         if (r.status === 'playing' && !r.game?.winner) return err(res, 'Ván chưa kết thúc.');
         r.game = null; r.status = 'waiting'; r.pause = null;
       } else if (sub === 'pause') {
+        if (r.spectators.includes(user)) return err(res, 'Khán giả không thể yêu cầu hoặc biểu quyết tạm dừng.', 403);
         if (tickTimer(r)) broadcastRoom(r);
         pauseAction(r, user, body);
       } else if (sub === 'action') {
+        if (r.spectators.includes(user)) return err(res, 'Khán giả không thể thực hiện hành động trong ván.', 403);
         if (!r.game) return err(res, 'Chưa có ván đấu.');
         if (tickTimer(r)) { broadcastRoom(r); broadcastLobby(); return err(res, 'Đã hết thời gian. Vui lòng thực hiện theo lượt hiện tại.'); }
         if (r.pause?.frozenAt != null) return err(res, 'Ván chơi đang tạm dừng.');
@@ -331,7 +367,10 @@ const server = http.createServer(async (req, res) => {
 // Timer chạy trên server kể cả khi người chơi mất kết nối.
 setInterval(() => {
   for (const r of rooms.values()) {
-    if (tickTimer(r)) { broadcastRoom(r); broadcastLobby(); }
+    const timerChanged = tickTimer(r);
+    const botChanged = tickBots(r);
+    if (r.game?.winner) { r.status = 'ended'; finishPause(r); }
+    if (timerChanged || botChanged) { syncTimer(r); broadcastRoom(r); broadcastLobby(); }
   }
 }, 250);
 
