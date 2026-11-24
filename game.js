@@ -198,7 +198,7 @@ function buildDeck(dodgeCity) {
 const MIN_CHECKS = 3; // Nhân phẩm tốt / Kiếp trước đốt chùa: cần rút kiểm tra ít nhất 3 lần
 const PLAY_SOUNDS = { Punch: 'punch1', Gatling: 'gatling', Howitzer: 'howitzer1', Duel: 'duelo1',
   'Cat Balou': 'catbalou1', 'Can Can': 'catbalou1', 'General Store': 'generalstore1', Indians: 'indian1' };
-const EQUIP_SOUNDS = { Mustang: 'mustang1', Dynamite: 'dynamitearmed', Jail: 'prison1' };
+const EQUIP_SOUNDS = { Mustang: 'mustang1', Dynamite: 'dynamite_start.wav', Jail: 'prison1' };
 const FACTION = { Sheriff: 'law', Deputy: 'law', Outlaw: 'outlaw', Renegade: 'renegade' };
 const sameFaction = (a, b) => a !== 'Renegade' && FACTION[a] === FACTION[b]; // Renegade không có đồng đội
 const newStats = () => ({
@@ -499,7 +499,7 @@ class Game {
       p.eq.splice(p.eq.indexOf(dyn), 1);
       if (!safe) {
         this.addLog(`💥 Dynamite nổ! ${p.name} mất 3 máu.`);
-        this.recordSound('dynamiteexploded');
+        this.recordSound('dynamite_explode.wav');
         this.toDiscard(dyn);
         this.damage(pi, 3, null);
         if (this.winner) return;
@@ -509,7 +509,7 @@ class Game {
         while (next !== pi && this.hasEq(this.players[next], 'Dynamite')) next = this.nextAlive(next);
         const nx = this.players[next];
         nx.eq.push(dyn);
-        if (next !== pi) this.recordSound('dynamitearmed');
+        if (next !== pi) this.recordSound(EQUIP_SOUNDS.Dynamite);
         this.addLog(next === pi ? `Dynamite vẫn ở trước ${p.name}.` : `Dynamite được chuyền sang ${nx.name}.`);
       }
       return this.continueTurnStart(false);

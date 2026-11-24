@@ -42,7 +42,8 @@ const gameAudio = (() => {
 
   function load(file) {
     if (!buffers.has(file)) {
-      buffers.set(file, fetch(`/sounds/${file}.mp3`).then((response) => response.ok ? response.arrayBuffer() : null)
+      const filename = file.includes('.') ? file : `${file}.mp3`;
+      buffers.set(file, fetch(`/sounds/${filename}`).then((response) => response.ok ? response.arrayBuffer() : null)
         .then((data) => data && context.decodeAudioData(data)).catch(() => null));
     }
     return buffers.get(file);
