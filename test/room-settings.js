@@ -540,10 +540,16 @@ for (const dodgeCity of [false, true]) test(`room API protects settings and pass
     assert.equal((await request(4, url + '/leave', {})).status, 200);
     assert.equal((await view(0, code)).game.phase, 'character');
     for (let i = 0; i < 4; i++) {
-      const user = names.indexOf(room.game.players[room.game.pending.player].name);
+      const player = room.game.players[room.game.pending.player];
+      const user = names.indexOf(player.name);
       const own = await view(user, code);
-      assert.equal(own.game.pending.options.length, 4);
-      assert.equal((await request(user, url + '/action', { action: { type: 'chooseCharacter', character: own.game.pending.options[0] } })).status, 200);
+      const { options } = own.game.pending;
+      assert.equal(options.length, 4);
+      // This flow expects a deck draw of at least two cards and no pre-draw choice.
+      const character = player.role === 'Sheriff'
+        ? options.find((name) => name !== 'Bill Noface' && name !== 'Vera Custer')
+        : options[0];
+      assert.equal((await request(user, url + '/action', { action: { type: 'chooseCharacter', character } })).status, 200);
       room = await view(0, code);
     }
     assert.equal((await request(0, url + '/settings', { turnSeconds: 0 })).status, 400);
@@ -563,11 +569,13 @@ for (const dodgeCity of [false, true]) test(`room API protects settings and pass
     const handBefore = drawingView.game.me.hand.length;
     assert.equal((await request(drawingUser, url + '/action', { action: { type: 'drawChoice', from: 'deck' } })).status, 200);
     let drawn = await view(drawingUser, code);
+    let revealedCardId;
     if (drawn.game.pending?.type === 'kit') {
       assert.equal((await request(drawingUser, url + '/action', { action: { type: 'kit', cardIds: drawn.game.pending.cards.slice(0, 2).map((c) => c.id) } })).status, 200);
       drawn = await view(drawingUser, code);
     }
     if (drawn.game.pending?.type === 'blackJack') {
+      revealedCardId = drawn.game.pending.card.id;
       assert.equal(drawn.timer.seconds, 3);
       await new Promise((resolve) => setTimeout(resolve, 3300));
       drawn = await view(drawingUser, code);
@@ -583,7 +591,10 @@ for (const dodgeCity of [false, true]) test(`room API protects settings and pass
     assert.ok(publicRoom.spectators.includes('Watcher'));
     assert.ok(publicRoom.game.players.every((p) => !('hand' in p)));
     assert.equal(publicRoom.game.players.filter((p) => p.role).length, 1);
-    assert.ok(publicRoom.game.transfers.every((e) => e.from === 'discard' || e.cards.every((c) => c === null)));
+    const revealedCards = publicRoom.game.transfers.filter((e) => e.from === 'reveal').flatMap((e) => e.cards);
+    assert.deepEqual(revealedCards.map((c) => c?.id), revealedCardId === undefined ? [] : [revealedCardId]);
+    const privateTransfers = publicRoom.game.transfers.filter((e) => !['discard', 'reveal'].includes(e.from));
+    assert.ok(privateTransfers.every((e) => e.cards.every((c) => c === null)));
     assert.equal((await request(4, url + '/action', { action: { type: 'endTurn' } })).status, 403);
     assert.equal((await request(4, url + '/pause', { type: 'request' })).status, 403);
     assert.equal((await request(4, url + '/chat', { text: 'Watching!' })).status, 200);

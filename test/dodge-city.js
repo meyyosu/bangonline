@@ -213,6 +213,27 @@ test('Punch uses distance one and existing defenses, and distance equipment stac
   assertDeck(g);
 });
 
+test('Knife plays its attack sound only when a valid activation is accepted', () => {
+  const { g, p, adjacent, distant } = setup('Willy the Kid');
+  g.timeout();
+  const knife = play(g, p, 'Knife');
+  const activate = { type: 'activate', cardId: knife.id, target: adjacent.name };
+  assert.deepEqual(g.viewFor(adjacent.name).sounds.at(-1).files, ['equipment1']);
+  const equippedAt = g.soundSeq;
+  assert.throws(() => g.act(p.name, activate), GameError);
+  assert.equal(g.soundSeq, equippedAt);
+
+  g.startTurn();
+  g.timeout();
+  const readyAt = g.soundSeq;
+  assert.throws(() => g.act(p.name, { ...activate, target: distant.name }), GameError);
+  assert.equal(g.soundSeq, readyAt);
+  g.act(p.name, activate);
+  assert.deepEqual(g.viewFor(adjacent.name).sounds.at(-1), { seq: readyAt + 1, files: ['bangsound_knife'] });
+  assert.equal(g.pending.player, g.idx(adjacent.name));
+  assertDeck(g);
+});
+
 test('a safe Dynamite passes over a player who already has one', () => {
   const { g, p, adjacent, distant } = setup('Willy the Kid');
   g.timeout();

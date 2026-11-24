@@ -219,6 +219,7 @@ const FEMALE_CHARACTERS = new Set([
 const PLAY_SOUNDS = { Punch: 'punch1', Gatling: 'gatling', Howitzer: 'howitzer1', Duel: 'duelo1',
   'Cat Balou': 'catbalou1', 'Can Can': 'catbalou1', 'General Store': 'generalstore1', Indians: 'indian1',
   'Buffalo Rifle': 'bangsound_buffalorifle', Derringer: 'bangsound_derringer', Pepperbox: 'bangsound_pepperbox',
+  Knife: 'bangsound_knife',
   Beer: 'beerdrink', Saloon: numberedSounds('saloon', 4), Whisky: numberedSounds('whiskey', 2) };
 const EQUIP_SOUNDS = { Mustang: 'mustang1', Dynamite: 'dynamite_start.wav', Jail: 'prison1' };
 const SOUND_FILES = new Set([
