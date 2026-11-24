@@ -186,7 +186,9 @@ test('Punch uses distance one and existing defenses, and distance equipment stac
 
 test('a safe Dynamite passes over a player who already has one', () => {
   const { g, p, adjacent, distant } = setup('Willy the Kid');
-  const original = equip(g, p, 'Dynamite');
+  g.timeout();
+  const original = play(g, p, 'Dynamite');
+  assert.deepEqual(g.viewFor(adjacent.name).sounds.at(-1).files, ['dynamite_start.wav']);
   const second = equip(g, adjacent, 'Dynamite');
   const heart = deal(g, p, 'Bang', 'H');
   g.deck.push(g.takeFromHand(p, heart.id));
@@ -197,7 +199,20 @@ test('a safe Dynamite passes over a player who already has one', () => {
   assert.deepEqual(adjacent.eq, [second]);
   assert.ok(distant.eq.includes(original));
   assert.equal(g.pending.type, 'draw');
-  assert.deepEqual(g.viewFor(p.name).sounds.at(-1).files, ['dynamitearmed']);
+  assert.deepEqual(g.viewFor(p.name).sounds.at(-1).files, ['dynamite_start.wav']);
+  assertDeck(g);
+});
+
+test('a failed Dynamite check uses the explosion WAV', () => {
+  const { g, p, adjacent } = setup('Willy the Kid');
+  const dynamite = equip(g, p, 'Dynamite');
+  const spade = deal(g, p, 'Missed', 'S');
+  g.deck.push(g.takeFromHand(p, spade.id));
+  g.startTurn();
+  g.timeout();
+  assert.equal(p.hp, p.maxHp - 3);
+  assert.ok(g.discard.includes(dynamite));
+  assert.deepEqual(g.viewFor(adjacent.name).sounds.at(-1).files, ['dynamite_explode.wav']);
   assertDeck(g);
 });
 

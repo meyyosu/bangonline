@@ -16,7 +16,7 @@ const PUBLIC_DIR = path.join(__dirname, 'public');
 const SOUNDS_DIR = path.join(__dirname, 'data', 'sounds');
 const SOUND_FILES = new Set([
   'bangload.mp3', 'bangsound1.mp3', 'bangsound2.mp3', 'catbalou1.mp3', 'duelo1.mp3',
-  'dynamitearmed.mp3', 'dynamiteexploded.mp3', 'equipment1.mp3', 'gatling.mp3', 'generalstore1.mp3',
+  'dynamite_start.wav', 'dynamite_explode.wav', 'equipment1.mp3', 'gatling.mp3', 'generalstore1.mp3',
   'howitzer1.mp3', 'indian1.mp3', 'missedsound1.mp3', 'mustang1.mp3', 'outlawkilled1.mp3',
   'playereliminated.mp3', 'playerjoin.mp3', 'prison1.mp3', 'prisonfree.mp3', 'punch1.mp3', 'yourturn1.mp3',
 ]);
@@ -160,7 +160,8 @@ function serveSound(req, res, name) {
   if (!SOUND_FILES.has(name)) return err(res, 'Not found', 404);
   fs.readFile(path.join(SOUNDS_DIR, name), (error, data) => {
     if (error) return err(res, 'Not found', 404);
-    res.writeHead(200, { 'Content-Type': 'audio/mpeg', 'Content-Length': data.length });
+    const contentType = name.endsWith('.wav') ? 'audio/wav' : 'audio/mpeg';
+    res.writeHead(200, { 'Content-Type': contentType, 'Content-Length': data.length });
     res.end(req.method === 'HEAD' ? undefined : data);
   });
 }

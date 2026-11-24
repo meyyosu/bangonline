@@ -3,6 +3,8 @@ node_modules/
 !/data/sounds/
 /data/sounds/*
 !/data/sounds/*.mp3
+!/data/sounds/dynamite_start.wav
+!/data/sounds/dynamite_explode.wav
 /data/sounds/dynamite.mp3
 /data/sounds/emote_disappointed.mp3
 test/*.png

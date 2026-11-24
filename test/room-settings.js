@@ -367,9 +367,14 @@ test('room API protects settings and passwords, supports reconnect and games', a
   const soundsDir = path.join(dir, 'data', 'sounds');
   fs.mkdirSync(soundsDir, { recursive: true });
   const soundFixture = Buffer.from([0xff, 0xfb, 0x90, 0x00]);
-  const approvedSounds = ['bangload.mp3', 'indian1.mp3'];
-  for (const file of approvedSounds) fs.writeFileSync(path.join(soundsDir, file), soundFixture);
-  fs.writeFileSync(path.join(soundsDir, 'dynamite.mp3'), soundFixture);
+  const approvedSounds = [
+    ['bangload.mp3', 'audio/mpeg'], ['indian1.mp3', 'audio/mpeg'],
+    ['dynamite_start.wav', 'audio/wav'], ['dynamite_explode.wav', 'audio/wav'],
+  ];
+  const excludedSounds = ['dynamite.mp3', 'dynamitearmed.mp3', 'dynamiteexploded.mp3'];
+  for (const file of [...approvedSounds.map(([file]) => file), ...excludedSounds]) {
+    fs.writeFileSync(path.join(soundsDir, file), soundFixture);
+  }
   const probe = net.createServer();
   await new Promise((resolve) => probe.listen(0, '127.0.0.1', resolve));
   const port = probe.address().port;
@@ -382,13 +387,13 @@ test('room API protects settings and passwords, supports reconnect and games', a
       child.once('error', reject);
       child.once('exit', (code) => { clearTimeout(timeout); reject(new Error(`Server exited: ${code}`)); });
     });
-    for (const file of approvedSounds) {
+    for (const [file, contentType] of approvedSounds) {
       const sample = await fetch(`http://127.0.0.1:${port}/sounds/${file}`);
       assert.equal(sample.status, 200);
-      assert.equal(sample.headers.get('content-type'), 'audio/mpeg');
+      assert.equal(sample.headers.get('content-type'), contentType);
       assert.deepEqual(Buffer.from(await sample.arrayBuffer()), soundFixture);
     }
-    assert.equal((await fetch(`http://127.0.0.1:${port}/sounds/dynamite.mp3`)).status, 404);
+    for (const file of excludedSounds) assert.equal((await fetch(`http://127.0.0.1:${port}/sounds/${file}`)).status, 404);
     const cookies = [];
     async function request(user, url, body) {
       const res = await fetch(`http://127.0.0.1:${port}${url}`, {
