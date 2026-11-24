@@ -1,0 +1,536 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Nháp tab Diễn biến v2</title>
+<link href="https://fonts.googleapis.com/css2?family=Rye&family=Be+Vietnam+Pro:wght@400;600;700;800&family=Roboto+Slab:wght@700;900&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../public/style.css">
+<script src="dien-bien-3-phe-data.js"></script>
+<style>
+  html, body { height: 100%; }
+  body { margin: 0; color: #f4e4c1; background: radial-gradient(circle at 50% 35%, #3a2416, #120a05); font-family: 'Be Vietnam Pro', sans-serif; }
+  /* Cả màn vừa một khung hình desktop: chỉ danh sách lượt cuộn bên trong */
+  .screen { height: 100vh; box-sizing: border-box; max-width: 1240px; margin: 0 auto; padding: 10px 20px 12px; display: flex; flex-direction: column; gap: 9px; }
+  .draft-bar { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; font-size: 11px; color: #bfa781; }
+  .draft-bar button { font: 700 11.5px 'Be Vietnam Pro', sans-serif; padding: 3px 10px; border-radius: 99px; border: 1px solid #8b6a43; background: transparent; color: #f4e4c1; cursor: pointer; }
+  .draft-bar button.on { background: #f4e4c1; color: #2a1a0e; }
+
+  .rhead { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+  .rhead h2 { margin: 0; font: normal 22px 'Rye', serif; color: #fde68a; }
+  .steps { display: flex; gap: 4px; font-size: 12px; font-weight: 700; }
+  .steps span { padding: 4px 10px; border-radius: 99px; color: #c9b08a; border: 1px solid #5c4128; }
+  .steps span.on { background: #fde68a; color: #2a1a0e; border-color: #fde68a; }
+
+  .panel { background: var(--paper); color: var(--ink); border: 2px solid #c9a46a; border-radius: 12px; box-shadow: 0 6px 20px rgba(0,0,0,.35); }
+  .panel h3 { margin: 0; font: normal 16px 'Rye', serif; color: var(--red); }
+
+  /* Hàng trên: loại trận + 3 thẻ phe */
+  .toprow { display: grid; grid-template-columns: minmax(0, 1.15fr) minmax(0, 2fr); gap: 9px; }
+  .mtype { display: flex; gap: 12px; align-items: center; padding: 9px 14px; }
+  .mtype .ic { font-size: 30px; line-height: 1; }
+  .mtype .k { font-size: 10.5px; font-weight: 800; letter-spacing: .5px; text-transform: uppercase; color: var(--muted); }
+  .mtype b { display: block; font: 900 18px 'Roboto Slab', serif; }
+  .mtype p { margin: 2px 0 0; font-size: 12.5px; line-height: 1.4; color: #4a3424; }
+  .odds { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 9px; }
+  .odd { padding: 8px 12px 9px; border-top: 6px solid var(--c); position: relative; }
+  .odd.win { box-shadow: 0 0 0 3px #fde68a, 0 6px 20px rgba(0,0,0,.35); }
+  .odd .nm { font-weight: 800; font-size: 13px; color: var(--ink2, var(--c)); display: flex; justify-content: space-between; gap: 6px; }
+  .odd .res { font-size: 11px; font-weight: 800; padding: 1px 8px; border-radius: 99px; background: #efe2c6; color: var(--muted); white-space: nowrap; }
+  .odd.win .res { background: var(--c); color: var(--on, #fff); }
+  .odd .facts { display: grid; grid-template-columns: repeat(3, auto); justify-content: space-between; gap: 2px 10px; margin-top: 4px; font-size: 10.5px; color: var(--muted); }
+  .odd .facts b { display: block; font-size: 15px; color: var(--ink); }
+  .odd .facts small { font-weight: 600; font-size: 10px; }
+
+  /* Biểu đồ */
+  .chartp { padding: 8px 14px 6px; position: relative; }
+  .head { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+  .legend { display: flex; gap: 12px; font-size: 11px; color: var(--muted); flex-wrap: wrap; align-items: center; }
+  .legend i { display: inline-block; width: 12px; height: 9px; border-radius: 2px; margin-right: 4px; vertical-align: -1px; }
+  #chart { display: block; width: 100%; height: 214px; touch-action: none; cursor: crosshair; }
+  .mk { cursor: pointer; }
+  .tip { position: absolute; pointer-events: none; background: #2a1a0e; color: #f4e4c1; border-radius: 8px; padding: 6px 9px; font-size: 11.5px; line-height: 1.45; box-shadow: 0 4px 14px rgba(0,0,0,.4); opacity: 0; transition: opacity .1s; white-space: nowrap; z-index: 3; }
+  .tip b { color: #fde68a; }
+  .tip .row { display: flex; gap: 8px; }
+  .tip .row span::before { content: ''; display: inline-block; width: 8px; height: 8px; border-radius: 2px; margin-right: 4px; background: var(--c); }
+
+  /* Danh sách lượt quyết định */
+  .events { flex: 1; min-height: 0; display: flex; flex-direction: column; padding: 8px 14px 10px; }
+  .list { flex: 1; min-height: 0; overflow-y: auto; margin-top: 6px; padding-right: 4px; display: flex; flex-direction: column; gap: 6px; scroll-behavior: smooth; }
+  .ev { display: grid; grid-template-columns: 28px 160px minmax(0, 1fr) 120px; gap: 10px; align-items: center; padding: 7px 10px; border-radius: 10px; background: #fffaf0; border: 1px solid #d8bd8a; cursor: pointer; transition: box-shadow .15s; }
+  .ev:hover, .ev.hl { box-shadow: 0 0 0 3px #d9a441; }
+  .ev.turning { background: linear-gradient(90deg, #fff1cc, #fffaf0 60%); border: 2px solid #d9a441; }
+  .num { width: 26px; height: 26px; border-radius: 50%; display: grid; place-items: center; font-weight: 800; font-size: 13px; color: #fff; background: var(--c); }
+  .ev.turning .num { background: #d9a441; color: #2a160a; }
+  .who { display: flex; gap: 8px; align-items: center; min-width: 0; }
+  .who img { width: 34px; height: 34px; border-radius: 50%; object-fit: cover; border: 2px solid var(--rc); flex: none; }
+  .who .w { font-size: 10.5px; color: var(--muted); font-weight: 700; line-height: 1.35; min-width: 0; }
+  .who .w b { display: block; font-size: 13px; color: var(--ink); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .rb { display: inline-block; padding: 0 6px; border-radius: 99px; font-size: 9.5px; font-weight: 800; color: #fff; background: var(--rc); }
+  .rb.ren { color: #2a1a0e; }
+  .t { font-weight: 800; font-size: 13.5px; }
+  .tag { display: inline-block; margin-left: 6px; padding: 1px 7px; border-radius: 99px; font-size: 9.5px; font-weight: 800; vertical-align: 2px; background: #efe2c6; color: var(--muted); }
+  .tag.turn { background: #d9a441; color: #2a160a; }
+  .tag.low { background: #2a1a0e; color: #fde68a; }
+  .tag.big { background: var(--red); color: #fff; }
+  .tag.hen { background: #2f7a3a; color: #fff; } .tag.xui { background: #4b4f5c; color: #fff; }
+  .luck { display: inline-block; font-weight: 800; padding: 0 6px; border-radius: 6px; margin-right: 2px; }
+  .luck.hen { background: #dcefd6; color: #2f6a35; } .luck.xui { background: #e1e2e8; color: #3b3f4a; }
+  .luck i { font-weight: 600; font-style: normal; opacity: .8; }
+  .act.cf .td b { text-decoration: underline dotted; text-underline-offset: 3px; }
+  .did { font-size: 12px; color: #4a3424; margin-top: 2px; line-height: 1.4; }
+  .imp { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 4px; }
+  .chip { font-size: 11px; padding: 1px 7px; border-radius: 99px; background: #f1e6cf; border: 1px solid #e2cfa4; }
+  .chip.dead { background: #3d2616; color: #fff; border-color: #3d2616; }
+  /* hành động trong lượt + Δ tỉ lệ thắng */
+  .acts { margin-top: 4px; display: flex; flex-direction: column; gap: 3px; }
+  /* mỗi dòng: Δ tỉ lệ thắng của đội người làm | hành động | giải thích */
+  .act { display: grid; grid-template-columns: 64px minmax(0, 1fr) minmax(0, 1.15fr); gap: 10px; align-items: center; padding: 3px 8px; border-radius: 7px; background: #f7eedb; font-size: 12px; line-height: 1.35; color: #4a3424; }
+  .act.big { background: #f1e1bd; }
+  .act .txt { display: flex; gap: 6px; min-width: 0; color: var(--ink); }
+  .act .ic { flex: none; width: 16px; text-align: center; }
+  .act .why { color: var(--muted); }
+  .act b.ok { color: #2f7a3a; } .act b.bad { color: var(--red); }
+  .rl { font-size: 10px; font-weight: 700; opacity: .8; }
+  .mate { font-size: 10px; font-weight: 800; color: var(--red); white-space: nowrap; }
+  .side { font-weight: 800; white-space: nowrap; } .side.law { color: var(--law); } .side.out { color: var(--outlaw); } .side.ren { color: var(--renegade-ink); }
+  /* Δ của một đội: số to + tên đội nhỏ, màu đội */
+  .td { display: flex; flex-direction: column; line-height: 1.1; white-space: nowrap; }
+  .td b { font-size: 13px; font-weight: 900; }
+  .td small { font-size: 9.5px; font-weight: 700; }
+  .td.law { color: var(--law); } .td.out { color: var(--outlaw); } .td.ren { color: var(--renegade-ink); }
+  .td.down b { opacity: .85; }
+  .td.big b { font-size: 22px; } .td.big small { display: none; }
+  .more { font-size: 11px; color: var(--muted); padding-left: 82px; }
+  /* cột phải: tổng cả lượt */
+  .swc { text-align: right; } .swc .td { align-items: flex-end; }
+  .sw { font-size: 10.5px; color: var(--muted); font-weight: 700; }
+  .sw2 { font-size: 11px; color: var(--muted); font-weight: 700; }
+  .dl { display: flex; gap: 8px; margin-top: 3px; font-size: 11px; font-weight: 800; flex-wrap: wrap; justify-content: flex-end; }
+  .dl .law { color: var(--law); } .dl .out { color: var(--outlaw); } .dl .ren { color: var(--renegade-ink); }
+
+  .foot { display: flex; justify-content: space-between; }
+  .foot button { font: 700 13px 'Be Vietnam Pro', sans-serif; padding: 7px 16px; border-radius: 8px; border: 1px solid #c9a46a; background: transparent; color: #f4e4c1; }
+  .foot button.main { background: #d9a441; color: #2a160a; border-color: #d9a441; }
+
+  /* màn thấp (1366×650, 1280×720): biểu đồ & hàng trên gọn lại để danh sách còn chỗ */
+  @media (max-height: 780px) and (min-width: 601px) {
+    .screen { gap: 6px; padding-top: 6px; padding-bottom: 8px; }
+    #chart { height: 150px; }
+    .mtype { padding: 6px 12px; } .mtype .ic { font-size: 24px; } .mtype b { font-size: 15px; } .mtype p { font-size: 11.5px; }
+    .odd { padding: 5px 10px 6px; border-top-width: 4px; } .odd .facts b { font-size: 13px; } .odd .facts small { display: none; }
+    .rhead h2 { font-size: 18px; }
+  }
+  @media (max-width: 900px) {
+    .toprow { grid-template-columns: 1fr; }
+    .ev { grid-template-columns: 26px minmax(0, 1fr); }
+    .ev .who { grid-column: 2; } .ev .body { grid-column: 1 / -1; } .ev .swc { grid-column: 1 / -1; }
+    .act { grid-template-columns: 56px minmax(0, 1fr); gap: 2px 8px; } .act .td { grid-row: span 2; } .act .why { grid-column: 2; }
+    .more { padding-left: 64px; }
+    .swc { text-align: left; display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; } .swc .td { align-items: flex-start; } .dl { justify-content: flex-start; }
+  }
+  @media (max-width: 600px) {
+    .screen { height: auto; min-height: 100vh; padding: 8px 10px 12px; }
+    .events { min-height: 60vh; flex: none; }
+    .list { max-height: 70vh; }
+    .odds { gap: 6px; } .odd { padding: 6px 8px; } .odd .facts { grid-template-columns: 1fr; } .odd .facts > div:nth-child(2) { display: none; }
+    .odd .nm { flex-direction: column; align-items: flex-start; gap: 3px; font-size: 12px; } .odd .res { font-size: 10px; padding: 0 6px; }
+    .rhead h2 { font-size: 18px; } .steps { display: none; }
+    #chart { height: 190px; }
+  }
+</style>
+</head>
+<body>
+<div class="screen">
+  <div class="draft-bar">Nháp — chọn ván bot: <span id="games"></span></div>
+  <div class="rhead"><h2 id="title"></h2><div class="steps"><span>Kết quả</span><span>Danh hiệu</span><span class="on">Diễn biến</span><span>Đóng góp</span><span>Thống kê</span></div></div>
+  <div class="toprow">
+    <div class="panel mtype" id="mtype"></div>
+    <div class="odds" id="odds"></div>
+  </div>
+  <section class="panel chartp" id="chartp">
+    <div class="head"><h3>Cửa thắng của 3 phe</h3>
+      <div class="legend"><span><i style="background:var(--law)"></i>Luật pháp</span><span><i style="background:var(--renegade)"></i>Renegade</span><span><i style="background:var(--outlaw)"></i>Outlaw</span><span>① lượt quyết định</span><span><i style="background:#d9a441"></i>bước ngoặt</span><span>☠ có người gục</span></div></div>
+    <svg id="chart"></svg>
+    <div class="tip" id="tip"></div>
+  </section>
+  <section class="panel events">
+    <div class="head"><h3>Những lượt quyết định</h3><span class="legend">lượt làm cửa thắng đổi nhiều nhất · lượt có rút kiểm tra hên / xui đặc biệt · 3 hành động tác động mạnh nhất mỗi lượt</span></div>
+    <div class="list" id="list"></div>
+  </section>
+  <div class="foot"><button>← Danh hiệu</button><button class="main">Đóng góp →</button></div>
+</div>
+<script>
+const D = window.GAMES3;
+const FS = ['law', 'ren', 'out']; // thứ tự dải từ dưới lên
+const FNAME = { law: 'Luật pháp', out: 'Outlaw', ren: 'Renegade' };
+const css = (v) => getComputedStyle(document.documentElement).getPropertyValue(v).trim();
+const COL = { law: css('--law') || '#3d7cc9', out: css('--outlaw') || '#8a2b1d', ren: css('--renegade') || '#e2b31e' };
+const ROLE_C = { Sheriff: css('--sheriff') || '#1d3a6b', Deputy: css('--deputy') || '#3d7cc9', Outlaw: COL.out, Renegade: COL.ren };
+const FAC = { Sheriff: 'law', Deputy: 'law', Outlaw: 'out', Renegade: 'ren' };
+const WIN = { Sheriff: 'law', Outlaw: 'out', Renegade: 'ren' };
+const pc = (v) => Math.round(v * 100) + '%';
+const sg = (v) => (Math.round(v * 100) === 0 ? '±' : v > 0 ? '+' : '−') + Math.abs(Math.round(v * 100));
+const slug = (s) => s.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+let G, turns, picked, turning, lowTurn, curHl = -1;
+
+// ---------- dữ liệu theo lượt ----------
+function buildTurns(g) {
+  const out = [];
+  g.pts.forEach((p, k) => {
+    let tr = out[out.length - 1];
+    if (!tr || tr.t !== p.t) { tr = { t: p.t, r: p.r, o: p.o, k0: k, k1: k, log: [] }; out.push(tr); }
+    tr.k1 = k; tr.log.push(...p.log);
+  });
+  out.forEach((tr, j) => {
+    const b = j ? g.pts[out[j - 1].k1] : { ...g.start, hp: g.pts[0].hp };
+    const a = g.pts[tr.k1];
+    tr.before = { law: b.law, out: b.out, ren: b.ren }; tr.after = { law: a.law, out: a.out, ren: a.ren };
+    tr.hp0 = b.hp; tr.hp1 = a.hp;
+    tr.d = { law: a.law - b.law, out: a.out - b.out, ren: a.ren - b.ren };
+    tr.swing = (Math.abs(tr.d.law) + Math.abs(tr.d.out) + Math.abs(tr.d.ren)) / 2; // tổng biến thiên
+    tr.gain = ['law', 'out', 'ren'].reduce((x, f) => (tr.d[f] > tr.d[x] ? f : x), 'law');
+    tr.deaths = g.deaths.filter((d) => d.k >= tr.k0 && d.k <= tr.k1);
+  });
+  return out;
+}
+// phe dẫn có "độ trễ": chỉ đổi khi phe mới hơn phe đang dẫn ≥ 10 điểm %
+function leaders(list) {
+  let cur = null;
+  return list.map((tr) => {
+    const p = tr.after, best = ['law', 'out', 'ren'].reduce((x, f) => (p[f] > p[x] ? f : x), 'law');
+    if (!cur || (best !== cur && p[best] - p[cur] >= 0.1)) cur = best;
+    return cur;
+  });
+}
+
+// ---------- loại trận (ngưỡng nháp, cần chỉnh lại bằng mô phỏng) ----------
+const MATCH = {
+  renegade: ['🎭', 'Kẻ phản bội cân cả bàn'], chaos: ['🔥', 'Trận điên rồ'], thrown: ['💔', 'Dẫn cả trận vẫn để thua'],
+  comeback: ['🔄', 'Lật kèo'], crush: ['👑', 'Áp đảo một chiều'], close: ['⚖️', 'Giằng co tới phút chót'], steady: ['🎯', 'Thắng chắc tay'],
+};
+function classify(g, list) {
+  const W = WIN[g.winner], body = list.slice(0, -1);
+  const pw = body.map((tr) => tr.after[W]);
+  const L = leaders(body);
+  let swaps = 0; for (let j = 1; j < L.length; j++) if (L[j] !== L[j - 1]) swaps++;
+  const share = (f) => (body.length ? body.filter(f).length / body.length : 0);
+  const low = Math.min(...pw), lowT = body[pw.indexOf(low)];
+  const mean = pw.reduce((a, b) => a + b, 0) / (pw.length || 1);
+  if (W === 'ren') {
+    const ren = g.roles.indexOf('Renegade');
+    return ['renegade', `${g.names[ren]} sống sót tới cuối, một mình đứng trên mọi phe — đầu ván chỉ có ${pc(g.start.ren)} cửa.`];
+  }
+  if (swaps >= 3) return ['chaos', `Thế dẫn đổi chủ ${swaps} lần — không phe nào giữ lợi thế được lâu.`];
+  const lost = share((_, j) => L[j] !== W);
+  if (lost >= 0.65) { const other = L.find((x) => x !== W); return ['thrown', `Phe ${FNAME[other]} dẫn ${pc(lost)} thời gian của ván nhưng để tuột chiến thắng ở cuối.`]; }
+  if (low <= 0.2) return ['comeback', `Phe ${FNAME[W]} từng chỉ còn ${pc(low)} cửa thắng ở lượt ${lowT.t} rồi lật ngược thế trận.`];
+  if (share((_, j) => L[j] === W) >= 0.9 && mean >= 0.6) return ['crush', `Phe ${FNAME[W]} dẫn gần như suốt ván, cửa thắng trung bình ${pc(mean)}.`];
+  if (share((tr) => Math.abs(tr.after.law - tr.after.out) <= 0.15) >= 0.7) return ['close', 'Hai phe ngang ngửa gần cả ván, chỉ ngã ngũ ở những lượt cuối.'];
+  return ['steady', `Phe ${FNAME[W]} tạo được lợi thế rồi giữ vững tới cuối.`];
+}
+
+// ---------- chọn lượt đưa vào danh sách ----------
+// Rút kiểm tra hên / xui đặc biệt trong lượt:
+//  hên: thoát tù (1/4) · Barrel đỡ được khi chỉ còn 1 máu (cứu mạng) · Barrel đỡ được ≥ 2 lần liền
+//  xui: Dynamite nổ · Barrel trượt rồi gục ngay trong lượt
+const CHECK = /^(.+?) rút kiểm tra \((\w+)\): (.+?) → (thành công|thất bại)/;
+function luckOf(g, tr) {
+  const ev = [], streak = {};
+  for (let k = tr.k0; k <= tr.k1; k++) for (const l of g.pts[k].log) {
+    const m = l.match(CHECK); if (!m) continue;
+    const [, who, kind, card, r] = m, i = g.names.indexOf(who), ok = r === 'thành công';
+    const hp0 = (k ? g.pts[k - 1] : g.pts[0]).hp[i];
+    if (kind === 'Barrel') streak[who] = ok ? (streak[who] || 0) + 1 : 0;
+    // text: tiêu đề lượt · short: nhãn gọn cạnh hành động
+    if (kind === 'Jail' && ok) ev.push({ k, kind: 'hen', text: `${who} rút ${card}, thoát tù`, short: 'thoát tù, cơ hội 1/4' });
+    else if (kind === 'Dynamite' && !ok) ev.push({ k, kind: 'xui', text: `Dynamite nổ trúng ${who}`, short: 'Dynamite nổ, cơ hội ~1/6' });
+    else if (kind === 'Barrel' && ok) {
+      const e = withCf(g, { k, i, ok, kind: 'hen' }), role = g.roles[i];
+      if (hp0 === 1) ev.push(Object.assign(e, { text: `Barrel cứu mạng ${who} khi chỉ còn 1 máu`, short: `${who} còn 1 máu, trượt là gục` }));
+      else if (streak[who] === 2) ev.push(Object.assign(e, { text: `Barrel của ${who} đỡ 2 lần liền`, short: 'Barrel đỡ 2 lần liền' }));
+      else if ((e.mag || 0) >= LUCK_MIN) ev.push(Object.assign(e, { text: `Barrel đỡ đòn cho ${role} ${who}`, short: `Barrel đỡ cho ${role} ${who}` }));
+    } else if (kind === 'Barrel') {
+      // trượt: tìm lúc người đó thật sự mất máu (có thể vẫn kịp dùng Missed! thì không tính)
+      let kEnd = -1; for (let j = k; j <= tr.k1; j++) if (g.pts[j].hp[i] < hp0) { kEnd = j; break; }
+      if (kEnd < 0) continue;
+      const dead = tr.deaths.some((x) => x.i === i && x.k === kEnd), role = g.roles[i];
+      const e = withCf(g, { k, i, ok, kind: 'xui', kEnd });
+      if (dead) ev.push(Object.assign(e, { text: `Barrel của ${who} trượt, gục ngay sau đó`, short: 'Barrel trượt đúng lúc nguy' }));
+      else if ((e.mag || 0) >= LUCK_MIN) ev.push(Object.assign(e, { text: `Barrel của ${role} ${who} trượt`, short: `Barrel của ${role} ${who} trượt` }));
+    }
+  }
+  return ev;
+}
+const LUCK_MIN = 0.1; // Barrel làm tỉ lệ thắng chênh ≥ 10 điểm % so với kịch bản ngược lại → hên/xui đặc biệt
+// Độ hên/xui của lần rút Barrel = tỉ lệ thắng thật − tỉ lệ thắng nếu Barrel ra ngược lại (cf tính sẵn trong dữ liệu).
+// Đỡ được: so ngay sau lần rút. Trượt: so lúc người đó gục với lúc vừa rút (như thể đã đỡ được).
+function withCf(g, e) {
+  const cf = g.pts[e.k].cf?.find((c) => c.i === e.i);
+  if (!cf) return e;
+  const a = g.pts[e.ok ? e.k : e.kEnd];
+  e.d = { law: a.law - cf.law, out: a.out - cf.out, ren: a.ren - cf.ren };
+  e.mag = Math.max(...Object.values(e.d).map(Math.abs));
+  e.vs = e.ok ? 'so với nếu Barrel trượt' : 'so với nếu Barrel đỡ được';
+  return e;
+}
+// Chỉ chọn: lượt ảnh hưởng lớn nhất (3 lượt, đổi ≥ 8 điểm %) + lượt có rút kiểm tra hên/xui đặc biệt (tối đa 3).
+// Bỏ lượt cuối (phát bắn cuối chỉ "chốt" kết quả).
+function pick(g, list) {
+  const W = WIN[g.winner], body = list.slice(0, -1);
+  const L = leaders(body);
+  let tp = null; for (let j = body.length - 1; j > 0; j--) if (L[j] === W && L[j - 1] !== W) { tp = body[j]; break; }
+  const pw = body.map((tr) => tr.after[W]);
+  const low = Math.min(...pw); const lowT = low < 0.3 ? body[pw.indexOf(low)] : null;
+  const bySwing = [...body].sort((a, b) => b.swing - a.swing);
+  let big = bySwing.filter((tr) => tr.swing >= 0.08).slice(0, 3);
+  if (big.length < 2) big = bySwing.slice(0, 2);
+  body.forEach((tr) => { tr.luck = luckOf(g, tr); });
+  // xếp lượt hên/xui theo độ hên/xui (kịch bản ngược lại) nếu có, không thì theo biến động của lượt
+  const luckMag = (tr) => Math.max(...tr.luck.map((e) => e.mag ?? tr.swing));
+  const lucky = body.filter((tr) => tr.luck.length).sort((a, b) => luckMag(b) - luckMag(a)).slice(0, 3);
+  const out = [...new Set([...big, ...lucky])].sort((a, b) => a.t - b.t);
+  out.forEach((tr) => {
+    tr.kinds = [];
+    if (big.includes(tr)) tr.kinds.push('big');
+    if (lucky.includes(tr)) tr.kinds.push(...new Set(tr.luck.map((e) => e.kind)));
+    if (tr === tp) tr.kinds.push('turn');
+    if (tr === lowT) tr.kinds.push('low');
+  });
+  return { out, tp, lowT };
+}
+
+// ---------- mô tả lượt ----------
+const ACT = /^(💥|🔫|🪶|🤠|🍺|⛓️|💃|😱|🏪|🥃)\s*/;
+function titleOf(g, tr) {
+  const own = tr.log.filter((l) => ACT.test(l)).join(' ');
+  // lượt chỉ lọt vì hên/xui: lấy chính sự kiện đó làm tiêu đề
+  if (!tr.kinds.includes('big') && tr.luck?.length) { const e = tr.luck[0]; return `${e.kind === 'hen' ? '🍀' : '🌧️'} ${e.text}`; }
+  if (tr.deaths.length >= 2) return `💀 Liên hoàn: ${tr.deaths.length} người gục`;
+  if (tr.deaths.length) { const d = tr.deaths[0]; const tragic = FAC[g.roles[tr.o]] === FAC[d.role] && g.roles[tr.o] !== 'Renegade' && d.i !== tr.o; return `${tragic ? '💔 Bi kịch: ' : '💀 '}${d.role} ${d.name} gục ngã`; }
+  if (/Dynamite nổ/.test(tr.log.join(' '))) return '💣 Dynamite phát nổ';
+  if (/Gatling/.test(own)) return '🔫 Gatling quét cả bàn';
+  if (/thổ dân/.test(own)) return '🪶 Thổ dân tràn vào';
+  if (/thách đấu/.test(own)) return '🤠 Đấu tay đôi';
+  if (/bỏ tù/.test(own)) return '⛓️ Song sắt khép lại';
+  if (/buộc .* bỏ|lấy .* của/.test(own)) return '😱 Tước vũ khí đối thủ';
+  if (/Beer|Saloon/.test(own)) return '🍺 Hồi sức đúng lúc';
+  if (/bắn/.test(own)) return '💥 Loạt đạn quyết định';
+  return `⚖️ ${FNAME[tr.gain]} giành lại thế`;
+}
+function didOf(g, tr) {
+  const kills = tr.deaths.map((d) => `☠️ <b>${esc(d.name)}</b> (${d.role}) gục`);
+  const acts = tr.log.filter((l) => ACT.test(l)).slice(0, 3).map((l) => esc(l.replace(ACT, '')));
+  return [...acts, ...kills].join(' · ') || 'Không có hành động tấn công';
+}
+function impactOf(g, tr) {
+  return g.names.map((nm, i) => {
+    if (tr.hp0[i] > 0 && tr.hp1[i] <= 0) return `<span class="chip dead">💀 ${esc(nm)}</span>`;
+    const dh = tr.hp1[i] - tr.hp0[i];
+    return dh ? `<span class="chip">${esc(nm)} ${dh > 0 ? '+' : '−'}${Math.abs(dh)} máu</span>` : '';
+  }).filter(Boolean).slice(0, 5).join('');
+}
+// ---------- các hành động trong lượt và tác động lên tỉ lệ thắng ----------
+// Mỗi "chuỗi" bắt đầu bằng một lá đánh / trang bị / lần rút kiểm tra / sự kiện, gom luôn các phản hồi theo sau
+// (né, mất máu, gục…). Δ của chuỗi = tỉ lệ thắng sau chuỗi − trước chuỗi.
+const STARTER = /^(💥|🔫|🪶|🤠|🍺|⛓️|💃|😱|🏪|🥃)|rút kiểm tra|trang bị |Dynamite nổ|bị giam|thoát khỏi nhà tù|bỏ \d+ lá để hồi/;
+const RESULT = /mất \d+ máu|đã chết|né được|dùng Missed|uống Beer|bị giam|thoát khỏi|được thưởng|Dynamite nổ|chuyền sang|rút kiểm tra \(Barrel\)/;
+// Rút Barrel là phản hồi của một đòn đang diễn ra → thuộc chuỗi của đòn đó; Dynamite/Jail đầu lượt mới là sự kiện riêng
+const isStarter = (l, cur) => STARTER.test(l) && !(cur && /rút kiểm tra \(Barrel\)/.test(l));
+const ACT_MIN = 0.03; // chỉ hiện hành động làm một phe đổi ≥ 3 điểm %
+function chainsOf(g, tr) {
+  const P = (k) => (k < 0 ? g.start : g.pts[k]);
+  const out = []; let cur = null;
+  for (let k = tr.k0; k <= tr.k1; k++) {
+    const lines = g.pts[k].log, si = lines.findIndex((l) => isStarter(l, cur));
+    if (si >= 0) { cur = { k0: k, head: lines[si], rest: lines.filter((_, j) => j !== si) }; out.push(cur); }
+    else if (!cur) { cur = { k0: k, head: null, rest: [...lines] }; out.push(cur); }
+    else cur.rest.push(...lines);
+    cur.k1 = k;
+  }
+  out.forEach((c) => { const a = P(c.k0 - 1), b = P(c.k1); c.d = { law: b.law - a.law, out: b.out - a.out, ren: b.ren - a.ren }; c.mag = Math.max(...Object.values(c.d).map(Math.abs)); });
+  return out;
+}
+// Người làm hành động: tên ở đầu dòng (tên dài nhất khớp, vì tên thật có thể có dấu cách); dòng rút bài đầu lượt → chủ lượt
+function actorOf(g, tr, c) {
+  if (!c.head) return tr.o;
+  const s = c.head.replace(/^\S+\s/u, (m) => (/\p{Extended_Pictographic}/u.test(m) ? '' : m));
+  let best = -1; g.names.forEach((nm, i) => { if (s.startsWith(nm + ' ') && (best < 0 || nm.length > g.names[best].length)) best = i; });
+  return best >= 0 ? best : tr.o;
+}
+// Hành động: bỏ biểu tượng ở đầu, tô đậm tên người làm, kết quả rút kiểm tra tô màu
+function actionText(g, c, actor) {
+  if (!c.head) return '<span class="ic">🃏</span><span><b>' + esc(g.names[actor]) + '</b> rút bài đầu lượt</span>';
+  const ic = c.head.match(/^(\S+)\s/u)?.[1];
+  const isCheck = /rút kiểm tra/.test(c.head);
+  const icon = isCheck ? '🎴' : /trang bị/.test(c.head) ? '🛡️' : ic && /\p{Extended_Pictographic}/u.test(ic) ? ic : '•';
+  let s = esc(c.head.replace(/^\S+\s/u, (m) => (/\p{Extended_Pictographic}/u.test(m) ? '' : m)).replace(/[.!]$/, ''));
+  s = s.replace(esc(g.names[actor]), `<b>${esc(g.names[actor])}</b>`);
+  if (isCheck) s = s.replace(/→ (thành công|thất bại)/, (_, r) => `→ <b class="${r === 'thành công' ? 'ok' : 'bad'}">${r}</b>`);
+  return `<span class="ic">${icon}</span><span>${s}</span>`;
+}
+// Giải thích ngắn: hậu quả của hành động (gục > mất máu > Barrel/né > còn lại), đánh dấu khi trúng đồng đội
+function explainText(g, c, actor) {
+  const role = (nm) => g.roles[g.names.indexOf(nm)];
+  const mate = (nm) => { const i = g.names.indexOf(nm); return i >= 0 && i !== actor && g.roles[actor] !== 'Renegade' && FAC[g.roles[i]] === FAC[g.roles[actor]]; };
+  const who = (nm) => `${esc(nm)} <span class="rl">${role(nm) || ''}</span>${mate(nm) ? ' <span class="mate">⚠ đồng đội</span>' : ''}`;
+  const items = [];
+  c.rest.forEach((l, j) => {
+    let m;
+    if ((m = l.match(/^☠️ (.+?) đã chết!/))) items.push([0, j, `☠️ ${who(m[1])} gục`]);
+    else if ((m = l.match(/^(.+?) mất (\d+) máu \(còn (\d+)\)/))) items.push([1, j, `${who(m[1])} −${m[2]} máu, còn ${m[3]}`]);
+    else if ((m = l.match(/^(.+?) rút kiểm tra \(Barrel\): (.+?) → (thành công|thất bại)/))) items.push([2, j, `Barrel của ${esc(m[1])} <b class="${m[3] === 'thành công' ? 'ok' : 'bad'}">${m[3] === 'thành công' ? 'đỡ được' : 'trượt'}</b>`]);
+    else if ((m = l.match(/^(.+?) đã né được/))) items.push([2, j, `${esc(m[1])} né được`]);
+    else if ((m = l.match(/Dynamite được chuyền sang (.+?)\./))) items.push([3, j, `Dynamite chuyền sang ${esc(m[1])}`]);
+    else if (/Dynamite nổ/.test(l)) items.push([0, j, '💣 Dynamite nổ']);
+    else if ((m = l.match(/^(.+?) bị giam, mất lượt/))) items.push([1, j, `${esc(m[1])} bị giam, mất lượt`]);
+    else if ((m = l.match(/^(.+?) thoát khỏi nhà tù/))) items.push([2, j, `${esc(m[1])} ra tù`]);
+    else if ((m = l.match(/được thưởng (\d+) lá/))) items.push([3, j, `thưởng ${m[1]} lá`]);
+  });
+  const out = items.sort((a, b) => a[0] - b[0] || a[1] - b[1]).slice(0, 4).sort((a, b) => a[1] - b[1]).map((x) => x[2]);
+  if (out.length) return out.join(' · ');
+  const h = c.head || '';
+  if (!c.head) return 'thêm bài trên tay';
+  if (/Beer/.test(h)) return 'hồi 1 máu';
+  if (/Saloon/.test(h)) return 'cả bàn hồi 1 máu';
+  if (/trang bị/.test(h)) return 'lắp trang bị lên bàn';
+  if (/bỏ tù/.test(h)) return 'đối thủ có thể mất lượt sau';
+  if (/General Store/.test(h)) return 'mỗi người chọn một lá';
+  if (/buộc .* bỏ|lấy .* của/.test(h)) return 'đối thủ mất một lá';
+  if (/rút kiểm tra \(Jail\)/.test(h)) return /thành công/.test(h) ? 'thoát tù, được chơi lượt này' : 'mất lượt';
+  if (/rút kiểm tra \(Dynamite\)/.test(h)) return /thành công/.test(h) ? 'Dynamite không nổ' : 'Dynamite nổ';
+  return 'không trúng ai';
+}
+const maxFac = (d) => ['law', 'ren', 'out'].reduce((a, f) => (Math.abs(d[f]) > Math.abs(d[a]) ? f : a), 'law');
+const teamDelta = (f, v, big) => { const r = Math.round(v * 100); return `<span class="td ${f} ${r > 0 ? 'up' : r < 0 ? 'down' : ''} ${big ? 'big' : ''}"><b>${r > 0 ? '▲' : r < 0 ? '▼' : ''} ${sg(v)}%</b><small>${FNAME[f]}</small></span>`; };
+function actsHTML(g, tr) {
+  // bỏ phần rút bài đầu lượt (không phải hành động); lấy tối đa 3 hành động tác động mạnh nhất, xếp lại theo thứ tự diễn ra
+  const all = chainsOf(g, tr).filter((c) => c.head);
+  // hành động có rút kiểm tra hên/xui luôn được hiện (nếu lượt lọt vì nó), rồi tới hành động tác động mạnh nhất
+  const luckIn = (c) => (tr.kinds?.includes('hen') || tr.kinds?.includes('xui')) && (tr.luck || []).filter((e) => e.k >= c.k0 && e.k <= c.k1);
+  all.forEach((c) => { c.luck = luckIn(c) || []; });
+  const byMag = [...all].sort((a, b) => b.mag - a.mag);
+  let shown = [...byMag.filter((c) => c.luck.length), ...byMag.filter((c) => !c.luck.length && c.mag >= ACT_MIN)].slice(0, 3);
+  if (!shown.length) shown = byMag.slice(0, 1);
+  shown.sort((a, b) => a.k0 - b.k0);
+  const rest = all.length - shown.length;
+  return `<div class="acts">${shown.map((c) => {
+    // số bên trái: phe có tỉ lệ thắng đổi nhiều nhất vì hành động này (không nhất thiết là đội người làm)
+    // có lần rút Barrel hên/xui → số bên trái là độ hên/xui (so với kịch bản ngược lại) thay cho Δ thật
+    const le = c.luck.find((e) => e.d);
+    const d = le ? le.d : c.d;
+    const actor = actorOf(g, tr, c), f = maxFac(d), v = d[f];
+    return `<div class="act ${Math.abs(v) >= 0.1 ? 'big' : ''} ${le ? 'cf' : ''}">${teamDelta(f, v)}<div class="txt">${actionText(g, c, actor)}</div><div class="why">${c.luck.map((e) => `<span class="luck ${e.kind}">${e.kind === 'hen' ? '🍀 hên' : '🌧️ xui'}: ${esc(e.short)}${e.vs ? ` <i>(${e.vs})</i>` : ''}</span> `).join('')}${explainText(g, c, actor)}</div></div>`;
+  }).join('')}
+    ${rest > 0 ? `<div class="more">+ ${rest} hành động khác ảnh hưởng nhỏ</div>` : ''}</div>`;
+}
+
+// ---------- biểu đồ dải chồng ----------
+let geo = null;
+function drawChart() {
+  const svg = document.getElementById('chart');
+  const W = svg.clientWidth || 1000, H = svg.clientHeight || 214;
+  svg.setAttribute('viewBox', `0 0 ${W} ${H}`);
+  const n = G.pts.length - 1, T = turns.length;
+  // mỗi lượt rộng bằng nhau, các hành động trong lượt chia đều
+  const pos = G.pts.map((p, k) => { const tr = turns.find((x) => k >= x.k0 && k <= x.k1); const j = turns.indexOf(tr); return j + (k - tr.k0 + 1) / (tr.k1 - tr.k0 + 1); });
+  const x0 = 30, x1 = W - 6, top = 24, bot = H - 34;
+  const x = (k) => x0 + (k < 0 ? 0 : pos[k] / T) * (x1 - x0), y = (v) => bot - v * (bot - top);
+  const xs = [x(-1), ...G.pts.map((_, k) => x(k))];
+  const P = [G.start, ...G.pts];
+  let h = '';
+  // dải: luật pháp (dưới) → renegade → outlaw (trên)
+  const cum = P.map((p) => [0, p.law, p.law + p.ren, 1]);
+  FS.forEach((f, b) => {
+    const up = P.map((_, k) => `${xs[k]},${y(cum[k][b + 1])}`), dn = P.map((_, k) => `${xs[k]},${y(cum[k][b])}`).reverse();
+    h += `<polygon points="${up.concat(dn).join(' ')}" fill="${COL[f]}"/>`;
+  });
+  // vạch vòng & nhãn
+  let lastR = null;
+  turns.forEach((tr, j) => { if (tr.r !== lastR) { const X = x0 + (j / T) * (x1 - x0); h += `<line x1="${X}" x2="${X}" y1="${top}" y2="${bot}" stroke="#fff" stroke-opacity=".35"/><text x="${X + 3}" y="${H - 4}" font-size="10" fill="#8b7355">V${tr.r}</text>`; lastR = tr.r; } });
+  h += `<line x1="${x0}" x2="${x1}" y1="${y(.5)}" y2="${y(.5)}" stroke="#fff" stroke-dasharray="4 4" stroke-opacity=".75"/>`;
+  [0, .5, 1].forEach((v) => { h += `<text x="${x0 - 4}" y="${y(v) + 3}" font-size="10" text-anchor="end" fill="#8b7355">${pc(v)}</text>`; });
+  // lượt quyết định: vệt sáng + số
+  picked.forEach((tr, i) => {
+    const a = x0 + (turns.indexOf(tr) / T) * (x1 - x0), w = Math.max(4, (x1 - x0) / T);
+    h += `<rect x="${a}" y="${top}" width="${w}" height="${bot - top}" fill="${tr === turning ? '#fde68a' : '#fff'}" opacity="${tr === turning ? .55 : .28}" class="mk" data-i="${i}"/>`;
+    const c = tr === turning ? '#d9a441' : COL[tr.gain];
+    h += `<g class="mk" data-i="${i}"><circle cx="${a + w / 2}" cy="${top - 12}" r="10" fill="${c}" stroke="#fffaf0" stroke-width="2"/><text x="${a + w / 2}" y="${top - 8}" font-size="11" font-weight="800" text-anchor="middle" fill="${tr === turning || tr.gain === 'ren' ? '#2a160a' : '#fff'}">${i + 1}</text></g>`;
+  });
+  // người gục: chấm màu vai trò ngay dưới trục
+  G.deaths.forEach((d) => { h += `<g><circle cx="${x(d.k)}" cy="${bot + 10}" r="7" fill="${ROLE_C[d.role]}" stroke="#fffaf0" stroke-width="1.5"/><text x="${x(d.k)}" y="${bot + 13.5}" font-size="8.5" text-anchor="middle">☠</text><title>${d.name} (${d.role}) gục — lượt ${d.t}</title></g>`; });
+  h += `<line id="cross" y1="${top}" y2="${bot}" stroke="#2a1a0e" stroke-width="1.5" opacity="0"/>`;
+  svg.innerHTML = h;
+  geo = { x, xs, x0, x1, top, bot, n };
+}
+function hover(ev) {
+  const svg = document.getElementById('chart'), r = svg.getBoundingClientRect(), mx = ev.clientX - r.left;
+  let k = 0, bd = 1e9; G.pts.forEach((_, j) => { const d = Math.abs(geo.x(j) - mx); if (d < bd) { bd = d; k = j; } });
+  const p = G.pts[k], tr = turns.find((t) => k >= t.k0 && k <= t.k1);
+  const cross = document.getElementById('cross'); cross.setAttribute('x1', geo.x(k)); cross.setAttribute('x2', geo.x(k)); cross.setAttribute('opacity', .7);
+  const tip = document.getElementById('tip');
+  const owner = G.names[tr.o];
+  tip.innerHTML = `<b>Lượt ${tr.t}</b> · ${esc(owner)} (${G.roles[tr.o]})<div class="row">${['law', 'ren', 'out'].map((f) => `<span style="--c:${COL[f]}">${FNAME[f]} ${pc(p[f])}</span>`).join('')}</div>${p.log.length ? `<div style="max-width:320px;white-space:normal;opacity:.85">${esc(p.log.slice(0, 2).join(' · '))}</div>` : ''}`;
+  const pr = document.getElementById('chartp').getBoundingClientRect();
+  let left = r.left - pr.left + geo.x(k) + 12; if (left + tip.offsetWidth > pr.width - 8) left -= tip.offsetWidth + 24;
+  tip.style.left = left + 'px'; tip.style.top = (r.top - pr.top + 26) + 'px'; tip.style.opacity = 1;
+}
+
+// ---------- vẽ toàn tab ----------
+function render(g) {
+  G = g; turns = buildTurns(g);
+  const res = pick(g, turns); picked = res.out; turning = res.tp; lowTurn = res.lowT;
+  const W = WIN[g.winner];
+  document.getElementById('title').textContent = `🏆 ${g.winner === 'Sheriff' ? 'Sheriff & Deputy' : g.winner === 'Outlaw' ? 'Outlaw' : 'Renegade'} chiến thắng · ${g.turns} lượt`;
+  const [mk, txt] = classify(g, turns), [ic, name] = MATCH[mk];
+  document.getElementById('mtype').innerHTML = `<span class="ic">${ic}</span><div><div class="k">Loại trận</div><b>${name}</b><p>${esc(txt)}</p></div>`;
+  // thẻ 3 phe: đầu ván · cao nhất · thấp nhất / kết cục
+  const body = turns.slice(0, -1);
+  document.getElementById('odds').innerHTML = ['law', 'ren', 'out'].map((f) => {
+    const vals = body.map((tr) => tr.after[f]);
+    const hi = Math.max(...vals), hiT = body[vals.indexOf(hi)];
+    const goneD = g.deaths.filter((d) => FAC[d.role] === f);
+    const allDead = goneD.length === g.roles.filter((r) => FAC[r] === f).length;
+    const res = f === W ? '🏆 Thắng' : allDead && f !== 'law' ? `hết người · L${goneD[goneD.length - 1].t}` : 'Thua';
+    const lo = Math.min(...vals), loT = body[vals.indexOf(lo)];
+    const third = f === W ? `<div>thấp nhất<b>${pc(lo)}</b><small>lượt ${loT.t}</small></div>` : `<div>cuối ván<b>${pc(body[body.length - 1].after[f])}</b><small>trước phát cuối</small></div>`;
+    return `<div class="panel odd ${f === W ? 'win' : ''}" style="--c:${COL[f]};${f === 'ren' ? '--on:#2a1a0e;--ink2:var(--renegade-ink)' : ''}">
+      <div class="nm">${FNAME[f]}<span class="res">${res}</span></div>
+      <div class="facts"><div>đầu ván<b>${pc(g.start[f])}</b><small>${g.n} người</small></div><div>cao nhất<b>${pc(hi)}</b><small>lượt ${hiT.t}</small></div>${third}</div></div>`;
+  }).join('');
+  // danh sách
+  document.getElementById('list').innerHTML = picked.map((tr, i) => {
+    const role = g.roles[tr.o], rc = ROLE_C[role];
+    const tags = [tr.kinds.includes('big') ? '<span class="tag big">ẢNH HƯỞNG LỚN</span>' : '',
+      tr.kinds.includes('hen') ? '<span class="tag hen">🍀 HÊN</span>' : '', tr.kinds.includes('xui') ? '<span class="tag xui">🌧️ XUI</span>' : '',
+      tr.kinds.includes('turn') ? '<span class="tag turn">BƯỚC NGOẶT</span>' : '',
+      tr.kinds.includes('low') ? `<span class="tag low">${FNAME[W].toUpperCase()} CHẠM ĐÁY ${pc(tr.after[W])}</span>` : ''].join('');
+    // cột phải: tổng cả lượt của phe bị đổi nhiều nhất
+    const of = maxFac(tr.d);
+    return `<div class="ev ${tr === turning ? 'turning' : ''}" id="ev${i}" data-i="${i}" style="--c:${COL[tr.gain]}">
+      <span class="num" style="${tr.gain === 'ren' ? 'color:#2a160a' : ''}">${i + 1}</span>
+      <div class="who" style="--rc:${rc}"><img src="../public/avatars/${slug(g.chars[tr.o])}.jpg" alt=""><div class="w">Lượt ${tr.t} · vòng ${tr.r}<b>${esc(g.names[tr.o])}</b><span class="rb ${role === 'Renegade' ? 'ren' : ''}">${role}</span></div></div>
+      <div class="body"><div class="t">${esc(titleOf(g, tr))}${tags}</div>${actsHTML(g, tr)}</div>
+      <div class="swc"><div class="sw">Cả lượt · ${FNAME[of]}</div>${teamDelta(of, tr.d[of], true)}<div class="sw2">${pc(tr.before[of])} → ${pc(tr.after[of])}</div></div>
+    </div>`;
+  }).join('');
+  drawChart();
+}
+function highlight(i, scroll) {
+  document.querySelectorAll('.ev').forEach((e) => e.classList.toggle('hl', +e.dataset.i === i));
+  if (scroll) document.getElementById('ev' + i)?.scrollIntoView({ block: 'nearest' });
+}
+
+document.getElementById('games').innerHTML = D.games.map((g, i) => `<button data-i="${i}">${esc(g.label)}</button>`).join(' ');
+document.getElementById('games').addEventListener('click', (e) => { const b = e.target.closest('button'); if (!b) return; document.querySelectorAll('#games button').forEach((x) => x.classList.toggle('on', x === b)); render(D.games[+b.dataset.i]); });
+const chart = document.getElementById('chart');
+chart.addEventListener('pointermove', hover);
+chart.addEventListener('pointerleave', () => { document.getElementById('tip').style.opacity = 0; document.getElementById('cross')?.setAttribute('opacity', 0); });
+chart.addEventListener('click', (e) => { const m = e.target.closest('.mk'); if (m) highlight(+m.dataset.i, true); });
+document.getElementById('list').addEventListener('mouseover', (e) => { const r = e.target.closest('.ev'); if (r) highlight(+r.dataset.i, false); });
+new ResizeObserver(() => G && drawChart()).observe(chart);
+document.querySelector('#games button').click();
+</script>
+</body>
+</html>

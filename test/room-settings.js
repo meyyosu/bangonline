@@ -22,7 +22,9 @@ test('character selection offers 2–4 choices, validates actions, and keeps sev
     assert.equal(g.phase, 'character');
     assert.equal(g.deck.length, 80);
     assert.equal(g.turnNumber, undefined);
-    for (let i = 0; i < 7; i++) {
+    for (let k = 0; k < 7; k++) {
+      const i = (g.turn + k) % 7;
+      assert.equal(g.pending.player, i);
       const player = g.players[i].name;
       const options = g.viewFor(player).pending.options;
       assert.equal(options.length, choices);
@@ -57,16 +59,18 @@ test('character clock runs independently and transitions to a fresh turn clock',
     }
     assert.notEqual(g.phase, 'character');
     assert.equal(r.clock.draw, true);
-    assert.equal(r.clock.deadline, 46000);
-    assert.equal(tickTimer(r, 46000), true);
-    if (turnSeconds) assert.equal(r.clock.deadline, 66000);
+    const drawEnd = 41000 + r.clock.seconds * 1000; // 5 hoặc 20 giây tuỳ nhân vật của Sheriff
+    assert.equal(r.clock.deadline, drawEnd);
+    assert.equal(tickTimer(r, drawEnd), true);
+    if (turnSeconds) assert.equal(r.clock.deadline, drawEnd + 20000);
     else assert.equal(r.clock, null);
   }
   const g = new Game(names, { characterChoices: 2 });
   const r = { game: g, turnSeconds: 10, characterSeconds: 0 };
   assert.equal(tickTimer(r, 100000), false);
   assert.equal(r.clock, null);
-  assert.equal(g.pending.player, 0);
+  assert.equal(g.pending.player, g.turn);
+  assert.equal(g.players[g.pending.player].role, 'Sheriff');
 });
 
 test('turn timer expires, preserves 80 cards, and starts the next turn', () => {
@@ -492,7 +496,7 @@ for (const dodgeCity of [false, true]) test(`room API protects settings and pass
     assert.deepEqual((await view(0, code)).bots, []);
     assert.equal((await request(0, url + '/settings', { turnSeconds: 601, password: '' })).status, 400);
     let room = await view(0, code);
-    assert.deepEqual(room.server, { features: ['endSummary'], stale: false });
+    assert.deepEqual(room.server, { features: ['endSummary', 'freeReset'], stale: false });
     assert.equal(room.hasPassword, true);
     assert.equal(room.turnSeconds, 10);
     assert.ok(!JSON.stringify(room).includes('room-secret'));
@@ -676,10 +680,10 @@ test('room view warns when the code on disk is newer than the running server', a
       return JSON.parse(text.split('\n\n')[0].slice(6)).room.server;
     }
     await new Promise((resolve) => setTimeout(resolve, 300));
-    assert.deepEqual(await server(), { features: ['endSummary'], stale: false });
+    assert.deepEqual(await server(), { features: ['endSummary', 'freeReset'], stale: false });
     fs.appendFileSync(path.join(dir, 'game.js'), '\n// cập nhật giả lập\n');
     await new Promise((resolve) => setTimeout(resolve, 400));
-    assert.deepEqual(await server(), { features: ['endSummary'], stale: true });
+    assert.deepEqual(await server(), { features: ['endSummary', 'freeReset'], stale: true });
   } finally {
     child.kill();
     await new Promise((resolve) => child.exitCode !== null ? resolve() : child.once('exit', resolve));

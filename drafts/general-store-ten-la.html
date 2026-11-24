@@ -1,0 +1,123 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Nháp General Store: tên lá</title>
+<link href="https://fonts.googleapis.com/css2?family=Rye&family=Be+Vietnam+Pro:wght@400;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../public/style.css">
+<style>
+body { padding: 0 16px 40px; }
+.page { max-width: 1100px; margin: 0 auto; color: var(--paper); }
+h1 { font-family: 'Rye', serif; color: var(--gold); font-size: 24px; margin: 18px 0 4px; }
+.lead { color: var(--paper2); font-size: 14px; margin: 0 0 14px; }
+.opt { margin: 22px 0 6px; padding-top: 10px; border-top: 1px solid rgba(244,228,193,.2); }
+.opt h2 { font-size: 17px; margin: 0; color: var(--gold); }
+.opt p { margin: 4px 0 0; font-size: 13px; color: var(--paper2); }
+.row { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-top: 8px; }
+.cap { font-size: 12px; color: var(--paper2); margin-bottom: 4px; }
+/* mặt bàn giả để pop-up nằm đúng ngữ cảnh */
+.stage { position: relative; height: 270px; border-radius: 20px; overflow: hidden;
+  background: repeating-radial-gradient(ellipse at 50% 50%, #6b4021 0 6px, #5e3819 6px 11px, #734623 11px 15px);
+  box-shadow: inset 0 0 0 4px #8b5a2b, inset 0 0 50px rgba(0,0,0,.6); }
+@media (max-width: 900px) { .row { grid-template-columns: 1fr; } }
+
+/* ===== B: lá nhỏ, luôn ghi tên (xuống 2 dòng nếu dài) ===== */
+.vB .store-pop .sp-left { width: 0; min-width: 100%; }
+.vB .store-pop .sp-left > span { width: 100%; text-align: center; margin: 0; }
+.vB .store-pop .card.sp-tiny { width: 50px; height: 68px; padding: 2px; justify-content: flex-start; padding-top: 12px; }
+.vB .store-pop .card.sp-tiny .icon { font-size: 16px; }
+.vB .store-pop .card.sp-tiny .cname { display: block; font-size: 8.5px; line-height: 1.05; margin-top: 3px; overflow-wrap: anywhere; }
+.vB .store-pop.my-turn .card.sp-tiny { width: 56px; height: 76px; }
+.vB .store-pop.my-turn .card.sp-tiny .icon { font-size: 19px; }
+.vB .store-pop.my-turn .card.sp-tiny .cname { font-size: 9.5px; }
+
+/* ===== C: dải "nhãn" icon + tên + chất, đọc như danh sách ===== */
+.vC .store-pop .sp-left { width: 0; min-width: 100%; gap: 5px; }
+.vC .store-pop .sp-left > span { width: 100%; text-align: center; margin: 0; }
+.sp-chip { display: inline-flex; align-items: center; gap: 4px; padding: 3px 8px 3px 5px; border-radius: 99px;
+  background: #fffaf0; color: var(--ink); border: 2px solid #8b5a2b; font-size: 11px; font-weight: 700; white-space: nowrap; line-height: 1.2; }
+.sp-chip.blue { border-color: var(--blue); background: #eef4fa; }
+.sp-chip.green { border-color: var(--green); background: #eaf4e6; }
+.sp-chip.gun { border-color: #5c3d1e; background: #f3ead9; }
+.sp-chip .ci { font-size: 13px; }
+.sp-chip .cs { font-size: 9.5px; font-weight: 600; color: var(--muted); }
+.sp-chip .cs.red { color: var(--red); }
+.store-pop.my-turn .sp-chip { font-size: 12.5px; padding: 5px 10px 5px 7px; }
+.store-pop.my-turn .sp-chip .ci { font-size: 15px; }
+.sp-chip.sp-pickable { cursor: pointer; animation: spGlow 1.1s ease-in-out infinite; }
+.sp-chip.sp-pickable:hover { transform: translateY(-2px); }
+</style>
+</head>
+<body>
+<div class="page">
+  <h1>General Store · hiện tên lá còn trên quầy</h1>
+  <p class="lead">Ván 7 người có Dodge City: quầy lật 7 lá, 2 người đã chọn. Để ý: <b>Bang</b> và <b>Knife</b> đều 💥, <b>Gatling</b> và <b>Volcanic</b> đều 🔫. Bấm thử các lá ở cột "Tới lượt bạn".</p>
+
+  <section class="opt"><h2>A · Hiện tại</h2><p>Chưa tới lượt: chỉ icon. Tới lượt: có tên nhưng chữ 8px, tên dài bị cắt.</p>
+    <div class="row"><div><div class="cap">Người khác đang chọn</div><div class="stage" data-v="A" data-turn="0"></div></div>
+    <div><div class="cap">Tới lượt bạn</div><div class="stage" data-v="A" data-turn="1"></div></div></div></section>
+
+  <section class="opt"><h2>B · Lá nhỏ luôn ghi tên</h2><p>Giữ hình lá bài, to hơn một chút, tên luôn hiện và xuống 2 dòng nếu dài (Ten Gallon Hat, Rev. Carabine).</p>
+    <div class="row"><div><div class="cap">Người khác đang chọn</div><div class="stage vB" data-v="B" data-turn="0"></div></div>
+    <div><div class="cap">Tới lượt bạn</div><div class="stage vB" data-v="B" data-turn="1"></div></div></div></section>
+
+  <section class="opt"><h2>C · Nhãn icon + tên + chất (đề xuất)</h2><p>Mỗi lá là một nhãn ngang "💥 Knife 8♥", viền theo màu lá (nâu/xanh dương/xanh lá/súng). Chữ 11–12,5px, không bao giờ cắt tên; tự xuống hàng trong bề rộng của hàng người chơi nên pop-up không rộng thêm.</p>
+    <div class="row"><div><div class="cap">Người khác đang chọn</div><div class="stage vC" data-v="C" data-turn="0"></div></div>
+    <div><div class="cap">Tới lượt bạn</div><div class="stage vC" data-v="C" data-turn="1"></div></div></div></section>
+</div>
+<script>
+const SUIT = { S: '♠', H: '♥', D: '♦', C: '♣' };
+const INFO = {
+  'General Store': ['brown', '🏪'], Bang: ['brown', '💥'], Knife: ['green', '💥'], Missed: ['brown', '🙅'],
+  'Iron Plate': ['green', '🙅'], Volcanic: ['gun', '🔫', 1], Gatling: ['brown', '🔫'], 'Ten Gallon Hat': ['green', '🙅'],
+  Beer: ['brown', '🍺'], 'Rev. Carabine': ['gun', '🔫', 4],
+};
+const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
+let id = 0;
+const C = (name, rank, suit) => ({ id: ++id, name, rank, suit });
+const store = C('General Store', '9', 'C');
+const picked = [C('Beer', '7', 'H'), C('Rev. Carabine', 'A', 'C')];
+const remaining = [C('Bang', '8', 'S'), C('Knife', '8', 'H'), C('Gatling', '10', 'H'), C('Volcanic', '10', 'S'), C('Ten Gallon Hat', 'J', 'D')];
+const players = ['CaoBoiMienTay', 'ThanhXaThu99', 'Bạn', 'HoangHonDo', 'TuongCuopSaMac', 'BongMaThungLung', 'SieuDaoChich'];
+
+function cardHTML(c, cls = '') {
+  const [type, icon, range] = INFO[c.name];
+  const red = c.suit === 'H' || c.suit === 'D';
+  return `<div class="card ${type} ${cls}" data-card="${c.id}" title="${esc(c.name)}">
+    <div class="corner ${red ? 'red' : ''}">${c.rank}${SUIT[c.suit]}</div>
+    <div class="icon">${icon}</div><div class="cname">${esc(c.name)}</div>
+    ${range ? `<div class="range">tầm ${range}</div>` : ''}</div>`;
+}
+function chipHTML(c, cls = '') {
+  const [type, icon] = INFO[c.name];
+  const red = c.suit === 'H' || c.suit === 'D';
+  return `<button type="button" class="sp-chip ${type} ${cls}" data-card="${c.id}"><span class="ci">${icon}</span>${esc(c.name)}<span class="cs ${red ? 'red' : ''}">${c.rank}${SUIT[c.suit]}</span></button>`;
+}
+function popup(v, myTurn) {
+  const picking = myTurn ? 2 : 3;
+  const cols = players.map((n, i) => {
+    const pk = picked[i], now = i === picking, mine = i === 2;
+    const slot = pk ? cardHTML(pk, 'mp-res ok') : `<div class="mp-res wait">${now ? 'đang<br>chọn…' : 'chờ…'}</div>`;
+    return `<div class="mp-col${mine ? ' mine' : ''}${now ? ' active' : ''}"><div class="mp-name">${esc(n)}</div><div class="mp-slot">${slot}</div></div>`;
+  }).join('');
+  const item = (c) => v === 'C' ? chipHTML(c, myTurn ? 'sp-pickable' : '') : cardHTML(c, 'sp-tiny' + (myTurn ? ' sp-pickable' : ''));
+  return `<div class="mass-pop store-pop${myTurn ? ' my-turn' : ''}">
+    <div class="mp-src"><div class="who">${esc(players[0])}</div>${cardHTML(store)}</div>
+    <div class="mp-arrow">➜</div>
+    <div class="sp-right"><div class="mp-targets">${cols}</div>
+      <div class="sp-left"><span>${myTurn ? '👉 Bấm 1 lá để lấy' : 'Còn trên quầy'}</span>${remaining.map(item).join('')}</div></div>
+    ${myTurn ? '' : '<button type="button" class="mp-close">✕</button>'}</div>`;
+}
+for (const st of document.querySelectorAll('.stage')) {
+  st.innerHTML = popup(st.dataset.v, st.dataset.turn === '1');
+  st.onclick = (e) => {
+    const p = e.target.closest('.sp-pickable');
+    if (!p) return;
+    const name = remaining.find((c) => c.id === Number(p.dataset.card)).name;
+    st.querySelector('.sp-left > span').textContent = `✔ Đã lấy ${name}`;
+  };
+}
+</script>
+</body>
+</html>

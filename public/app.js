@@ -458,7 +458,7 @@ function renderRoom() {
   const g = r.game;
   btns.innerHTML = `
     ${g && r.spectators?.length ? `<span class="muted" title="${esc(r.spectators.join(', '))}">👁️ ${r.spectators.length} khán giả</span>` : ''}
-    ${isHost && g?.winner ? '<button class="btn green" id="resetBtn">🔁 Về phòng chờ</button>' : ''}
+    ${g?.winner && canReset() ? '<button class="btn green" id="resetBtn">🔁 Về phòng chờ</button>' : ''}
     ${g?.me && !g.winner ? `<button class="btn" id="pauseBtn" ${r.pause ? 'disabled' : ''}>Tạm dừng</button><button class="btn ghost small" id="pauseNotifications">Bật thông báo Windows</button>` : ''}
     <button class="btn secondary" id="leaveBtn">Rời phòng${g?.me && !g.winner ? ' giữa ván' : ''}</button>`;
   $('#pauseBtn') && ($('#pauseBtn').onclick = run(() => api(`/api/rooms/${r.code}/pause`, { type: 'request' })));
@@ -475,7 +475,13 @@ function renderRoom() {
 
   $('#logPanel').style.display = g ? '' : 'none';
   renderPause();
-  if (!g?.winner) clearMatchResult();
+  // Mỗi người tự xem màn kết quả: phòng về phòng chờ thì màn kết quả đang mở vẫn giữ (đã có số liệu ván cũ),
+  // chỉ đóng khi ván mới bắt đầu.
+  const openResult = $('#matchResult');
+  if (g?.winner) ui.lastResult = { code: r.code, g };
+  else if (g) { ui.lastResult = null; clearMatchResult(); }
+  else if (!openResult) ui.resultDismissed = false;
+  else if (!openResult.dataset.roomWaiting) { openResult.dataset.roomWaiting = '1'; openResult.refresh?.(); }
   if (!g) {
     ui.lastCheckSeq = null;
     return renderWaiting();
@@ -496,7 +502,7 @@ function roomSettingsBody(form) {
 // Phát hiện server chạy bản cũ trước khi chơi, để ván không kết thúc mà thiếu danh hiệu/thống kê.
 // Server cũ không gửi r.server; server mới báo stale khi code trên ổ đĩa mới hơn code đang chạy.
 function serverOutdated(r) {
-  return !r.server?.features?.includes('endSummary') || !!r.server.stale;
+  return !r.server?.features?.includes('winProb3') || !!r.server.stale;
 }
 
 function serverWarningHTML(r) {
@@ -517,6 +523,7 @@ function renderWaiting() {
     ${serverWarningHTML(r)}
     <div class="panel">
       <h2>Phòng chờ (${n}/${r.max})</h2>
+      ${ui.lastResult?.code === r.code && !$('#matchResult') ? '<button class="btn small secondary" id="lastResultBtn">📊 Xem lại kết quả ván trước</button>' : ''}
       <ul class="seat-list">
         ${r.players.map((p) => `<li><span class="dot ${r.online.includes(p) ? 'on' : ''}"></span>
           <b>${esc(p)}</b> ${r.bots?.includes(p) ? '<span class="muted">🤖 Bot</span>' : ''} ${p === r.host ? '👑' : ''} ${p === ME ? '<span class="muted">(bạn)</span>' : ''}
@@ -565,6 +572,13 @@ function renderWaiting() {
     ui.settingsDraft = null;
   }));
   $('#addBotBtn') && ($('#addBotBtn').onclick = run(() => api(`/api/rooms/${r.code}/add-bot`, {})));
+  $('#lastResultBtn') && ($('#lastResultBtn').onclick = () => {
+    ui.resultDismissed = false;
+    renderMatchResult(ui.lastResult.g);
+    const dlg = $('#matchResult');
+    if (dlg) { dlg.dataset.roomWaiting = '1'; dlg.refresh(); }
+    $('#lastResultBtn')?.remove();
+  });
   $('#spectatorBtn').onclick = run(() => api(`/api/rooms/${r.code}/spectator`, { spectator: !spectator }));
   const settings = $('#settingsForm');
   if (settings) {
@@ -621,7 +635,7 @@ function renderTurnRing() {
   if (!seat) return;
   const ring = document.createElement('div');
   ring.className = 'turn-ring';
-  ring.style.setProperty('--ring-total', t.seconds);
+  ring.style.setProperty('--ring-total', t.seconds || (t.character ? ROOM.characterSeconds : ROOM.turnSeconds));
   ring.style.setProperty('--ring-left', Math.max(0, timerLeft(t)).toFixed(2));
   seat.classList.add('ticking');
   seat.querySelector('.av').appendChild(ring);
@@ -711,6 +725,24 @@ const CHAR_ICON = {
 // Bàn chơi và màn hình kết quả dùng chung avatar theo nhân vật/trạng thái.
 // Ảnh chân dung nhân vật (public/avatars/<tên-không-dấu>.jpg, cắt sẵn quanh khuôn mặt; bo tròn bằng CSS)
 const charSlug = (name) => name.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+// Tooltip nhân vật: số máu + kỹ năng; nhân vật của Sheriff (vai trò công khai) ghi thêm +1.
+const charTipAttrs = (name) => {
+  const ch = META.chars?.[name];
+  if (!ch) return '';
+  const sheriff = ROOM?.game?.players?.some((p) => p.char === name && p.role === 'Sheriff');
+  return tooltipAttrs(name, `❤ ${ch.hp + (sheriff ? 1 : 0)} máu${sheriff ? ' (+1 vì là Sheriff)' : ''}\n${ch.desc}`);
+};
+let charNameRe = null;
+// Một dòng Diễn biến: tên nhân vật thành chữ gạch chân chấm, rê chuột xem tooltip.
+function logLineHTML(line) {
+  const names = Object.keys(META.chars || {});
+  if (!names.length) return esc(line);
+  if (!charNameRe || charNameRe.n !== names.length) {
+    charNameRe = new RegExp(`(${names.sort((a, b) => b.length - a.length).map((s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|')})`, 'g');
+    charNameRe.n = names.length;
+  }
+  return line.split(charNameRe).map((part, i) => (i % 2 ? `<span class="log-char" ${charTipAttrs(part)}>${esc(part)}</span>` : esc(part))).join('');
+}
 const charPortrait = (name) => (name && META.chars?.[name] ?`<img class="char-img" src="/avatars/${charSlug(name)}.jpg" alt="" draggable="false">` : '');
 
 function playerAvatarHTML(player) {
@@ -831,19 +863,38 @@ function renderCharacterSelection() {
       <div class="chp" title="${max} máu">${Array.from({ length: max }, () => bulletSVG(true, 22)).join('')}${meP.role === 'Sheriff' ? '<span class="plus">+1 Sheriff</span>' : ''}</div>
       <div class="ab">${esc(ch.desc)}</div></div>`;
   }).join('');
+  // Bàn chơi thu nhỏ: cùng cách xếp ghế với trận đấu (desktop viên thuốc, điện thoại tròn).
+  // Mỗi ghế: ảnh + tên nhân vật đã chọn (tooltip), vai trò đã biết (Sheriff công khai, vai trò của mình).
+  const n = g.players.length;
+  const start = Math.max(g.me?.index ?? 0, 0);
+  const capsule = !isPhone();
+  const picker = g.players[g.pending.player];
+  const seats = Array.from({ length: n }, (_, k) => {
+    const i = (start + k) % n;
+    const p = g.players[i];
+    const a = Math.PI / 2 + (k * 2 * Math.PI) / n;
+    const [x, y] = capsule ? capsuleSeat(k, n) : [50 + 37 * Math.cos(a), 50 + 43 * Math.sin(a)];
+    const picking = i === g.pending.player;
+    return `<div class="player cseat ${i === g.me?.index ? 'mine' : ''} ${picking ? 'acting turn' : ''} ${p.char ? 'chosen' : ''}" data-player="${esc(p.name)}" style="left:${x.toFixed(2)}%;top:${y.toFixed(2)}%">
+      <div class="av">${playerAvatarHTML(p)}${roleBadge(p)}</div>
+      <div class="plate"><span class="dot ${ROOM.online.includes(p.name) ? 'on' : ''}"></span>${esc(p.name)}${i === g.me?.index ? ' (bạn)' : ''}</div>
+      ${p.char ? `${hpBarHTML(p)}<span class="pchar" ${charTipAttrs(p.char)}>${esc(p.char)}</span>` : `<span class="cstat">${picking ? '✋ Đang chọn…' : 'Chờ lượt'}</span>`}
+    </div>`;
+  }).join('');
+  const center = `<div class="choose-center">
+    ${g.me ? `<div class="crole" ${tooltipAttrs(ROLE_VI[meP.role], role.goal)}>${ROLE_ICON[meP.role]} Bạn là <span class="role ${meP.role}">${esc(ROLE_VI[meP.role])}</span></div>
+      <div class="cgoal">${esc(role.goal)} <span class="csecret">${meP.role === 'Sheriff' ? '👁️ Mọi người đều biết' : '🔒 Chỉ bạn thấy'}</span></div>` : '<div class="crole">👁️ Bạn đang xem trận đấu</div>'}
+    <div class="cwait">${mine ? '👉 Tới lượt bạn chọn nhân vật' : `⏳ ${esc(picker.name)} đang chọn…`} <span class="ccount">(${done}/${n} đã chọn)</span></div>
+    <div class="cprogress"><i style="width:${done / n * 100}%"></i></div>
+  </div>`;
   $('#mainArea').innerHTML = `<div class="panel choose">
-    ${g.me ? `<div class="rolecard ${meP.role}"><div class="rstar">${ROLE_ICON[meP.role]}</div>
-      <div><h3>Bạn là ${esc(ROLE_VI[meP.role])} · ${esc(role.vi)}</h3><p>${esc(role.goal)}${meP.role === 'Sheriff' ? ' Bạn được +1 máu.' : ''}</p></div>
-      <span class="secret">${meP.role === 'Sheriff' ? '👁️ Mọi người đều biết' : '🔒 Chỉ bạn thấy'}</span></div>` : '<h2>👁️ Bạn đang xem trận đấu</h2>'}
-    <div class="choose-head"><h2>Chọn nhân vật</h2><span class="muted">${mine ? `Bạn được chia ${options.length} lá — bấm vào 1 lá rồi xác nhận.` : `Đang chờ ${esc(g.players[g.pending.player].name)} chọn nhân vật…`}</span></div>
-    <div class="room-clock" data-room-clock role="timer"></div>
-    <div class="chars ${selected ? 'has-sel' : ''} ${mine ? '' : 'locked'}">${cards}</div>
+    <div class="choose-head"><h2>Chọn nhân vật</h2><span class="muted">${mine ? `Bạn được chia ${options.length} lá — bấm vào 1 lá rồi xác nhận.` : 'Sheriff chọn trước, rồi lần lượt theo chiều lượt chơi.'}</span>
+      <div class="room-clock" data-room-clock role="timer"></div></div>
+    <div class="arena choose-table${capsule ? ' capsule' : ''}"><div class="felt"></div>${center}${seats}</div>
+    ${options.length ? `<div class="chars ${selected ? 'has-sel' : ''} ${mine ? '' : 'locked'}">${cards}</div>` : ''}
     <div class="actions" style="justify-content:center">${mine ? `<button class="btn" id="confirmCharacter" ${selected ? '' : 'disabled'}>✔ Chọn ${esc(selected || 'nhân vật')}</button>` : meP.char ? `<span class="muted">✔ Bạn chơi <b>${esc(meP.char)}</b>. Đang chờ những người khác…</span>` : `<span class="muted">${g.me ? 'Chờ tới lượt của bạn.' : 'Đang chờ người chơi chọn nhân vật.'}</span>`}
       ${mine && ROOM.characterSeconds ? '<span class="muted">Hết giờ sẽ tự chọn ngẫu nhiên.</span>' : ''}</div>
-    <h3 style="margin-top:18px">Người chơi (${done}/${g.players.length} đã chọn)</h3>
-    <div class="cprogress"><i style="width:${done / g.players.length * 100}%"></i></div>
-    <ul class="plist">${g.players.map((p, i) => `<li>${roleBadge(p)} <b>${esc(p.name)}</b>${i === g.me?.index ? ' (bạn)' : ''}<span class="st ${p.char ? 'done' : 'wait'}">${p.char ? '✔ Đã chọn' : i === g.pending.player ? 'Đang chọn' : 'Chờ tới lượt'}</span></li>`).join('')}</ul>
-    <p class="muted">Ván đấu và timer lượt bắt đầu khi mọi người đã chọn xong.</p>
+    <p class="muted" style="text-align:center">Ván đấu và timer lượt bắt đầu khi mọi người đã chọn xong.</p>
   </div>`;
   document.querySelectorAll('[data-character]').forEach((el) => {
     const select = () => { ui.choosePick = el.dataset.character; renderCharacterSelection(); };
@@ -856,7 +907,8 @@ function renderCharacterSelection() {
     try { await sendAction({ type: 'chooseCharacter', character: ui.choosePick }); }
     finally { if (confirm.isConnected) confirm.disabled = false; }
   });
-  $('#logBox').innerHTML = g.log.map((l) => `<div>${esc(l)}</div>`).join('');
+  $('#logBox').innerHTML = g.log.map((l) => `<div>${logLineHTML(l)}</div>`).join('');
+  renderTurnRing();
   updateClock();
 }
 
@@ -899,18 +951,18 @@ function renderGame() {
   }
   if (ui.mode?.kind === 'skill' && ui.mode.skill === 'Doc Holyday' && ui.selected.length === 2) tfilter = (p) => docTarget(p, g);
 
-  // Ghế quanh bàn tròn: mình ở đáy bàn, người sau mình ngồi bên trái, cứ thế theo chiều kim đồng hồ
+  // Desktop: bàn viên thuốc nằm ngang, mình ở mép dưới (capsuleSeat). Điện thoại dọc (mobile.css): vẫn bàn tròn,
+  // mình ở đáy bàn, người sau mình ngồi bên trái, cứ thế theo chiều kim đồng hồ; ghế lùi vào để không tràn mép.
   const n = g.players.length;
   const start = Math.max(meIdx, 0);
-  const narrow = window.matchMedia('(max-width: 900px)').matches;
-  // Điện thoại dọc (mobile.css): bàn cao hơn rộng, ghế lùi vào để không tràn mép màn hình
-  const rx = isPhone() ? 37 : narrow ? 41 : 43, ry = isPhone() ? 43 : 44;
+  const capsule = !isPhone();
+  const rx = 37, ry = 43;
 
   const seatsHTML = Array.from({ length: n }, (_, k) => {
     const i = (start + k) % n;
     const p = g.players[i];
     const a = Math.PI / 2 + (k * 2 * Math.PI) / n;
-    const x = 50 + rx * Math.cos(a), y = 50 + ry * Math.sin(a);
+    const [x, y] = capsule ? capsuleSeat(k, n) : [50 + rx * Math.cos(a), 50 + ry * Math.sin(a)];
     const isMe = i === meIdx;
     const cls = [
       isMe ? 'mine' : '',
@@ -934,13 +986,13 @@ function renderGame() {
         ${handFanHTML(p.handCount)}${roleBadge(p)}</div>
       <div class="plate"><span class="dot ${ROOM.online.includes(p.name) ? 'on' : ''}"></span>${g.turn === i && !g.winner ? '⭐ ' : ''}${esc(p.name)}${isMe ? ' (bạn)' : ''}</div>
       ${hpBarHTML(p)}
-      <span class="pchar" ${tooltipAttrs(p.char, ch.desc)}>${esc(p.char)}${p.char === 'Vera Custer' && p.ability ? ` · ${esc(p.ability)}` : ''}</span>
+      <span class="pchar" ${charTipAttrs(p.char)}>${esc(p.char)}${p.char === 'Vera Custer' && p.ability ? ` · ${esc(p.ability)}` : ''}</span>
     </div>`;
   }).join('');
 
   const promptBoxHTML = `<div class="prompt ${myPrompt || (canPlay && !ui.mode) ? 'mine' : ''}" id="prompt">${!g.me ? '<h4>👁️ Bạn đang xem trận đấu</h4><p class="muted">Bạn chỉ xem thông tin công khai.</p>' : ''}${promptHTML(g, meIdx, meP)}</div>`;
   const tableHTML = `
-    <div class="arena">
+    <div class="arena${capsule ? ' capsule' : ''}">
       <div class="felt"></div>
       <div class="piles">
         <div class="pile"><div class="deck ${['check', 'draw'].includes(pend?.type) ? (myPrompt ? 'ready' : 'waiting') : ''}" id="deck"><div class="card-back">BANG!</div>
@@ -983,7 +1035,7 @@ function renderGame() {
 
   // log
   const lb = $('#logBox');
-  lb.innerHTML = g.log.map((l) => `<div class="${l.startsWith('—') ? 'turnline' : ''}">${esc(l)}</div>`).join('');
+  lb.innerHTML = g.log.map((l) => `<div class="${l.startsWith('—') ? 'turnline' : ''}">${logLineHTML(l)}</div>`).join('');
   lb.scrollTop = lb.scrollHeight;
 
   bindGame(g, meIdx, meP, canPlay, myPrompt);
@@ -994,6 +1046,25 @@ function renderGame() {
   renderTurnRing();
   showCheckReveal(g);
   updateClock();
+}
+
+// ---------- bàn viên thuốc nằm ngang (desktop) ----------
+// Trả [x, y] theo % khu bàn cho ghế thứ k (k = 0 là mình). Hai đầu bàn mỗi đầu 1 người; còn lại chia hai
+// mép dài, mép trên nhiều hơn khi lẻ (5 người: 2 trên · 1 dưới; 7: 3 · 2). Mình luôn ngồi mép dưới:
+// chính giữa, hoặc ghế bên phải khi mép dưới có số ghế chẵn (2 ghế → ghế phải).
+// Ghế theo chiều kim đồng hồ: đầu trái → mép trên trái → phải → đầu phải → mép dưới phải → trái;
+// người sau mình là ghế kế tiếp theo chiều đó (bên trái mình).
+// CAPSULE_EDGE khớp với top/bottom của .arena.capsule .felt trong style.css.
+const CAPSULE_EDGE = 18.5;
+function capsuleSeat(k, n) {
+  const rest = n - 2, top = Math.ceil(rest / 2), bottom = rest - top;
+  const xAt = (j, m) => (m === 1 ? 50 : 27 + (46 * j) / (m - 1));
+  const ring = [[7, 50]];
+  for (let j = 0; j < top; j++) ring.push([xAt(j, top), CAPSULE_EDGE]);
+  ring.push([93, 50]);
+  for (let j = bottom - 1; j >= 0; j--) ring.push([xAt(j, bottom), 100 - CAPSULE_EDGE]);
+  const me = top + 2 + (bottom - 1 - Math.floor(bottom / 2)); // ghế mép dưới thứ floor(bottom/2) tính từ trái
+  return ring[(me + k) % n];
 }
 
 // ---------- điện thoại dọc ----------
@@ -1564,9 +1635,16 @@ function resultMissingSummaryHTML(g, won, back, next) {
     <div class="result-foot"><button type="button" class="btn ghost" data-step="${back[0]}">← ${back[1]}</button><span></span>${next}</div>`;
 }
 
+// Hết ván thì ai cũng về phòng chờ được; server cũ (chưa có freeReset) chỉ cho chủ phòng.
+function canReset() {
+  return ROOM.host === ME || !!ROOM.server?.features?.includes('freeReset');
+}
+
 function resultFinalButtonsHTML() {
+  const back = '<button type="button" class="result-continue small" data-reset><span aria-hidden="true">🔁</span> Về phòng chờ</button>';
+  if (!ROOM.game) return `<span class="st-wait">Phòng đã về phòng chờ.</span>${back}`;
   return `<button type="button" class="btn ghost" data-close>Xem bàn chơi</button>
-    ${ROOM.host === ME ? '<button type="button" class="result-continue small" data-reset><span aria-hidden="true">🔁</span> Về phòng chờ</button>' : '<span class="st-wait">Chờ chủ phòng mở ván mới…</span>'}`;
+    ${canReset() ? back : '<span class="st-wait">Chờ chủ phòng mở ván mới…</span>'}`;
 }
 
 function resultAwardsHTML(g, won) {
@@ -1608,270 +1686,364 @@ function teamNames(g, text) {
   return out.replace(/\u0000(\d+)\u0000/g, (_, i) => marks[i]);
 }
 
-// Gom các điểm cán cân thành từng lượt: cán cân đầu/cuối lượt, trạng thái từng người trước/sau, log trong lượt
-function timelineTurns(g) {
+// ---------- Diễn biến: tỉ lệ thắng 3 phe (power.winProb, game.compactTimeline) ----------
+// Dữ liệu: summary.timeline.pts[k] có w = [Luật pháp, Outlaw, Renegade], h = máu mọi người, cf = kịch bản Barrel ngược lại.
+// Tab gồm: Loại trận · 3 thẻ phe · biểu đồ dải chồng 100% · "Những lượt quyết định" (lượt ảnh hưởng lớn + lượt rút kiểm tra
+// hên/xui đặc biệt, mỗi lượt tối đa 3 hành động tác động mạnh nhất). Nháp gốc: drafts/tab-dien-bien-v2.html.
+const RESULT_NO_TIMELINE = `<div class="result-missing" role="status"><b>Không có dữ liệu diễn biến</b><p>Ván này được chơi trên server bản cũ nên chưa ghi tỉ lệ thắng theo từng hành động.</p></div>`;
+const WT_BANDS = ['law', 'ren', 'out']; // thứ tự dải từ dưới lên
+const WT_NAME = { law: 'Luật pháp', out: 'Outlaw', ren: 'Renegade' };
+const WT_COLOR = { law: ROLE_COLOR.law, out: ROLE_COLOR.Outlaw, ren: ROLE_COLOR.Renegade };
+const WIN_OF = { Sheriff: 'law', Outlaw: 'out', Renegade: 'ren' };
+const wtPct = (v) => `${Math.round(v * 100)}%`;
+const wtSigned = (v) => { const r = Math.round(v * 100); return `${r === 0 ? '±' : r > 0 ? '+' : '−'}${Math.abs(r)}`; };
+const wtMaxFac = (d) => ['law', 'ren', 'out'].reduce((a, f) => (Math.abs(d[f]) > Math.abs(d[a]) ? f : a), 'law');
+const wtDiff = (a, b) => ({ law: a.law - b.law, out: a.out - b.out, ren: a.ren - b.ren });
+const wtObj = (w) => ({ law: w[0], out: w[1], ren: w[2] });
+const WT_ACT_MIN = 0.03;  // hành động làm một phe đổi ≥ 3 điểm % mới đáng kể
+const WT_LUCK_MIN = 0.1;  // Barrel làm tỉ lệ thắng chênh ≥ 10 điểm % so với kịch bản ngược lại → hên/xui đặc biệt
+
+// Gom các điểm thành từng lượt: tỉ lệ thắng trước/sau, máu trước/sau, người gục, log
+function winTurns(g) {
   const tl = g.summary?.timeline;
-  if (!tl?.pts?.length) return null;
-  const pts = tl.pts, turns = [];
-  let prevPs = tl.start;
+  if (!tl?.pts?.length || !tl.pts[0].w) return null;
+  const idx = (name) => g.players.findIndex((p) => p.name === name);
+  const pts = tl.pts.map((p) => ({ ...p, P: wtObj(p.w) }));
+  const start = { P: wtObj(tl.w0), h: tl.start.map((x) => x[0]) };
+  const deaths = [];
+  pts.forEach((p, k) => p.log.forEach((l) => {
+    const m = l.match(/^☠️ (.+) đã chết! Vai trò: (\w+)/);
+    if (m && idx(m[1]) >= 0) deaths.push({ k, t: p.t, i: idx(m[1]), name: m[1], role: m[2] });
+  }));
+  const turns = [];
   pts.forEach((p, k) => {
     let tr = turns[turns.length - 1];
-    if (!tr || tr.t !== p.t) { tr = { t: p.t, r: p.r, o: p.o, k0: k, start: k ? pts[k - 1].b : 0, before: prevPs, log: [], deaths: [] }; turns.push(tr); }
-    // Ai chết, ai hạ gục (người được ghi công của hành động đó), bằng gì (hành động tấn công gần nhất trước đó trong lượt)
-    p.log.forEach((line, j) => {
-      const m = line.match(/^☠️ (.+) đã chết! Vai trò: (\w+)/);
-      if (!m) return;
-      const before = [...tr.log, ...p.log.slice(0, j)];
-      const killer = p.a >= 0 && g.players[p.a] && g.players[p.a].name !== m[1] ? g.players[p.a].name : null;
-      tr.deaths.push({ name: m[1], role: m[2], killer, weapon: deathWeapon(before) });
-    });
-    tr.k1 = k; tr.end = p.b; tr.log.push(...p.log);
-    if (p.ps) { tr.after = p.ps; prevPs = p.ps; }
+    if (!tr || tr.t !== p.t) { tr = { t: p.t, r: p.r, o: p.o, k0: k, log: [] }; turns.push(tr); }
+    tr.k1 = k; tr.log.push(...p.log);
   });
-  for (const tr of turns) {
-    tr.delta = tr.end - tr.start;
-    tr.after = tr.after || tr.before;
+  turns.forEach((tr, j) => {
+    const b = j ? pts[turns[j - 1].k1] : start, a = pts[tr.k1];
+    tr.before = b.P; tr.after = a.P; tr.hp0 = b.h; tr.hp1 = a.h;
+    tr.d = wtDiff(a.P, b.P);
+    tr.swing = (Math.abs(tr.d.law) + Math.abs(tr.d.out) + Math.abs(tr.d.ren)) / 2;
+    tr.deaths = deaths.filter((d) => d.k >= tr.k0 && d.k <= tr.k1);
+  });
+  return { pts, start, turns, deaths };
+}
+
+// Phe dẫn có độ trễ: chỉ đổi khi phe mới hơn phe đang dẫn ≥ 10 điểm %
+function winLeaders(list) {
+  let cur = null;
+  return list.map((tr) => {
+    const p = tr.after, best = ['law', 'out', 'ren'].reduce((x, f) => (p[f] > p[x] ? f : x), 'law');
+    if (!cur || (best !== cur && p[best] - p[cur] >= 0.1)) cur = best;
+    return cur;
+  });
+}
+
+// ---------- Loại trận (kiểu chess.com) theo cửa thắng của phe thắng ----------
+// Ngưỡng tạm đặt theo các ván nháp, chưa chỉnh bằng mô phỏng hàng loạt.
+const MATCH_TYPES = {
+  renegade: ['🎭', 'Kẻ phản bội cân cả bàn'], chaos: ['🔥', 'Trận điên rồ'], thrown: ['💔', 'Dẫn cả trận vẫn để thua'],
+  comeback: ['🔄', 'Lật kèo'], crush: ['👑', 'Áp đảo một chiều'], close: ['⚖️', 'Giằng co tới phút chót'], steady: ['🎯', 'Thắng chắc tay'],
+};
+const MATCH_RULE = { chaosSwaps: 3, thrownShare: 0.65, comebackLow: 0.2, crushShare: 0.9, crushMean: 0.6, closeBand: 0.15, closeShare: 0.7 };
+function classifyMatch(g, data) {
+  const W = WIN_OF[g.winner], body = data.turns.slice(0, -1);
+  if (W === 'ren') {
+    const r = g.players.find((p) => p.role === 'Renegade');
+    return { type: 'renegade', text: `${r ? r.name : 'Renegade'} sống sót tới cuối, một mình đứng trên mọi phe — đầu ván chỉ có ${wtPct(data.start.P.ren)} cửa thắng.` };
   }
-  return { pts, turns };
+  if (body.length < 3) return { type: 'crush', text: `Phe ${WT_NAME[W]} kết thúc ván chỉ sau ${data.turns.length} lượt.` };
+  const R = MATCH_RULE, pw = body.map((tr) => tr.after[W]), L = winLeaders(body);
+  let swaps = 0; for (let j = 1; j < L.length; j++) if (L[j] !== L[j - 1]) swaps++;
+  const share = (f) => body.filter(f).length / body.length;
+  const low = Math.min(...pw), lowT = body[pw.indexOf(low)];
+  const mean = pw.reduce((a, b) => a + b, 0) / pw.length;
+  if (swaps >= R.chaosSwaps) return { type: 'chaos', text: `Thế dẫn đổi chủ ${swaps} lần — không phe nào giữ lợi thế được lâu.` };
+  const lost = share((_, j) => L[j] !== W);
+  if (lost >= R.thrownShare) { const o = L.find((x) => x !== W); return { type: 'thrown', text: `Phe ${WT_NAME[o]} dẫn ${wtPct(lost)} thời gian của ván nhưng để tuột chiến thắng ở cuối.` }; }
+  if (low <= R.comebackLow) return { type: 'comeback', text: `Phe ${WT_NAME[W]} từng chỉ còn ${wtPct(low)} cửa thắng ở lượt ${lowT.t} rồi lật ngược thế trận.` };
+  if (share((_, j) => L[j] === W) >= R.crushShare && mean >= R.crushMean) return { type: 'crush', text: `Phe ${WT_NAME[W]} dẫn gần như suốt ván, cửa thắng trung bình ${wtPct(mean)}.` };
+  if (share((tr) => Math.abs(tr.after.law - tr.after.out) <= R.closeBand) >= R.closeShare) return { type: 'close', text: 'Hai phe ngang ngửa gần cả ván, chỉ ngã ngũ ở những lượt cuối.' };
+  return { type: 'steady', text: `Phe ${WT_NAME[W]} tạo được lợi thế rồi giữ vững tới cuối.` };
 }
 
-// Vũ khí của cái chết: dòng tấn công gần nhất trước dòng ☠️ (đọc ngược lên)
-function deathWeapon(lines) {
-  for (let i = lines.length - 1; i >= 0; i--) {
-    const l = lines[i];
-    if (l.includes('Dynamite nổ')) return 'Dynamite';
-    let m = l.match(/bắn .+ \(([^)]+)\)\.$/);           // kỹ năng bắn (vd. Doc Holyday)
-    if (m) return `kỹ năng ${m[1]}`;
-    m = l.match(/^💥 .+ bắn .+ bằng (.+)!$/);              // lá xanh tấn công (Dodge City)
-    if (m) return m[1];
-    if (/^💥 .+ bắn /.test(l)) return 'Bang!';
-    if (l.includes('thách đấu')) return 'Duel';
-    if (l.startsWith('🪶')) return 'Indians!';
-    m = l.match(/^🔫 .+ dùng (.+)!$/);                     // Gatling / Howitzer
-    if (m) return m[1];
-  }
-  return null;
-}
-
-// Chọn 5 sự kiện: 3 lượt ảnh hưởng nhất (|Δ cán cân| lớn nhất) + lượt Sheriff mất máu lần đầu
-// + 1 khoảnh khắc thú vị nhất ngoài các lượt trên. Trùng lượt thì gộp nhãn và lấy thêm lượt ảnh hưởng kế tiếp cho đủ 5.
-// Bước ngoặt = lần cuối cán cân đổi dấu về phe thắng (chỉ để gắn nhãn).
-function pickTimeline(g, turns) {
-  const lawWon = g.winner === 'Sheriff';
-  let turning = null;
-  if (g.winner !== 'Renegade') for (const tr of turns) if (lawWon ? tr.start <= 0 && tr.end > 0 : tr.start >= 0 && tr.end < 0) turning = tr;
-  const ranked = [...turns].sort((a, b) => Math.abs(b.delta) - Math.abs(a.delta));
-  const chosen = new Map();
-  const add = (tr, kind) => { if (!tr) return; if (chosen.has(tr)) chosen.get(tr).push(kind); else chosen.set(tr, [kind]); };
-  ranked.slice(0, 3).forEach((tr) => add(tr, 'impact'));
-  const sh = g.players.findIndex((p) => p.role === 'Sheriff');
-  const shTurn = sh >= 0 ? turns.find((tr) => tr.after[sh][0] < tr.before[sh][0]) : null;
-  if (shTurn) { shTurn.sheriffLoss = shTurn.before[sh][0] - shTurn.after[sh][0]; add(shTurn, 'sheriff'); }
-  const fun = funMoments(g, turns).find((f) => !chosen.has(f.tr));
-  if (fun) { fun.tr.fun = fun; add(fun.tr, 'fun'); }
-  for (const tr of ranked) { if (chosen.size >= 5) break; if (!chosen.has(tr)) add(tr, 'impact'); }
-  for (const tr of turns) tr.kinds = chosen.get(tr) || [];
-  return { picked: [...chosen.keys()].sort((a, b) => a.t - b.t), turning };
-}
-
-// Khoảnh khắc thú vị, xếp theo điểm (càng lớn càng thú vị):
-//  hồi ≥ 2 máu trong một lượt · mất ≥ 3 máu trong một lượt · Gatling/Indians!/Howitzer gây ≥ 2 sát thương
-//  · rút kiểm tra trúng ≥ 2 lần liền trong một lượt
-function funMoments(g, turns) {
-  const out = [];
-  const ACTION = /^(💥|🔫|🪶|🤠|⛓️|💃|😱|🏪)/;
-  for (const tr of turns) {
-    g.players.forEach((p, i) => {
-      const d = tr.after[i][0] - tr.before[i][0];
-      if (d >= 2) out.push({ tr, score: d + 0.5, title: `🍺 ${p.name} hồi ${d} máu trong một lượt` });
-      if (d <= -3) out.push({ tr, score: -d * 0.9, title: `🩸 ${p.name} mất ${-d} máu trong một lượt` });
-    });
-    tr.log.forEach((l, k) => {
-      const m = l.match(/^(🔫|🪶) (.+?) (dùng (Gatling|Howitzer)!|thả thổ dân tấn công!)/);
-      if (!m) return;
-      let dmg = 0, dead = 0;
-      for (let j = k + 1; j < tr.log.length && !ACTION.test(tr.log[j]); j++) {
-        const h = tr.log[j].match(/ mất (\d+) máu/);
-        if (h && !tr.log[j].includes('Dynamite')) dmg += Number(h[1]);
-        if (tr.log[j].startsWith('☠️')) dead++;
-      }
-      if (dmg >= 2) out.push({ tr, score: dmg * 1.2 + dead * 0.5, title: `${m[1]} ${m[2]} tung ${m[4] || 'Indians!'} gây ${dmg} sát thương${dead ? `, hạ ${dead} người` : ''}` });
-    });
-    const streak = {};
-    for (const l of tr.log) {
-      const m = l.match(/^(.+?) rút kiểm tra \((\w+)\): .*→ (thành công|thất bại)/);
-      if (!m) continue;
-      const s = streak[m[1]] || (streak[m[1]] = { cur: 0, best: 0 });
-      s.cur = m[3] === 'thành công' ? s.cur + 1 : 0;
-      s.best = Math.max(s.best, s.cur);
+// ---------- Rút kiểm tra hên / xui đặc biệt ----------
+//  hên: thoát tù (1/4) · Barrel đỡ được khi chỉ còn 1 máu · Barrel đỡ 2 lần liền · Barrel đỡ mà cửa thắng chênh ≥ 10 điểm %
+//  xui: Dynamite nổ · Barrel trượt rồi gục · Barrel trượt mà cửa thắng chênh ≥ 10 điểm %
+// Với Barrel, độ hên/xui = tỉ lệ thắng thật − tỉ lệ thắng nếu Barrel ra ngược lại (cf do server tính).
+function winLuck(g, data, tr) {
+  const ev = [], streak = {}, pts = data.pts;
+  const withCf = (e) => {
+    const cf = pts[e.k].cf?.find((c) => c[0] === e.i);
+    if (!cf) return e;
+    const a = pts[e.ok ? e.k : e.kEnd].P;
+    e.d = wtDiff(a, { law: cf[2], out: cf[3], ren: cf[4] });
+    e.mag = Math.max(...Object.values(e.d).map(Math.abs));
+    e.vs = e.ok ? 'so với nếu Barrel trượt' : 'so với nếu Barrel đỡ được';
+    return e;
+  };
+  for (let k = tr.k0; k <= tr.k1; k++) for (const l of pts[k].log) {
+    const m = l.match(/^(.+?) rút kiểm tra \((\w+)\): (.+?) → (thành công|thất bại)/);
+    if (!m) continue;
+    const [, who, kind, card, r] = m, i = g.players.findIndex((p) => p.name === who), ok = r === 'thành công';
+    if (i < 0) continue;
+    const role = g.players[i].role, hp0 = (k ? pts[k - 1].h : data.start.h)[i];
+    if (kind === 'Barrel') streak[who] = ok ? (streak[who] || 0) + 1 : 0;
+    if (kind === 'Jail' && ok) ev.push({ k, i, kind: 'hen', text: `${who} rút ${card}, thoát tù`, short: 'thoát tù, cơ hội 1/4' });
+    else if (kind === 'Dynamite' && !ok) ev.push({ k, i, kind: 'xui', text: `Dynamite nổ trúng ${who}`, short: 'Dynamite nổ, cơ hội ~1/6' });
+    else if (kind === 'Barrel' && ok) {
+      const e = withCf({ k, i, ok, kind: 'hen' });
+      if (hp0 === 1) ev.push(Object.assign(e, { text: `Barrel cứu mạng ${who} khi chỉ còn 1 máu`, short: `${who} còn 1 máu, trượt là gục` }));
+      else if (streak[who] === 2) ev.push(Object.assign(e, { text: `Barrel của ${who} đỡ 2 lần liền`, short: 'Barrel đỡ 2 lần liền' }));
+      else if ((e.mag || 0) >= WT_LUCK_MIN) ev.push(Object.assign(e, { text: `Barrel đỡ đòn cho ${role} ${who}`, short: `Barrel đỡ cho ${role} ${who}` }));
+    } else if (kind === 'Barrel') {
+      // trượt: tìm lúc người đó thật sự mất máu (kịp dùng Missed! thì không tính)
+      let kEnd = -1; for (let j = k; j <= tr.k1; j++) if (pts[j].h[i] < hp0) { kEnd = j; break; }
+      if (kEnd < 0) continue;
+      const e = withCf({ k, i, ok, kind: 'xui', kEnd });
+      if (tr.deaths.some((x) => x.i === i && x.k === kEnd)) ev.push(Object.assign(e, { text: `Barrel của ${who} trượt, gục ngay sau đó`, short: 'Barrel trượt đúng lúc nguy' }));
+      else if ((e.mag || 0) >= WT_LUCK_MIN) ev.push(Object.assign(e, { text: `Barrel của ${role} ${who} trượt`, short: `Barrel của ${role} ${who} trượt` }));
     }
-    for (const [name, s] of Object.entries(streak)) if (s.best >= 2) out.push({ tr, score: s.best * 1.3, title: `🍀 ${name} rút kiểm tra trúng ${s.best} lần liền` });
   }
-  return out.sort((a, b) => b.score - a.score);
+  return ev;
 }
 
-function timelineTitle(g, tr, last) {
-  const owner = g.players[tr.o]?.name || '';
-  const own = tr.log.filter((l) => /^(💥|🔫|🪶|🤠|🍺|⛓️|💃|😱|🏪)/.test(l) && l.includes(owner + ' ')).join(' ');
-  if (tr === last) return '🏁 Phát súng cuối';
+// Chọn lượt: tối đa 3 lượt ảnh hưởng lớn nhất (đổi ≥ 8 điểm %) + tối đa 3 lượt rút kiểm tra hên/xui đặc biệt.
+// Bỏ lượt cuối (phát bắn cuối chỉ "chốt" kết quả). Bước ngoặt / chạm đáy chỉ là nhãn khi lượt đã được chọn.
+function pickWinTurns(g, data) {
+  const W = WIN_OF[g.winner], body = data.turns.slice(0, -1);
+  if (!body.length) return { picked: [], turning: null };
+  const L = winLeaders(body);
+  let turning = null; for (let j = body.length - 1; j > 0; j--) if (L[j] === W && L[j - 1] !== W) { turning = body[j]; break; }
+  const pw = body.map((tr) => tr.after[W]), low = Math.min(...pw), lowT = low < 0.3 ? body[pw.indexOf(low)] : null;
+  const bySwing = [...body].sort((a, b) => b.swing - a.swing);
+  let big = bySwing.filter((tr) => tr.swing >= 0.08).slice(0, 3);
+  if (big.length < 2) big = bySwing.slice(0, 2);
+  body.forEach((tr) => { tr.luck = winLuck(g, data, tr); });
+  const luckMag = (tr) => Math.max(...tr.luck.map((e) => e.mag ?? tr.swing));
+  const lucky = body.filter((tr) => tr.luck.length).sort((a, b) => luckMag(b) - luckMag(a)).slice(0, 3);
+  const picked = [...new Set([...big, ...lucky])].sort((a, b) => a.t - b.t);
+  picked.forEach((tr) => {
+    tr.kinds = [];
+    if (big.includes(tr)) tr.kinds.push('big');
+    if (lucky.includes(tr)) tr.kinds.push(...new Set(tr.luck.map((e) => e.kind)));
+    if (tr === turning) tr.kinds.push('turn');
+    if (tr === lowT) tr.kinds.push('low');
+  });
+  return { picked, turning };
+}
+
+// ---------- mô tả lượt & hành động ----------
+const WT_ACT = /^(💥|🔫|🪶|🤠|🍺|⛓️|💃|😱|🏪|🥃)\s*/;
+function winTurnTitle(g, tr) {
+  if (!tr.kinds.includes('big') && tr.luck?.length) { const e = tr.luck[0]; return `${e.kind === 'hen' ? '🍀' : '🌧️'} ${e.text}`; }
+  const own = tr.log.filter((l) => WT_ACT.test(l)).join(' ');
   if (tr.deaths.length >= 2) return `💀 Liên hoàn: ${tr.deaths.length} người gục`;
   if (tr.deaths.length) {
-    const d = tr.deaths[0], ownerP = g.players[tr.o];
-    const tragic = ownerP && ownerP.name !== d.name && d.role !== 'Renegade' && TEAM_OF[ownerP.role] === TEAM_OF[d.role];
+    const d = tr.deaths[0], o = g.players[tr.o];
+    const tragic = o && d.i !== tr.o && o.role !== 'Renegade' && TEAM_OF[o.role] === TEAM_OF[d.role];
     return `${tragic ? '💔 Bi kịch: ' : '💀 '}${d.role} ${d.name} gục ngã`;
   }
-  if (tr.log.some((l) => l.includes('Dynamite nổ'))) return '💣 Dynamite phát nổ';
+  if (/Dynamite nổ/.test(tr.log.join(' '))) return '💣 Dynamite phát nổ';
   if (/Gatling|Howitzer/.test(own)) return '🔫 Gatling quét cả bàn';
   if (/thổ dân/.test(own)) return '🪶 Thổ dân tràn vào';
   if (/thách đấu/.test(own)) return '🤠 Đấu tay đôi';
   if (/bỏ tù/.test(own)) return '⛓️ Song sắt khép lại';
   if (/buộc .* bỏ|lấy .* của/.test(own)) return '😱 Tước vũ khí đối thủ';
-  if (/uống Beer/.test(own)) return '🍺 Hồi sức đúng lúc';
+  if (/Beer|Saloon/.test(own)) return '🍺 Hồi sức đúng lúc';
   if (/bắn/.test(own)) return '💥 Loạt đạn quyết định';
-  return tr.delta > 0 ? '⚖️ Luật pháp lấy lại thế' : '⚖️ Outlaw dồn ép';
+  return `⚖️ ${WT_NAME[wtMaxFac(tr.d)]} đổi thế`;
 }
 
-// Chủ lượt đã làm gì (tối đa 3 hành động đáng kể)
-function timelineActions(g, tr) {
-  const owner = g.players[tr.o]?.name;
-  if (!owner) return [];
-  const quiet = (l) => l.startsWith(owner + ' ') && /^(bỏ \d+ lá để hồi|dùng (Stagecoach|Wells Fargo|Saloon)|trang bị)/.test(l.slice(owner.length + 1));
-  return tr.log.filter((l) => (/^(💥|🔫|🪶|🤠|🍺|⛓️|💃|😱|🏪)/.test(l) && l.includes(owner + ' ')) || quiet(l)).slice(0, 3)
-    .map((l) => l.replace(/^(💥|🔫|🪶|🤠|🍺|⛓️|💃|😱|🏪)\s*/, ''));
-}
-
-// Tác động của lượt lên từng người: máu, gục, trang bị, sức mạnh (▲▼)
-function timelineImpact(g, tr) {
-  return g.players.map((p, i) => {
-    const [h0, a0, s0, e0] = tr.before[i], [h1, a1, s1, e1] = tr.after[i];
-    if (a0 && !a1) return { p, ds: s1 - s0, parts: ['💀 gục'] };
-    const E0 = e0 ? e0.split('|') : [], E1 = e1 ? e1.split('|') : [];
-    const parts = [];
-    if (h1 !== h0) parts.push(`${h1 > h0 ? '+' : '−'}${Math.abs(h1 - h0)} máu`);
-    E1.filter((e) => !E0.includes(e)).forEach((e) => parts.push(e === 'Jail' ? '⛓️ vào tù' : e === 'Dynamite' ? '🧨 cầm Dynamite' : `+${e}`));
-    E0.filter((e) => !E1.includes(e)).forEach((e) => parts.push(e === 'Jail' ? 'ra tù' : `mất ${e}`));
-    return { p, ds: s1 - s0, parts };
-  }).filter((x) => Math.abs(x.ds) >= 0.15 && x.parts.length).sort((a, b) => Math.abs(b.ds) - Math.abs(a.ds)).slice(0, 4);
-}
-
-function timelineChartSVG(g, pts, turns, picked, turning) {
-  const n = pts.length - 1, T = Math.max(1, pts[n].t);
-  const pos = [];
-  for (let k = 0; k <= n; k++) {
-    let a = k; while (a > 0 && pts[a - 1].t === pts[k].t) a--;
-    let b = k; while (b < n && pts[b + 1].t === pts[k].t) b++;
-    pos[k] = Math.max(0, pts[k].t - 1) + (k - a + 1) / (b - a + 1);
+// Mỗi "chuỗi" bắt đầu bằng một lá đánh / trang bị / lần rút kiểm tra / sự kiện và gom các phản hồi theo sau
+// (né, mất máu, gục…). Rút Barrel là phản hồi của đòn đang diễn ra nên thuộc chuỗi của đòn đó.
+// Phần rút bài đầu lượt (trước hành động đầu tiên) không phải hành động nên bỏ.
+const WT_STARTER = /^(💥|🔫|🪶|🤠|🍺|⛓️|💃|😱|🏪|🥃)|rút kiểm tra|trang bị |Dynamite nổ|bị giam|thoát khỏi nhà tù|bỏ \d+ lá để hồi/;
+function winChains(data, tr) {
+  const pts = data.pts, out = [];
+  let cur = null;
+  for (let k = tr.k0; k <= tr.k1; k++) {
+    const lines = pts[k].log;
+    const si = lines.findIndex((l) => WT_STARTER.test(l) && !(cur && /rút kiểm tra \(Barrel\)/.test(l)));
+    if (si >= 0) { cur = { k0: k, head: lines[si], rest: lines.filter((_, j) => j !== si) }; out.push(cur); }
+    else if (!cur) { cur = { k0: k, head: null, rest: [...lines] }; out.push(cur); }
+    else cur.rest.push(...lines);
+    cur.k1 = k;
   }
-  const x = (k) => 20 + (pos[k] / T) * 960, y = (v) => 92 - v * 78;
-  let h = `<line x1="20" x2="980" y1="${y(0)}" y2="${y(0)}" stroke="#b9a99a" stroke-dasharray="4 4"/>`;
-  for (let k = 1; k <= n; k++) if (pts[k].r !== pts[k - 1].r) h += `<line x1="${x(k)}" x2="${x(k)}" y1="6" y2="178" stroke="#eadbbd"/><text x="${x(k) + 3}" y="194" font-size="11" fill="#8b7355">vòng ${pts[k].r}</text>`;
-  picked.forEach((tr) => { h += `<rect x="${x(tr.k0)}" y="6" width="${Math.max(3, x(tr.k1) - x(tr.k0))}" height="172" fill="${tr === turning ? '#d9a441' : '#c9a46a'}" opacity="${tr === turning ? 0.28 : 0.16}"/>`; });
-  const area = (sign) => `M${x(0)},${y(0)}` + pts.map((p, k) => `L${x(k)},${y(sign > 0 ? Math.max(p.b, 0) : Math.min(p.b, 0))}`).join('') + `L${x(n)},${y(0)}Z`;
-  h += `<path d="${area(1)}" fill="${ROLE_COLOR.law}" opacity=".3"/><path d="${area(-1)}" fill="${ROLE_COLOR.Outlaw}" opacity=".3"/>`;
-  h += `<path d="${pts.map((p, k) => `${k ? 'L' : 'M'}${x(k)},${y(p.b)}`).join('')}" fill="none" stroke="#3d2616" stroke-width="2.5" vector-effect="non-scaling-stroke"/>`;
-  for (const tr of turns) if (tr.deaths.length) h += `<text x="${x(tr.k1)}" y="${y(tr.end) + 18}" font-size="13" text-anchor="middle">💀</text>`;
-  picked.forEach((tr, i) => {
-    const cx = (x(tr.k0) + x(tr.k1)) / 2, cy = Math.max(16, y(Math.max(tr.start, tr.end)) - 16);
-    const fill = tr === turning ? '#d9a441' : tr.delta > 0 ? ROLE_COLOR.law : ROLE_COLOR.Outlaw;
-    h += `<g class="tl-mk" data-ev="${i}"><circle cx="${cx}" cy="${cy}" r="10" fill="${fill}" stroke="#fff" stroke-width="2"/><text x="${cx}" y="${cy + 4}" font-size="11" font-weight="800" text-anchor="middle" fill="${tr === turning ? '#2a160a' : '#fff'}">${i + 1}</text></g>`;
+  out.forEach((c) => {
+    c.d = wtDiff(pts[c.k1].P, c.k0 ? pts[c.k0 - 1].P : data.start.P);
+    c.mag = Math.max(...Object.values(c.d).map(Math.abs));
   });
-  return `<svg class="tl-chart" viewBox="0 0 1000 200" preserveAspectRatio="none" role="img" aria-label="Cán cân trận đấu theo từng lượt">${h}</svg>`;
+  return out.filter((c) => c.head);
+}
+const wtStripIcon = (s) => s.replace(/^\S+\s/u, (m) => (/\p{Extended_Pictographic}/u.test(m) ? '' : m));
+function winActor(g, tr, c) {
+  const s = wtStripIcon(c.head);
+  let best = -1;
+  g.players.forEach((p, i) => { if (s.startsWith(p.name + ' ') && (best < 0 || p.name.length > g.players[best].name.length)) best = i; });
+  return best >= 0 ? best : tr.o;
+}
+function winActionHTML(g, c) {
+  const ic = c.head.match(/^(\S+)\s/u)?.[1];
+  const check = /rút kiểm tra/.test(c.head);
+  const icon = check ? '🎴' : /trang bị/.test(c.head) ? '🛡️' : /để hồi/.test(c.head) ? '🍺' : ic && /\p{Extended_Pictographic}/u.test(ic) ? ic : '•';
+  let s = teamNames(g, wtStripIcon(c.head).replace(/[.!]$/, ''));
+  if (check) s = s.replace(/→ (thành công|thất bại)/, (_, r) => `→ <b class="${r === 'thành công' ? 'ok' : 'bad'}">${r}</b>`);
+  return `<span class="wt-ic">${icon}</span><span>${s}</span>`;
+}
+// Giải thích ngắn: hậu quả (gục > mất máu > Barrel/né > còn lại), đánh dấu khi trúng đồng đội của người làm
+function winExplainHTML(g, c, actor) {
+  const P = g.players, iOf = (nm) => P.findIndex((p) => p.name === nm);
+  const mate = (nm) => { const i = iOf(nm); return i >= 0 && i !== actor && P[actor].role !== 'Renegade' && TEAM_OF[P[i].role] === TEAM_OF[P[actor].role]; };
+  const who = (nm) => `${teamNames(g, nm)} <span class="wt-rl">${esc(P[iOf(nm)]?.role || '')}</span>${mate(nm) ? ' <span class="wt-mate">⚠ đồng đội</span>' : ''}`;
+  const items = [];
+  c.rest.forEach((l, j) => {
+    let m;
+    if ((m = l.match(/^☠️ (.+?) đã chết!/))) items.push([0, j, `☠️ ${who(m[1])} gục`]);
+    else if ((m = l.match(/^(.+?) mất (\d+) máu \(còn (\d+)\)/))) items.push([1, j, `${who(m[1])} −${m[2]} máu, còn ${m[3]}`]);
+    else if ((m = l.match(/^(.+?) rút kiểm tra \(Barrel\): .+? → (thành công|thất bại)/))) items.push([2, j, `Barrel của ${teamNames(g, m[1])} <b class="${m[2] === 'thành công' ? 'ok' : 'bad'}">${m[2] === 'thành công' ? 'đỡ được' : 'trượt'}</b>`]);
+    else if ((m = l.match(/^(.+?) đã né được/))) items.push([2, j, `${teamNames(g, m[1])} né được`]);
+    else if ((m = l.match(/Dynamite được chuyền sang (.+?)\./))) items.push([3, j, `Dynamite chuyền sang ${teamNames(g, m[1])}`]);
+    else if (/Dynamite nổ/.test(l)) items.push([0, j, '💣 Dynamite nổ']);
+    else if ((m = l.match(/^(.+?) bị giam, mất lượt/))) items.push([1, j, `${teamNames(g, m[1])} bị giam, mất lượt`]);
+    else if ((m = l.match(/^(.+?) thoát khỏi nhà tù/))) items.push([2, j, `${teamNames(g, m[1])} ra tù`]);
+    else if ((m = l.match(/được thưởng (\d+) lá/))) items.push([3, j, `thưởng ${m[1]} lá`]);
+  });
+  const out = items.sort((a, b) => a[0] - b[0] || a[1] - b[1]).slice(0, 4).sort((a, b) => a[1] - b[1]).map((x) => x[2]);
+  if (out.length) return out.join(' · ');
+  const h = c.head;
+  if (/Beer|để hồi/.test(h)) return 'hồi 1 máu';
+  if (/Saloon/.test(h)) return 'cả bàn hồi 1 máu';
+  if (/trang bị/.test(h)) return 'lắp trang bị lên bàn';
+  if (/bỏ tù/.test(h)) return 'đối thủ có thể mất lượt sau';
+  if (/General Store/.test(h)) return 'mỗi người chọn một lá';
+  if (/buộc .* bỏ|lấy .* của/.test(h)) return 'đối thủ mất một lá';
+  if (/rút kiểm tra \(Jail\)/.test(h)) return /thành công/.test(h) ? 'thoát tù, được chơi lượt này' : 'mất lượt';
+  if (/rút kiểm tra \(Dynamite\)/.test(h)) return /thành công/.test(h) ? 'Dynamite không nổ' : 'Dynamite nổ';
+  return 'không trúng ai';
+}
+const winDeltaHTML = (f, v, big) => { const r = Math.round(v * 100); return `<span class="wt-d ${f} ${big ? 'big' : ''}"><b>${r > 0 ? '▲' : r < 0 ? '▼' : ''} ${wtSigned(v)}%</b><small>${WT_NAME[f]}</small></span>`; };
+// Tối đa 3 hành động: hành động có rút kiểm tra hên/xui trước (nếu lượt lọt vì nó), rồi tới tác động mạnh nhất.
+// Số bên trái = phe đổi nhiều nhất; với Barrel hên/xui là độ hên/xui so với kịch bản ngược lại.
+function winActsHTML(g, data, tr) {
+  const lucky = tr.kinds.includes('hen') || tr.kinds.includes('xui');
+  const all = winChains(data, tr);
+  all.forEach((c) => { c.luck = lucky ? (tr.luck || []).filter((e) => e.k >= c.k0 && e.k <= c.k1) : []; });
+  const byMag = [...all].sort((a, b) => b.mag - a.mag);
+  let shown = [...byMag.filter((c) => c.luck.length), ...byMag.filter((c) => !c.luck.length && c.mag >= WT_ACT_MIN)].slice(0, 3);
+  if (!shown.length) shown = byMag.slice(0, 1);
+  shown.sort((a, b) => a.k0 - b.k0);
+  const rest = all.length - shown.length;
+  return `<div class="wt-acts">${shown.map((c) => {
+    const le = c.luck.find((e) => e.d), d = le ? le.d : c.d, f = wtMaxFac(d), actor = winActor(g, tr, c);
+    const tags = c.luck.map((e) => `<span class="wt-luck ${e.kind}">${e.kind === 'hen' ? '🍀 hên' : '🌧️ xui'}: ${teamNames(g, e.short)}${e.vs ? ` <i>(${e.vs})</i>` : ''}</span> `).join('');
+    return `<div class="wt-act ${Math.abs(d[f]) >= 0.1 ? 'big' : ''} ${le ? 'cf' : ''}">${winDeltaHTML(f, d[f])}<div class="wt-txt">${winActionHTML(g, c)}</div><div class="wt-why">${tags}${winExplainHTML(g, c, actor)}</div></div>`;
+  }).join('')}${rest > 0 ? `<div class="wt-more">+ ${rest} hành động khác ảnh hưởng nhỏ</div>` : ''}</div>`;
 }
 
-const RESULT_NO_TIMELINE = `<div class="result-missing" role="status"><b>Không có dữ liệu cán cân</b><p>Ván này được chơi trên server bản cũ nên chưa ghi diễn biến.</p></div>`;
-
-// ---------- Loại trận (kiểu chess.com) từ đường cán cân ----------
-// Nhìn từ phía phe thắng: w > 0 = phe thắng đang dẫn. Mỗi lượt lấy giá trị cuối lượt, bỏ lượt cuối (cán cân chạm trần).
-// Ngưỡng chỉnh bằng 1000 ván mô phỏng: chắc tay ~31% · giằng co ~21% · để thua ~14% · áp đảo ~11% · lật kèo ~10% · Renegade ~8% · điên rồ ~5%.
-const MATCH_TYPES = {
-  renegade: ['🎭', 'Kẻ phản bội cân cả bàn'],
-  chaos: ['🔥', 'Trận điên rồ'],
-  thrown: ['💔', 'Dẫn cả trận vẫn để thua'],
-  comeback: ['🔄', 'Lật kèo'],
-  crush: ['👑', 'Áp đảo một chiều'],
-  close: ['⚖️', 'Giằng co tới phút chót'],
-  steady: ['🎯', 'Thắng chắc tay'],
-};
-const MATCH_RULE = { lead: 0.08, chaosSwaps: 3, thrownShare: 0.65, comebackLow: -0.25, crushShare: 0.9, crushMean: 0.3, closeBand: 0.15, closeShare: 0.7 };
-
-function classifyMatch(g, turns) {
-  const SIDE = { Sheriff: 'Sheriff & Deputy', Outlaw: 'Outlaw' };
-  const winName = SIDE[g.winner], loseName = g.winner === 'Sheriff' ? 'Outlaw' : 'Sheriff & Deputy';
-  if (g.winner === 'Renegade') {
-    const r = g.players.find((p) => p.role === 'Renegade');
-    return { type: 'renegade', text: `${r ? r.name : 'Renegade'} sống sót tới cuối, một mình đứng trên mọi phe.` };
-  }
-  const sign = g.winner === 'Sheriff' ? 1 : -1;
-  const body = turns.slice(0, -1);
-  const w = body.map((tr) => tr.end * sign);
-  const pct = (x) => `${Math.round(x * 100)}%`;
-  const num = (v) => signed(v).replace('+', '');
-  if (w.length < 3) return { type: 'crush', text: `Phe ${winName} kết thúc ván chỉ sau ${turns.length} lượt.` };
-  const R = MATCH_RULE;
-  let state = 0, swaps = 0;
-  for (const v of w) { const s = v > R.lead ? 1 : v < -R.lead ? -1 : 0; if (s && state && s !== state) swaps++; if (s) state = s; }
-  const low = Math.min(...w), lowTr = body[w.indexOf(low)];
-  const share = (f) => w.filter(f).length / w.length;
-  const mean = w.reduce((a, b) => a + b, 0) / w.length;
-  if (swaps >= R.chaosSwaps) return { type: 'chaos', text: `Thế dẫn đổi chủ ${swaps} lần — không phe nào giữ được lợi thế lâu.` };
-  const behind = share((v) => v < -0.05);
-  if (behind >= R.thrownShare) return { type: 'thrown', text: `Phe ${loseName} nắm lợi thế ${pct(behind)} thời gian của ván nhưng để tuột chiến thắng ở cuối.` };
-  if (low <= R.comebackLow) return { type: 'comeback', text: `Phe ${winName} từng bị dẫn tới ${num(Math.abs(low))} ở lượt ${lowTr.t} (vòng ${lowTr.r}) rồi lật ngược thế trận.` };
-  const ahead = share((v) => v >= -0.05);
-  if (ahead >= R.crushShare && mean >= R.crushMean) return { type: 'crush', text: `Phe ${winName} dẫn ${pct(ahead)} thời gian của ván, đối thủ gần như không có cửa.` };
-  if (share((v) => Math.abs(v) <= R.closeBand) >= R.closeShare) return { type: 'close', text: `Hai phe ngang ngửa gần cả ván, chỉ ngã ngũ ở những lượt cuối.` };
-  return { type: 'steady', text: `Phe ${winName} tạo được lợi thế rồi giữ vững tới cuối.` };
+// ---------- biểu đồ dải chồng 100% ----------
+// Mỗi lượt rộng bằng nhau, các hành động trong lượt chia đều. Điện thoại dùng khung hẹp hơn để chữ không bé đi.
+let WT_CHART = null; // hình học của biểu đồ đang hiện (cho rê chuột)
+function winChartSVG(g, data, picked, turning) {
+  const { pts, turns, start, deaths } = data;
+  const phone = innerWidth < 600;
+  const W = phone ? 420 : 1000, H = phone ? 230 : 165, T = turns.length;
+  const x0 = 30, x1 = W - 6, top = 24, bot = H - 32;
+  const pos = []; turns.forEach((tr, j) => { for (let k = tr.k0; k <= tr.k1; k++) pos[k] = j + (k - tr.k0 + 1) / (tr.k1 - tr.k0 + 1); });
+  const x = (k) => x0 + (k < 0 ? 0 : pos[k] / T) * (x1 - x0), y = (v) => bot - v * (bot - top);
+  const xs = [x(-1), ...pts.map((_, k) => x(k))], P = [start.P, ...pts.map((p) => p.P)];
+  const cum = P.map((p) => [0, p.law, p.law + p.ren, 1]);
+  let h = '';
+  WT_BANDS.forEach((f, b) => {
+    const up = P.map((_, k) => `${xs[k].toFixed(1)},${y(cum[k][b + 1]).toFixed(1)}`), dn = P.map((_, k) => `${xs[k].toFixed(1)},${y(cum[k][b]).toFixed(1)}`).reverse();
+    h += `<polygon points="${up.concat(dn).join(' ')}" fill="${WT_COLOR[f]}"/>`;
+  });
+  let lastR = null;
+  turns.forEach((tr, j) => {
+    if (tr.r === lastR) return; lastR = tr.r;
+    const X = x0 + (j / T) * (x1 - x0);
+    h += `<line x1="${X}" x2="${X}" y1="${top}" y2="${bot}" stroke="#fff" stroke-opacity=".35"/><text x="${X + 3}" y="${H - 3}" font-size="10" fill="#8b7355">V${tr.r}</text>`;
+  });
+  h += `<line x1="${x0}" x2="${x1}" y1="${y(0.5)}" y2="${y(0.5)}" stroke="#fff" stroke-dasharray="4 4" stroke-opacity=".75"/>`;
+  [0, 0.5, 1].forEach((v) => { h += `<text x="${x0 - 4}" y="${y(v) + 3}" font-size="10" text-anchor="end" fill="#8b7355">${wtPct(v)}</text>`; });
+  picked.forEach((tr, i) => {
+    const a = x0 + (turns.indexOf(tr) / T) * (x1 - x0), w = Math.max(4, (x1 - x0) / T), c = tr === turning ? '#d9a441' : WT_COLOR[wtMaxFac(tr.d)];
+    h += `<rect x="${a}" y="${top}" width="${w}" height="${bot - top}" fill="${tr === turning ? '#fde68a' : '#fff'}" opacity="${tr === turning ? 0.55 : 0.28}" class="wt-mk" data-ev="${i}"/>`;
+    h += `<g class="wt-mk" data-ev="${i}"><circle cx="${a + w / 2}" cy="${top - 12}" r="10" fill="${c}" stroke="#fffaf0" stroke-width="2"/><text x="${a + w / 2}" y="${top - 8}" font-size="11" font-weight="800" text-anchor="middle" fill="${tr === turning || c === WT_COLOR.ren ? '#2a160a' : '#fff'}">${i + 1}</text></g>`;
+  });
+  deaths.forEach((d) => { h += `<g><circle cx="${x(d.k)}" cy="${bot + 10}" r="7" fill="${ROLE_COLOR[d.role]}" stroke="#fffaf0" stroke-width="1.5"/><text x="${x(d.k)}" y="${bot + 13.5}" font-size="8.5" text-anchor="middle">☠</text><title>${esc(d.name)} (${d.role}) gục — lượt ${d.t}</title></g>`; });
+  h += `<line class="wt-cross" y1="${top}" y2="${bot}" stroke="#2a1a0e" stroke-width="1.5" opacity="0"/>`;
+  WT_CHART = { g, data, xs: pts.map((_, k) => x(k)), W };
+  return `<svg class="wt-chart" viewBox="0 0 ${W} ${H}" role="img" aria-label="Tỉ lệ thắng của 3 phe theo từng hành động">${h}</svg>`;
+}
+// Rê chuột / chạm lên biểu đồ: vạch dọc + ô ghi lượt, chủ lượt, tỉ lệ 3 phe và việc vừa xảy ra
+function wireWinChart(dialog) {
+  const svg = dialog.querySelector('.wt-chart'), tip = dialog.querySelector('.wt-tip');
+  if (!svg || !tip || !WT_CHART) return;
+  const { g, data, xs, W } = WT_CHART, cross = svg.querySelector('.wt-cross');
+  const move = (ev) => {
+    const r = svg.getBoundingClientRect(), mx = (ev.clientX - r.left) / r.width * W;
+    let k = 0, bd = Infinity; xs.forEach((X, j) => { const d = Math.abs(X - mx); if (d < bd) { bd = d; k = j; } });
+    const p = data.pts[k], o = g.players[p.o];
+    cross.setAttribute('x1', xs[k]); cross.setAttribute('x2', xs[k]); cross.setAttribute('opacity', 0.7);
+    tip.innerHTML = `<b>Lượt ${p.t}</b> · ${o ? `${teamNames(g, o.name)} (${esc(o.role)})` : ''}
+      <div class="wt-tip-row">${['law', 'ren', 'out'].map((f) => `<span style="--c:${WT_COLOR[f]}">${WT_NAME[f]} ${wtPct(p.P[f])}</span>`).join('')}</div>
+      ${p.log.length ? `<div class="wt-tip-log">${p.log.slice(0, 2).map((l) => teamNames(g, l)).join(' · ')}</div>` : ''}`;
+    const box = svg.parentElement.getBoundingClientRect(), zoom = svg.parentElement.offsetWidth ? box.width / svg.parentElement.offsetWidth : 1;
+    let left = (ev.clientX - box.left) / zoom + 14;
+    if (left + tip.offsetWidth > svg.parentElement.offsetWidth - 6) left -= tip.offsetWidth + 28;
+    tip.style.left = `${Math.max(4, left)}px`;
+    tip.style.top = `${(r.top - box.top) / zoom + 24}px`;
+    tip.classList.add('on');
+  };
+  svg.addEventListener('pointermove', move);
+  svg.addEventListener('pointerdown', move);
+  svg.addEventListener('pointerleave', () => { tip.classList.remove('on'); cross.setAttribute('opacity', 0); });
 }
 
 function resultTimelineHTML(g, won) {
-  const data = timelineTurns(g);
+  const data = winTurns(g);
   const foot = `<div class="result-foot"><button type="button" class="btn ghost" data-step="awards">← Danh hiệu</button><span></span>${resultNext('contrib')}</div>`;
   if (!data) return `${resultHeaderHTML(g, won)}${RESULT_NO_TIMELINE}${foot}`;
-  const { pts, turns } = data;
-  const { picked, turning } = pickTimeline(g, turns);
-  const mt = classifyMatch(g, turns);
-  const [mtIcon, mtName] = MATCH_TYPES[mt.type];
-  const last = turns[turns.length - 1];
-  const maxD = Math.max(...picked.map((t) => Math.abs(t.delta)), 0.01);
-  const rows = picked.map((tr, i) => {
-    const side = tr.delta > 0 ? 'law' : 'out';
-    const owner = g.players[tr.o];
-    const acts = timelineActions(g, tr);
-    const boom = tr.log.find((l) => l.includes('Dynamite nổ'));
-    // Lượt có người chết: ghi thẳng "X hạ gục Y bằng …"; còn lại: hành động chính của chủ lượt (không có nhãn)
-    const kills = tr.deaths.map((d) => d.killer
-      ? `☠️ ${teamNames(g, d.killer)} hạ gục ${teamNames(g, d.name)}${d.weapon ? ` bằng <b>${esc(d.weapon)}</b>` : ''}`
-      : `☠️ ${teamNames(g, d.name)} chết${d.weapon === 'Dynamite' ? ' vì <b>Dynamite</b> nổ' : ''}`);
-    const did = kills.length ? kills.join(' · ')
-      : acts.length ? acts.map((a) => teamNames(g, a)).join(' · ') : boom ? teamNames(g, boom.replace(/^💥\s*/, '')) : 'Không có hành động tấn công';
-    // Tiêu đề: khoảnh khắc thú vị / Sheriff mất máu dùng tiêu đề riêng nếu lượt đó không lọt vì ảnh hưởng
-    const sheriff = g.players.find((p) => p.role === 'Sheriff');
-    const title = tr.kinds.includes('impact') ? timelineTitle(g, tr, last)
-      : tr.kinds.includes('fun') ? tr.fun.title
-      : `🎯 Sheriff ${sheriff?.name || ''} mất máu lần đầu (−${tr.sheriffLoss})`;
-    const tags = [
-      tr.kinds.includes('impact') ? '<span class="tl-tag impact">ẢNH HƯỞNG LỚN</span>' : '',
-      tr.kinds.includes('sheriff') ? `<span class="tl-tag sheriff">SHERIFF MẤT MÁU ĐẦU TIÊN${tr.kinds.includes('impact') ? ` (−${tr.sheriffLoss})` : ''}</span>` : '',
-      tr.kinds.includes('fun') ? `<span class="tl-tag fun">★ THÚ VỊ</span>` : '',
-      tr === turning ? '<span class="tl-tag">BƯỚC NGOẶT</span>' : '',
-    ].join('');
-    const funLine = tr.kinds.includes('fun') && tr.kinds.includes('impact') ? `<div class="tl-did">★ ${teamNames(g, tr.fun.title.replace(/^\S+\s/, ''))}</div>` : '';
-    const imp = timelineImpact(g, tr).map((x) => `<span class="tl-chip ${x.ds > 0 ? 'up' : 'down'}">${teamNames(g, x.p.name)} ${esc(x.parts.join(', '))} <i>${x.ds > 0 ? '▲' : '▼'} ${Math.abs(x.ds).toFixed(1).replace('.', ',')}</i></span>`).join('');
-    return `<div class="tl-ev ${side} ${tr === turning ? 'turning' : ''}" id="tlEv${i}">
-      <span class="tl-num">${i + 1}</span>
-      <div class="tl-when">Lượt ${tr.t} · vòng ${tr.r}<b>Lượt của ${owner ? teamNames(g, owner.name) : '?'}</b>${owner ? `<span class="aw-role role-${owner.role.toLowerCase()}">${esc(owner.role)}</span>` : ''}</div>
-      <div class="tl-body"><div class="tl-title">${teamNames(g, title)}${tags}</div>
-        <div class="tl-did">${did}</div>${funLine}${imp ? `<div class="tl-imp">${imp}</div>` : ''}</div>
-      <div class="tl-swing ${side}">${side === 'law' ? 'nghiêng về Luật pháp' : 'nghiêng về Outlaw'}<b>${signed(tr.delta)}</b><div class="tl-bar"><i style="width:${Math.min(100, Math.abs(tr.delta) / maxD * 100)}%"></i></div></div>
-    </div>`;
+  const W = WIN_OF[g.winner], { turns } = data, body = turns.slice(0, -1);
+  const { picked, turning } = pickWinTurns(g, data);
+  const mt = classifyMatch(g, data), [mtIcon, mtName] = MATCH_TYPES[mt.type];
+  // 3 thẻ phe: đầu ván · cao nhất · thấp nhất (phe thắng) / cuối ván (phe thua)
+  const odds = ['law', 'ren', 'out'].filter((f) => g.players.some((p) => TEAM_OF[p.role] === f)).map((f) => {
+    const vals = (body.length ? body : turns).map((tr) => tr.after[f]), list = body.length ? body : turns;
+    const hi = Math.max(...vals), hiT = list[vals.indexOf(hi)], lo = Math.min(...vals), loT = list[vals.indexOf(lo)];
+    const members = g.players.filter((p) => TEAM_OF[p.role] === f), gone = data.deaths.filter((d) => TEAM_OF[d.role] === f);
+    const res = f === W ? '🏆 Thắng' : f !== 'law' && gone.length === members.length ? `hết người · L${gone[gone.length - 1].t}` : 'Thua';
+    const third = f === W ? `<div>thấp nhất<b>${wtPct(lo)}</b><small>lượt ${loT.t}</small></div>` : `<div>cuối ván<b>${wtPct(vals[vals.length - 1])}</b><small>trước phát cuối</small></div>`;
+    return `<div class="wt-odd ${f} ${f === W ? 'win' : ''}"><div class="wt-odd-nm">${WT_NAME[f]}<span>${res}</span></div>
+      <div class="wt-facts"><div>đầu ván<b>${wtPct(data.start.P[f])}</b><small>${g.players.length} người</small></div><div>cao nhất<b>${wtPct(hi)}</b><small>lượt ${hiT.t}</small></div>${third}</div></div>`;
   }).join('');
+  const rows = picked.map((tr, i) => {
+    const o = g.players[tr.o], of = wtMaxFac(tr.d);
+    const tags = [tr.kinds.includes('big') ? '<span class="wt-tag big">ẢNH HƯỞNG LỚN</span>' : '',
+      tr.kinds.includes('hen') ? '<span class="wt-tag hen">🍀 HÊN</span>' : '', tr.kinds.includes('xui') ? '<span class="wt-tag xui">🌧️ XUI</span>' : '',
+      tr.kinds.includes('turn') ? '<span class="wt-tag turn">BƯỚC NGOẶT</span>' : '',
+      tr.kinds.includes('low') ? `<span class="wt-tag low">${WT_NAME[W].toUpperCase()} CHẠM ĐÁY ${wtPct(tr.after[W])}</span>` : ''].join('');
+    return `<div class="wt-ev ${tr === turning ? 'turning' : ''}" id="wtEv${i}" style="--c:${WT_COLOR[of]}">
+      <span class="wt-num ${of}">${i + 1}</span>
+      <div class="wt-who" style="--rc:${ROLE_COLOR[o?.role] || '#7a5b3a'}"><span class="wt-av">${o ? charPortrait(o.char) || '🤠' : '🤠'}</span>
+        <div>Lượt ${tr.t} · vòng ${tr.r}<b>${o ? teamNames(g, o.name) : '?'}</b>${o ? `<span class="aw-role role-${o.role.toLowerCase()}">${esc(o.role)}</span>` : ''}</div></div>
+      <div class="wt-body"><div class="wt-title">${teamNames(g, winTurnTitle(g, tr))}${tags}</div>${winActsHTML(g, data, tr)}</div>
+      <div class="wt-sum"><small>Cả lượt · ${WT_NAME[of]}</small>${winDeltaHTML(of, tr.d[of], true)}<small>${wtPct(tr.before[of])} → ${wtPct(tr.after[of])}</small></div>
+    </div>`;
+  }).join('') || '<p class="wt-none">Ván quá ngắn, không có lượt nào nổi bật.</p>';
   return `${resultHeaderHTML(g, won)}
-    <div class="tl-type ${mt.type}"><span class="tl-type-ic">${mtIcon}</span><div><div class="tl-type-k">Loại trận</div><b>${esc(mtName)}</b><p>${teamNames(g, mt.text)}</p></div></div>
-    <section class="tl-panel"><div class="tl-head"><h3>Cán cân trận đấu</h3>
-      <div class="tl-legend"><span><i class="law"></i>Sheriff &amp; Deputy lợi thế</span><span><i class="out"></i>Outlaw lợi thế</span><span>💀 có người gục</span><span><i class="turn"></i>Bước ngoặt</span></div></div>
-      ${timelineChartSVG(g, pts, turns, picked, turning)}</section>
-    <section class="tl-panel tl-events"><div class="tl-head"><h3>Diễn biến</h3><span class="tl-legend">3 lượt ảnh hưởng nhất · Sheriff mất máu đầu tiên · 1 khoảnh khắc thú vị · ▲▼ sức mạnh người đó tăng/giảm</span></div>
-      <div class="tl-list">${rows}</div></section>
+    <div class="wt-top">
+      <div class="tl-type ${mt.type}"><span class="tl-type-ic">${mtIcon}</span><div><div class="tl-type-k">Loại trận</div><b>${esc(mtName)}</b><p>${teamNames(g, mt.text)}</p></div></div>
+      <div class="wt-odds">${odds}</div>
+    </div>
+    <section class="tl-panel wt-chart-panel"><div class="tl-head"><h3>Cửa thắng của 3 phe</h3>
+      <div class="tl-legend"><span><i style="background:var(--law)"></i>Luật pháp</span><span><i style="background:var(--renegade)"></i>Renegade</span><span><i style="background:var(--outlaw)"></i>Outlaw</span><span>① lượt quyết định</span><span><i class="turn"></i>Bước ngoặt</span><span>☠ có người gục</span></div></div>
+      ${winChartSVG(g, data, picked, turning)}<div class="wt-tip" aria-hidden="true"></div></section>
+    <section class="tl-panel tl-events"><div class="tl-head"><h3>Những lượt quyết định</h3><span class="tl-legend">lượt đổi cửa thắng nhiều nhất · lượt rút kiểm tra hên / xui đặc biệt · 3 hành động tác động mạnh nhất mỗi lượt</span></div>
+      <div class="wt-list">${rows}</div></section>
     ${foot}`;
 }
 
@@ -2032,6 +2204,7 @@ function renderMatchResult(g) {
     resizeWatch.disconnect();
     dialog.remove();
     document.body.classList.remove('match-result-open');
+    if (ROOM && !ROOM.game) renderWaiting(); // hiện nút "Xem lại kết quả ván trước"
     ($('#resetBtn') || $('#leaveBtn'))?.focus();
   };
   const show = (step) => {
@@ -2041,23 +2214,26 @@ function renderMatchResult(g) {
     const html = render ? render(g, won) : resultMainHTML(g, won, team);
     dialog.innerHTML = `<div class="result-frame step-${step}"><div class="result-body">${html}</div></div>`;
     dialog.scrollTop = 0;
-    // Diễn biến: bấm số trên biểu đồ → cuộn tới diễn biến tương ứng trong danh sách
-    dialog.querySelectorAll('.tl-mk').forEach((mk) => {
+    // Diễn biến: bấm số / vệt sáng trên biểu đồ → cuộn tới lượt tương ứng trong danh sách; rê chuột → ô tỉ lệ thắng
+    dialog.querySelectorAll('.wt-mk').forEach((mk) => {
       mk.onclick = () => {
-        const ev = dialog.querySelector(`#tlEv${mk.dataset.ev}`);
-        dialog.querySelectorAll('.tl-ev.hl').forEach((e) => e.classList.remove('hl'));
+        const ev = dialog.querySelector(`#wtEv${mk.dataset.ev}`);
+        dialog.querySelectorAll('.wt-ev.hl').forEach((e) => e.classList.remove('hl'));
         ev?.classList.add('hl');
         ev?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
       };
     });
+    wireWinChart(dialog);
     dialog.querySelectorAll('[data-step]').forEach((b) => { b.onclick = () => show(b.dataset.step); });
     const close = dialog.querySelector('[data-close]');
     if (close) close.onclick = dismiss;
     const reset = dialog.querySelector('[data-reset]');
-    if (reset) reset.onclick = () => { dismiss(); $('#resetBtn')?.click(); };
+    // Phòng còn giữ ván đã xong → đưa phòng về phòng chờ; phòng đã về rồi → chỉ đóng màn của mình.
+    if (reset) reset.onclick = () => { dismiss(); if (ROOM.game?.winner) $('#resetBtn')?.click(); };
     (dialog.querySelector('.result-continue') || dialog.querySelector('[data-close]'))?.focus();
     fitMatchResult(dialog);
   };
+  dialog.refresh = () => show(ui.resultStep || 'result'); // vẽ lại nút cuối khi phòng vừa về phòng chờ
   dialog.oncancel = (event) => { event.preventDefault(); dismiss(); };
   document.body.appendChild(dialog);
   document.body.classList.add('match-result-open');

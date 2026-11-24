@@ -1,0 +1,234 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Nháp Diễn biến 3 phe</title>
+<link href="https://fonts.googleapis.com/css2?family=Rye&family=Be+Vietnam+Pro:wght@400;600;700;800&family=Roboto+Slab:wght@700;900&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../public/style.css">
+<script src="dien-bien-3-phe-data.js"></script>
+<style>
+  body { margin: 0; color: #f4e4c1; background: radial-gradient(circle at 50% 30%, #3a2416, #120a05) fixed; font-family: 'Be Vietnam Pro', sans-serif; }
+  .wrap { max-width: 1180px; margin: 0 auto; padding: 18px 16px 40px; }
+  h1 { font: normal 26px 'Rye', serif; color: #fde68a; margin: 0 0 4px; }
+  .sub { color: #d9c29a; font-size: 13px; margin: 0 0 12px; line-height: 1.5; }
+  .sub b { color: #fde68a; }
+  .games { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 12px; }
+  .games button { font: 700 13px 'Be Vietnam Pro', sans-serif; padding: 7px 12px; border-radius: 99px; border: 1px solid #c9a46a; background: transparent; color: #f4e4c1; cursor: pointer; }
+  .games button.on { background: #f4e4c1; color: #2a1a0e; }
+
+  .sticky { position: sticky; top: 0; z-index: 5; padding: 8px 0; background: linear-gradient(#1c110a 85%, transparent); }
+  .info { background: var(--paper); color: var(--ink); border: 2px solid #c9a46a; border-radius: 12px; padding: 8px 12px; display: grid; grid-template-columns: 150px 1fr auto; gap: 12px; align-items: center; min-height: 46px; }
+  .info .when { font-size: 12px; color: var(--muted); font-weight: 700; }
+  .info .when b { display: block; font-size: 14px; color: var(--ink); }
+  .info .log { font-size: 12.5px; line-height: 1.4; color: #4a3424; max-height: 36px; overflow: hidden; }
+  .pcts { display: flex; gap: 6px; }
+  .pct { font-weight: 800; font-size: 13px; padding: 3px 9px; border-radius: 99px; color: #fff; white-space: nowrap; }
+  .pct.law { background: var(--law); } .pct.out { background: var(--outlaw); } .pct.ren { background: var(--renegade); color: #2a1a0e; }
+
+  .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+  .vcard { background: var(--paper); color: var(--ink); border: 2px solid #c9a46a; border-radius: 12px; padding: 10px 14px 12px; box-shadow: 0 6px 20px rgba(0,0,0,.35); min-width: 0; }
+  .vcard.wide { grid-column: 1 / -1; }
+  .vcard h3 { margin: 0; font: normal 17px 'Rye', serif; color: var(--red); }
+  .vcard .note { font-size: 12px; color: var(--muted); margin: 2px 0 6px; line-height: 1.45; }
+  .vcard .note b { color: var(--ink); }
+  svg { width: 100%; display: block; overflow: visible; touch-action: none; }
+  .legend { display: flex; gap: 14px; font-size: 11.5px; color: var(--muted); flex-wrap: wrap; margin-top: 4px; }
+  .legend i { display: inline-block; width: 12px; height: 9px; border-radius: 2px; margin-right: 4px; vertical-align: -1px; }
+  .axis { font: 600 10px 'Be Vietnam Pro', sans-serif; fill: #8a6b48; }
+  .lbl { font: 800 11px 'Be Vietnam Pro', sans-serif; }
+  @media (max-width: 760px) { .grid { grid-template-columns: 1fr; } .info { grid-template-columns: 1fr; gap: 4px; } }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Diễn biến 3 phe — nháp</h1>
+  <p class="sub">Ván bot thật. Xác suất thắng từ <b>hồi quy logistic 3 phe</b> (<code>drafts/ty-le-thang.js</code>): đầu vào là sức mạnh mỗi phe so với đầu ván, máu và sức mạnh riêng của Sheriff, tỉ lệ còn sống mỗi phe, Renegade còn sống, bàn thưa đến đâu; trọng số học từ <span id="modelNote">ván bot ngẫu nhiên</span> — người thật chơi có chủ đích nên số sẽ khác. Rê chuột (hoặc chạm) lên bất kỳ biểu đồ nào: mọi biểu đồ cùng chỉ một thời điểm.</p>
+  <div class="games" id="games"></div>
+  <div class="sticky"><div class="info" id="info"></div></div>
+  <div class="grid" id="grid"></div>
+</div>
+<script>
+const D = window.GAMES3;
+const COL = { law: '#3d7cc9', out: '#8a2b1d', ren: '#e2b31e' };
+const NAME = { law: 'Luật pháp', out: 'Outlaw', ren: 'Renegade' };
+const ROLE_FAC = { Sheriff: 'law', Deputy: 'law', Outlaw: 'out', Renegade: 'ren' };
+const ROLE_COL = { Sheriff: '#1d3a6b', Deputy: '#3d7cc9', Outlaw: '#8a2b1d', Renegade: '#e2b31e' };
+let G = D.games[0], cur = null;
+const charts = []; // mỗi biểu đồ: {svg, mark(k)}
+const el = (t, a = {}, html = '') => { const e = document.createElementNS('http://www.w3.org/2000/svg', t); for (const k in a) e.setAttribute(k, a[k]); if (html) e.innerHTML = html; return e; };
+const pc = (v) => Math.round(v * 100) + '%';
+
+function turnTicks(x, y0, y1, svg) {
+  const seen = new Set();
+  G.pts.forEach((p, k) => {
+    if (seen.has(p.t)) return; seen.add(p.t);
+    if (p.t % 5 && p.t !== 1) return;
+    svg.appendChild(el('line', { x1: x(k), x2: x(k), y1: y0, y2: y1, stroke: '#d8bd8a', 'stroke-dasharray': '2 3' }));
+    svg.appendChild(el('text', { x: x(k), y: y1 + 12, class: 'axis', 'text-anchor': 'middle' }, 'L' + p.t));
+  });
+}
+function deathMarks(x, y, svg) {
+  G.deaths.forEach((d) => {
+    const g = el('g');
+    g.appendChild(el('circle', { cx: x(d.k), cy: y, r: 7, fill: ROLE_COL[d.role], stroke: '#fff', 'stroke-width': 1.5 }));
+    g.appendChild(el('text', { x: x(d.k), y: y + 3.5, 'text-anchor': 'middle', 'font-size': 9 }, '☠'));
+    g.appendChild(el('title', {}, `${d.name} (${d.role}) chết — lượt ${d.t}`));
+    svg.appendChild(g);
+  });
+}
+function hoverX(svg, x0, x1, n) {
+  const pick = (ev) => {
+    const r = svg.getBoundingClientRect(), vb = svg.viewBox.baseVal;
+    const px = (ev.clientX - r.left) / r.width * vb.width;
+    setCur(Math.max(0, Math.min(n - 1, Math.round((px - x0) / (x1 - x0) * (n - 1)))));
+  };
+  svg.addEventListener('pointermove', pick); svg.addEventListener('pointerdown', pick);
+}
+function cursorLine(svg, x, y0, y1) {
+  const l = el('line', { y1: y0, y2: y1, stroke: '#2a1a0e', 'stroke-width': 1.2, opacity: 0 });
+  svg.appendChild(l);
+  return (k) => { l.setAttribute('x1', x(k)); l.setAttribute('x2', x(k)); l.setAttribute('opacity', .6); };
+}
+function card(title, note, legend, wide) {
+  const c = document.createElement('div'); c.className = 'vcard' + (wide ? ' wide' : '');
+  c.innerHTML = `<h3>${title}</h3><div class="note">${note}</div>`;
+  const svg = el('svg'); c.appendChild(svg);
+  if (legend) { const lg = document.createElement('div'); lg.className = 'legend'; lg.innerHTML = ['law', 'ren', 'out'].map((f) => `<span><i style="background:${COL[f]}"></i>${NAME[f]}</span>`).join('') + '<span>☠ = có người chết (màu vai trò)</span>'; c.appendChild(lg); }
+  document.getElementById('grid').appendChild(c);
+  return svg;
+}
+
+// A. Dải chồng 100%
+function chartStack() {
+  const svg = card('A · Dải chồng 100%', '<b>Kiểu dự báo bầu cử</b>: 3 phe luôn lấp đầy 100%, phe nào dày là đang có cửa. Dễ đọc "ai đang dẫn" và thấy Renegade phình ra lúc cuối. Nhược: dải giữa (Renegade) khó đọc độ lên xuống vì đáy của nó cũng di chuyển.', true, true);
+  const W = 1100, H = 190, x0 = 34, x1 = W - 8, y0 = 8, y1 = H - 22, n = G.pts.length;
+  svg.setAttribute('viewBox', `0 0 ${W} ${H + 4}`);
+  const x = (k) => x0 + (x1 - x0) * k / (n - 1), y = (v) => y1 - (y1 - y0) * v;
+  const band = (lo, hi, c) => {
+    const top = G.pts.map((p, k) => `${x(k)},${y(hi(p))}`), bot = G.pts.map((p, k) => `${x(k)},${y(lo(p))}`).reverse();
+    svg.appendChild(el('polygon', { points: top.concat(bot).join(' '), fill: c }));
+  };
+  band(() => 0, (p) => p.law, COL.law);
+  band((p) => p.law, (p) => p.law + p.ren, COL.ren);
+  band((p) => p.law + p.ren, () => 1, COL.out);
+  svg.appendChild(el('line', { x1: x0, x2: x1, y1: y(.5), y2: y(.5), stroke: '#fff', 'stroke-dasharray': '4 4', opacity: .7 }));
+  [0, .5, 1].forEach((v) => svg.appendChild(el('text', { x: x0 - 5, y: y(v) + 3, class: 'axis', 'text-anchor': 'end' }, pc(v))));
+  turnTicks(x, y0, y1, svg); deathMarks(x, y0 - 1, svg);
+  const mk = cursorLine(svg, x, y0, y1); hoverX(svg, x0, x1, n);
+  charts.push({ mark: mk });
+}
+
+// B. Ba đường
+function chartLines() {
+  const svg = card('B · Ba đường riêng', '<b>Mỗi phe một đường</b>, cùng thang 0–100%. Đọc chính xác từng phe, thấy rõ lúc hai đường cắt nhau (đổi người dẫn). Nhược: rối khi 3 đường sát nhau.', true);
+  const W = 540, H = 210, x0 = 30, x1 = W - 6, y0 = 10, y1 = H - 22, n = G.pts.length;
+  svg.setAttribute('viewBox', `0 0 ${W} ${H + 4}`);
+  const x = (k) => x0 + (x1 - x0) * k / (n - 1), y = (v) => y1 - (y1 - y0) * v;
+  [0, .5, 1].forEach((v) => { svg.appendChild(el('line', { x1: x0, x2: x1, y1: y(v), y2: y(v), stroke: '#e2cfa4' })); svg.appendChild(el('text', { x: x0 - 4, y: y(v) + 3, class: 'axis', 'text-anchor': 'end' }, pc(v))); });
+  turnTicks(x, y0, y1, svg);
+  ['law', 'out', 'ren'].forEach((f) => svg.appendChild(el('polyline', { points: G.pts.map((p, k) => `${x(k)},${y(p[f])}`).join(' '), fill: 'none', stroke: COL[f], 'stroke-width': f === 'ren' ? 3 : 2.4, 'stroke-linejoin': 'round' })));
+  deathMarks(x, y0 - 2, svg);
+  const mk = cursorLine(svg, x, y0, y1);
+  const dots = ['law', 'out', 'ren'].map((f) => { const c = el('circle', { r: 4.5, fill: COL[f], stroke: '#fff', 'stroke-width': 1.5, opacity: 0 }); svg.appendChild(c); return [f, c]; });
+  hoverX(svg, x0, x1, n);
+  charts.push({ mark: (k) => { mk(k); dots.forEach(([f, c]) => { c.setAttribute('cx', x(k)); c.setAttribute('cy', y(G.pts[k][f])); c.setAttribute('opacity', 1); }); } });
+}
+
+// C. Tam giác
+function chartTri() {
+  const svg = card('C · Tam giác 3 phe', '<b>Mỗi đỉnh là một phe thắng chắc</b>; chấm càng gần đỉnh nào phe đó càng có cửa. Đường đi nhạt → đậm theo thời gian. Hợp làm "chữ ký" của trận, không cần trục. Nhược: không đọc được thời gian, người mới cần chú thích.', false);
+  const W = 540, H = 250, A = { x: 270, y: 18 }, L = { x: 70, y: 226 }, O = { x: 470, y: 226 };
+  svg.setAttribute('viewBox', `0 0 ${W} ${H}`);
+  const pt = (p) => ({ x: p.law * L.x + p.out * O.x + p.ren * A.x, y: p.law * L.y + p.out * O.y + p.ren * A.y });
+  svg.appendChild(el('polygon', { points: `${A.x},${A.y} ${L.x},${L.y} ${O.x},${O.y}`, fill: '#fffaf0', stroke: '#c9a46a', 'stroke-width': 1.5 }));
+  // vạch 50% của từng phe
+  const mid = (P, Q) => ({ x: (P.x + Q.x) / 2, y: (P.y + Q.y) / 2 });
+  [[L, A, O], [O, A, L], [A, L, O]].forEach(([V, P, Q]) => { const a = mid(V, P), b = mid(V, Q); svg.appendChild(el('line', { x1: a.x, y1: a.y, x2: b.x, y2: b.y, stroke: '#e2cfa4', 'stroke-dasharray': '3 3' })); });
+  svg.appendChild(el('text', { x: A.x, y: A.y - 5, 'text-anchor': 'middle', class: 'lbl', fill: '#8a6500' }, 'Renegade'));
+  svg.appendChild(el('text', { x: L.x - 4, y: L.y + 15, 'text-anchor': 'start', class: 'lbl', fill: COL.law }, 'Luật pháp'));
+  svg.appendChild(el('text', { x: O.x + 4, y: O.y + 15, 'text-anchor': 'end', class: 'lbl', fill: COL.out }, 'Outlaw'));
+  const n = G.pts.length, P = G.pts.map(pt);
+  for (let k = 1; k < n; k++) svg.appendChild(el('line', { x1: P[k - 1].x, y1: P[k - 1].y, x2: P[k].x, y2: P[k].y, stroke: '#3d2616', 'stroke-width': 2, 'stroke-linecap': 'round', opacity: .15 + .85 * k / n }));
+  svg.appendChild(el('circle', { cx: P[0].x, cy: P[0].y, r: 5, fill: '#fff', stroke: '#3d2616', 'stroke-width': 2 }));
+  svg.appendChild(el('text', { x: P[0].x + 8, y: P[0].y + 4, class: 'axis' }, 'đầu ván'));
+  G.deaths.forEach((d) => { const q = P[d.k]; const g = el('g'); g.appendChild(el('circle', { cx: q.x, cy: q.y, r: 6.5, fill: ROLE_COL[d.role], stroke: '#fff', 'stroke-width': 1.5 })); g.appendChild(el('text', { x: q.x, y: q.y + 3, 'text-anchor': 'middle', 'font-size': 8 }, '☠')); g.appendChild(el('title', {}, `${d.name} (${d.role}) chết — lượt ${d.t}`)); svg.appendChild(g); });
+  const dot = el('circle', { r: 7, fill: 'none', stroke: '#b5332a', 'stroke-width': 3, opacity: 0 }); svg.appendChild(dot);
+  svg.addEventListener('pointermove', (ev) => {
+    const r = svg.getBoundingClientRect(), vb = svg.viewBox.baseVal, mx = (ev.clientX - r.left) / r.width * vb.width, my = (ev.clientY - r.top) / r.height * vb.height;
+    let best = 0, bd = 1e9; P.forEach((q, k) => { const d = (q.x - mx) ** 2 + (q.y - my) ** 2; if (d < bd) { bd = d; best = k; } });
+    setCur(best);
+  });
+  charts.push({ mark: (k) => { dot.setAttribute('cx', P[k].x); dot.setAttribute('cy', P[k].y); dot.setAttribute('opacity', 1); } });
+}
+
+// D. Cán cân cũ + dải Renegade
+function chartDual() {
+  const svg = card('D · Cán cân cũ + dải Renegade', '<b>Giữ biểu đồ cán cân hiện tại</b> (Luật pháp ↑ / Outlaw ↓, chỉ so hai phe với nhau) và thêm một dải vàng bên dưới cho cửa thắng của Renegade. Ít thay đổi nhất so với bản đang dùng. Nhược: hai trục, Renegade tách riêng nên khó so trực tiếp với hai phe kia.', false, true);
+  const W = 1100, H = 230, x0 = 34, x1 = W - 8, n = G.pts.length;
+  const a0 = 8, a1 = 140, r0 = 160, r1 = H - 22; // vùng cán cân & vùng Renegade
+  svg.setAttribute('viewBox', `0 0 ${W} ${H + 4}`);
+  const x = (k) => x0 + (x1 - x0) * k / (n - 1);
+  const yb = (v) => (a0 + a1) / 2 - (a1 - a0) / 2 * v;
+  const bal = (p) => (p.law + p.out ? (p.law - p.out) / (p.law + p.out) : 0);
+  svg.appendChild(el('defs', {}, `<clipPath id="cU"><rect x="0" y="0" width="${W}" height="${yb(0)}"/></clipPath><clipPath id="cD"><rect x="0" y="${yb(0)}" width="${W}" height="${H}"/></clipPath>`));
+  const area = `${x(0)},${yb(0)} ` + G.pts.map((p, k) => `${x(k)},${yb(bal(p))}`).join(' ') + ` ${x(n - 1)},${yb(0)}`;
+  svg.appendChild(el('polygon', { points: area, fill: COL.law, opacity: .85, 'clip-path': 'url(#cU)' }));
+  svg.appendChild(el('polygon', { points: area, fill: COL.out, opacity: .85, 'clip-path': 'url(#cD)' }));
+  svg.appendChild(el('line', { x1: x0, x2: x1, y1: yb(0), y2: yb(0), stroke: '#3d2616' }));
+  svg.appendChild(el('text', { x: x0 + 4, y: a0 + 10, class: 'lbl', fill: COL.law }, 'Luật pháp lợi'));
+  svg.appendChild(el('text', { x: x0 + 4, y: a1 - 2, class: 'lbl', fill: COL.out }, 'Outlaw lợi'));
+  const yr = (v) => r1 - (r1 - r0) * v;
+  svg.appendChild(el('rect', { x: x0, y: r0, width: x1 - x0, height: r1 - r0, fill: '#fff8de', stroke: '#ead9a0' }));
+  svg.appendChild(el('polygon', { points: `${x(0)},${yr(0)} ` + G.pts.map((p, k) => `${x(k)},${yr(p.ren)}`).join(' ') + ` ${x(n - 1)},${yr(0)}`, fill: COL.ren }));
+  svg.appendChild(el('text', { x: x0 + 4, y: r0 + 11, class: 'lbl', fill: '#8a6500' }, 'Cửa Renegade (0–100%)'));
+  turnTicks(x, r1, r1, svg); deathMarks(x, (a1 + r0) / 2, svg);
+  const mk = cursorLine(svg, x, a0, r1); hoverX(svg, x0, x1, n);
+  charts.push({ mark: mk });
+}
+
+// E. Thanh theo lượt
+function chartStrip() {
+  const svg = card('E · Thanh theo lượt (bản gọn)', '<b>Mỗi cột là cuối một lượt</b>, chia 3 màu theo xác suất; viền trên là màu chủ lượt, ☠ là lượt có người chết. Gọn, hợp điện thoại hoặc làm "tóm tắt" ngay đầu tab, bấm cột để nhảy tới lượt đó.', false, false);
+  const ends = []; G.pts.forEach((p, k) => { if (k === G.pts.length - 1 || G.pts[k + 1].t !== p.t) ends.push(k); });
+  const W = 540, H = 150, x0 = 4, x1 = W - 4, y0 = 16, y1 = H - 20, m = ends.length, bw = (x1 - x0) / m;
+  svg.setAttribute('viewBox', `0 0 ${W} ${H}`);
+  const hi = el('rect', { y: y0 - 6, height: y1 - y0 + 10, fill: 'none', stroke: '#b5332a', 'stroke-width': 2.5, rx: 2, opacity: 0 });
+  ends.forEach((k, j) => {
+    const p = G.pts[k], X = x0 + j * bw, h = (y1 - y0);
+    let yy = y1;
+    [['law', p.law], ['ren', p.ren], ['out', p.out]].forEach(([f, v]) => { svg.appendChild(el('rect', { x: X + 1, width: bw - 2, y: yy - h * v, height: h * v, fill: COL[f] })); yy -= h * v; });
+    svg.appendChild(el('rect', { x: X + 1, width: bw - 2, y: y0 - 6, height: 4, rx: 1, fill: ROLE_COL[G.roles[p.o]] }));
+    if (G.deaths.some((d) => d.t === p.t)) svg.appendChild(el('text', { x: X + bw / 2, y: y1 + 13, 'text-anchor': 'middle', 'font-size': 10 }, '☠'));
+    else if (p.t % 5 === 0) svg.appendChild(el('text', { x: X + bw / 2, y: y1 + 13, 'text-anchor': 'middle', class: 'axis' }, p.t));
+    const hit = el('rect', { x: X, width: bw, y: 0, height: H, fill: 'transparent' });
+    hit.addEventListener('pointerenter', () => setCur(k)); hit.addEventListener('pointerdown', () => setCur(k));
+    svg.appendChild(hit);
+  });
+  svg.appendChild(hi);
+  charts.push({ mark: (k) => { const j = ends.findIndex((e) => e >= k); hi.setAttribute('x', x0 + j * bw); hi.setAttribute('width', bw); hi.setAttribute('opacity', 1); } });
+}
+
+function setCur(k) {
+  if (k === cur) return; cur = k;
+  const p = G.pts[k];
+  const owner = G.names[p.o], role = G.roles[p.o];
+  document.getElementById('info').innerHTML = `
+    <div class="when">Lượt ${p.t} · vòng ${p.r}<b style="color:${ROLE_COL[role] === '#e2b31e' ? '#8a6500' : ROLE_COL[role]}">${owner} · ${G.chars[p.o]}</b></div>
+    <div class="log">${(p.log.length ? p.log : ['(thủ tục)']).join(' · ')}</div>
+    <div class="pcts"><span class="pct law">Luật pháp ${pc(p.law)}</span><span class="pct ren">Renegade ${pc(p.ren)}</span><span class="pct out">Outlaw ${pc(p.out)}</span></div>`;
+  charts.forEach((c) => c.mark(k));
+}
+
+function render() {
+  document.getElementById('grid').innerHTML = ''; charts.length = 0; cur = null;
+  document.getElementById('games').innerHTML = D.games.map((g, i) => `<button class="${g === G ? 'on' : ''}" data-i="${i}">${g.label} · ${g.n} người · ${g.turns} lượt</button>`).join('');
+  chartStack(); chartLines(); chartTri(); chartDual(); chartStrip();
+  setCur(0);
+}
+if (D.model) document.getElementById('modelNote').textContent = D.model.replace(/ — .*/, '').replace(/^Học từ /, '');
+document.getElementById('games').addEventListener('click', (e) => { const b = e.target.closest('button'); if (b) { G = D.games[+b.dataset.i]; render(); } });
+render();
+</script>
+</body>
+</html>

@@ -11,7 +11,7 @@
     },
     {
       "name": "bang-demo-results",
-      "runtimeExecutable": "node",
+      "runtimeExecutable": "node\\node.exe",
       "runtimeArgs": [
         "tools/demo-results.js"
       ],
@@ -43,11 +43,33 @@
     },
     {
       "name": "bang-demo-store-popup",
-      "runtimeExecutable": "node",
+      "runtimeExecutable": "node\\node.exe",
       "runtimeArgs": [
         "tools/demo-store-popup.js"
       ],
       "port": 3011
+    },
+    {
+      "name": "bang-demo-capsule-table",
+      "runtimeExecutable": "node\\node.exe",
+      "runtimeArgs": [
+        "tools/demo-capsule-table.js"
+      ],
+      "port": 3012
+    },
+    {
+      "name": "bang-server-3015",
+      "runtimeExecutable": "node\\node.exe",
+      "runtimeArgs": ["-e", "process.env.PORT='3015';require('./server.js')"],
+      "port": 3015
+    },
+    {
+      "name": "bang-drafts",
+      "runtimeExecutable": "node\\node.exe",
+      "runtimeArgs": [
+        "tools/serve-drafts.js"
+      ],
+      "port": 3013
     }
   ]
 }
