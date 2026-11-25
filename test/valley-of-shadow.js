@@ -177,6 +177,26 @@ test('Saved! can interrupt the Barrel check and Aim still deals one remaining da
   assertConservation(game);
 });
 
+test('the pending Saved! offer keeps both names private until the card is played', () => {
+  const { game, actor, target } = setup();
+  const saver = game.players.find((p) => p !== actor && p !== target);
+  const saved = deal(game, saver, 'Saved!');
+  const hp = target.hp;
+  play(game, actor, 'Bang', target);
+  game.act(target.name, { type: 'take' });
+  const privateView = game.viewFor(saver.name);
+  assert.deepEqual(privateView.pending, {
+    type: 'saved', player: privateView.me.index, target: game.idx(target.name), amount: 1,
+  });
+  for (const viewer of [null, ...names.filter((name) => name !== saver.name)]) {
+    assert.deepEqual(game.viewFor(viewer).pending, { type: 'saved', player: null });
+  }
+  game.act(saver.name, { type: 'saved', cardId: saved.id, from: 'deck' });
+  assert.equal(target.hp, hp);
+  assert.ok(game.log.includes(`${saver.name} vừa cứu ${target.name} khỏi một pha đấu súng!`));
+  assertConservation(game);
+});
+
 test('Rattlesnake follows Jail and remains on the board after a failed check', () => {
   const { game, actor, target } = setup();
   const snake = play(game, actor, 'Rattlesnake', target);
