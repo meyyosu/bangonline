@@ -4,7 +4,7 @@ const { test } = require('node:test');
 const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
-const { Game } = require('../game');
+const { Game, SOUND_FILES } = require('../game');
 
 function setup(options) {
   const g = new Game(['Alice', 'Bobby', 'Carol', 'David'], { rng: () => .4, ...options });
@@ -91,6 +91,22 @@ test('draw sounds play once per batch for the recipient only', () => {
   g.act(p.name, { type: 'pick', cardId: g.pending.cards[0].id });
   assert.deepEqual(g.viewFor(p.name).sounds.filter((cue) => cue.seq > pickAt).flatMap((cue) => cue.files), ['drawcard']);
   for (const viewer of [opponent.name, null]) assert.ok(g.viewFor(viewer).sounds.every((cue) => cue.seq <= pickAt));
+});
+
+test('teamkiller plays together with elimination in both directions, including the final hit', () => {
+  assert.ok(SOUND_FILES.has('teamkiller.mp3'));
+  for (const [killerRole, victimRole, teamkill] of [
+    ['Sheriff', 'Deputy', true], ['Deputy', 'Sheriff', true], ['Outlaw', 'Sheriff', false],
+  ]) {
+    const g = new Game(['Alice', 'Bobby', 'Carol', 'David', 'Elena'], { rng: () => 0.4 });
+    const victim = g.players.find((p) => p.role === victimRole);
+    const killer = g.players.findIndex((p) => p.role === killerRole);
+    g.toDiscard(...victim.hand);
+    victim.hand = [];
+    victim.hp = 1;
+    g.damage(g.idx(victim.name), 1, killer);
+    assert.deepEqual(g.viewFor(null).sounds.at(-1).files, teamkill ? ['playereliminated', 'teamkiller'] : ['playereliminated']);
+  }
 });
 
 test('Springfield, Tomahawk and Tornado use their own clips', () => {
