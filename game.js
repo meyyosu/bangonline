@@ -299,10 +299,9 @@ class Game {
     if (names.length < 4 || names.length > maxPlayers) fail(`Cần 4–${maxPlayers} người chơi.`);
     this.rng = opts.rng || Math.random;
     const roles = shuffle([...ROLE_SETS[names.length]], this.rng);
-    const pool = [...BASE_CHARACTERS];
+    const pool = [...BASE_CHARACTERS, 'Annie Versary'];
     if (opts.dodgeCity) pool.push(...Object.keys(DODGE_CITY_CHAR_INFO));
     if (opts.valleyOfShadow) pool.push(...VALLEY.characters);
-    if (opts.annieVersary) pool.push('Annie Versary');
     const chars = shuffle(pool, this.rng);
     const order = shuffle([...names], this.rng);
     this.players = order.map((name, i) => {
@@ -312,7 +311,7 @@ class Game {
       return { name, role, char, maxHp, hp: maxHp, hand: [], eq: [], coolingGreen: new Set(), alive: true, jailed: 0 };
     });
     if (opts.dodgeCity && !DODGE_CITY.cards.length) fail('Chưa nạp bộ lá Dodge City.');
-    if (opts.valleyOfShadow && !VALLEY.cards.length) fail('Chưa nạp bộ lá Valley of Shadow.');
+    if (opts.valleyOfShadow && !VALLEY.cards.length) fail('Chưa nạp bộ lá Valley of Shadows.');
     this.valleyOfShadow = !!opts.valleyOfShadow;
     this.fullDeck = buildDeck(opts.dodgeCity, this.valleyOfShadow); // Dùng bộ bài ban đầu của phòng để tính xác suất rút kiểm tra.
     this.deck = shuffle([...this.fullDeck], this.rng);

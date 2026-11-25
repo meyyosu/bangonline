@@ -79,9 +79,9 @@ for (let s = 1; s <= N; s++) {
   const names = Array.from({ length: 4 + (s % 4) }, (_, i) => `P${i + 1}`);
   const mode = ((s - 1) + Math.floor((s - 1) / 4)) % 4;
   const dodgeCity = Boolean(mode & 1), valleyOfShadow = Boolean(mode & 2);
-  const variant = ['Gốc', 'Dodge City', 'Valley of Shadow', 'Cả hai'][mode];
+  const variant = ['Gốc', 'Dodge City', 'Valley of Shadows', 'Cả hai'][mode];
   variants[variant] = (variants[variant] || 0) + 1;
-  const g = new Game(names, { rng, characterChoices: 1 + (s % 4), dodgeCity, valleyOfShadow, annieVersary: s % 3 === 0 });
+  const g = new Game(names, { rng, characterChoices: 1 + (s % 4), dodgeCity, valleyOfShadow });
   let steps = 0;
   while (!g.winner) {
     if (++steps > 20000) throw new Error(`Ván ${s}: kẹt vòng lặp`);
