@@ -3,7 +3,7 @@ Ghost - Đưa một người đã bị loại trở lại bàn dưới dạng Gh
 LeMat - Trong lượt, có thể dùng một lá bất kỳ trên tay như Bang! trong giới hạn thông thường.
 Rattlesnake - Đặt trước mặt một người chơi. Đầu lượt, người đó rút kiểm tra và mất 1 máu nếu lật lá Bích.
 Shotgun - Khi lá Bang! của bạn trúng đích, người bị trúng chọn bỏ một lá trên tay.
-Aim - Dùng kèm một lá Bang! để gây 2 sát thương nếu trúng. Lá Bang! đi kèm tính vào giới hạn Bang! của lượt.
+Aim - Dùng kèm một lá Bang! để gây 2 sát thương nếu trúng. Lá Bang! đi kèm tính vào giới hạn Bang! của lượt. Nếu Slab the Killer bắn, mục tiêu cần né hai lần.
 Backfire - Dùng để né một đòn và phản công lại người đã tấn công bạn.
 Bandidos - Mỗi người chọn bỏ 2 lá trên tay (1 lá nếu chỉ còn 1) hoặc chịu 1 sát thương.
 Escape - Né phần hiệu ứng nhắm vào bạn của một lá viền nâu, trừ lá đóng vai trò Bang!.
