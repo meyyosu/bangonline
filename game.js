@@ -238,6 +238,7 @@ const IRON_PLATE_SOUNDS = [
 const BARREL_SOUND = 'missedsound_barrel';
 const STEAL_SOUNDS = ['cardswap', 'cardswap2'];
 const TARGET_DISCARD_SOUND = 'catbalou1';
+const CAT_BALOU_RELIEF_SOUNDS = ['ohyeah1', 'ohyeah2', 'ohyeah3'];
 const TEAMKILLER_SOUND = 'teamkiller';
 const PROJECTILE_BY_CARD = { Punch: 'fist', Knife: 'knife' };
 const HURT_SOUNDS = { female: numberedSounds('hurt_f', 4), male: numberedSounds('hurt_m', 4) };
@@ -245,7 +246,7 @@ const FEMALE_CHARACTERS = new Set([
   'Calamity Janet', 'Rose Doolan', 'Suzy Lafayette', 'Belle Star', 'Elena Fuente', 'Molly Stark', 'Vera Custer',
   'Black Flower', 'Evelyn Shebang', 'Annie Versary',
 ]);
-const AIM_SOUNDS = { play: 'Aim', female: 'aim_success_f', male: 'aim_success_m' };
+const AIM_SOUNDS = { play: ['Aim', 'Aim2'], female: 'aim_success_f', male: 'aim_success_m' };
 const EFFECT_SOUNDS = {
   backfire: 'backfired', escape: 'escape', draw: 'drawcard', rattlesnakeHurt: 'rattlesnake_hurt',
   bountyPlaced: 'bounty', bountyEarned: 'bounty_earned',
@@ -260,9 +261,9 @@ const EQUIP_SOUNDS = { Mustang: 'mustang1', Dynamite: 'dynamite_start.wav', Jail
 const SOUND_FILES = new Set([
   'bangload', 'playerjoin', 'yourturn1', 'equipment1', 'prisonfree', 'playereliminated', 'outlawkilled1', 'dynamite_explode.wav',
   'victory', 'defeat',
-  BARREL_SOUND, TARGET_DISCARD_SOUND, TEAMKILLER_SOUND, ...MISSED_SOUNDS, ...IRON_PLATE_SOUNDS, ...STEAL_SOUNDS,
+  BARREL_SOUND, TARGET_DISCARD_SOUND, TEAMKILLER_SOUND, ...MISSED_SOUNDS, ...IRON_PLATE_SOUNDS, ...STEAL_SOUNDS, ...CAT_BALOU_RELIEF_SOUNDS,
   ...Object.values(HURT_SOUNDS).flat(), ...Object.values(GUN_SOUNDS).flat(),
-  ...Object.values(AIM_SOUNDS), ...Object.values(EFFECT_SOUNDS),
+  ...Object.values(AIM_SOUNDS).flat(), ...Object.values(EFFECT_SOUNDS),
   ...Object.values(PLAY_SOUNDS).flat(), ...Object.values(EQUIP_SOUNDS),
 ].map((file) => file.includes('.') ? file : `${file}.mp3`));
 const FACTION = { Sheriff: 'law', Deputy: 'law', Outlaw: 'outlaw', Renegade: 'renegade' };
@@ -1608,7 +1609,7 @@ class Game {
         if (regularBang) {
           this.bangsPlayed++;
           this.stats[pi].bangs++;
-          this.recordSound(aim ? AIM_SOUNDS.play : randomSound(GUN_SOUNDS[this.gun(p)?.name] || GUN_SOUNDS.default));
+          this.recordSound(randomSound(aim ? AIM_SOUNDS.play : GUN_SOUNDS[this.gun(p)?.name] || GUN_SOUNDS.default));
         }
         if (info.draw) this.give(p, info.draw);
         if (this.ignoredCard(t, bang)) return;
@@ -1705,7 +1706,8 @@ class Game {
           } else {
             this.toDiscard(taken);
             this.recordTransfer(t, [taken], ti, 'discard', true, null, sourceZone);
-            this.recordSound(TARGET_DISCARD_SOUND);
+            const relieved = name === 'Cat Balou' && selected && ['Jail', 'Dynamite', 'Rattlesnake'].includes(taken.name);
+            this.recordSound(relieved ? randomSound(CAT_BALOU_RELIEF_SOUNDS) : TARGET_DISCARD_SOUND);
             this.addLog(`💃 ${p.name} buộc ${t.name} bỏ ${cardStr(taken)}.`);
           }
         });

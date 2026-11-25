@@ -297,6 +297,10 @@ function showLobby() {
   $('#fanHand')?.remove();
   ROOM = null;
   history.replaceState(null, '', '/');
+  const dodgeCount = META.dodgeCityCardCount ?? META.greenCardCount;
+  const dodgeDescription = dodgeCount
+    ? `Thêm ${dodgeCount} lá Dodge City vào bộ bài của phòng.`
+    : 'Máy chủ chưa nạp dữ liệu Dodge City.';
   const valleyCount = META.valleyOfShadowCardCount;
   const valleyDescription = valleyCount
     ? `Thêm ${valleyCount} lá và cơ chế mới từ phiên bản mở rộng Valley of Shadows.`
@@ -312,8 +316,7 @@ function showLobby() {
           ${characterFields()}
           ${timerField()}
           ${fasterBotsField()}
-          <label><input type="checkbox" name="dodgeCity" aria-describedby="dodgeCityDetails" ${(META.dodgeCityCardCount ?? META.greenCardCount) ? '' : 'disabled'}> Bản mở rộng: Dodge City</label>
-          <p class="muted" id="dodgeCityDetails">${(META.dodgeCityCardCount ?? META.greenCardCount) ? `Thêm ${META.dodgeCityCardCount ?? META.greenCardCount} lá Dodge City vào bộ bài của phòng.` : 'Máy chủ chưa nạp dữ liệu Dodge City.'}</p>
+          <label ${tooltipAttrs('Dodge City', dodgeDescription)}><input type="checkbox" name="dodgeCity" aria-description="${esc(dodgeDescription)}" ${dodgeCount ? '' : 'disabled'}> Bản mở rộng: Dodge City</label>
           <label ${tooltipAttrs('Valley of Shadows', valleyDescription)}><input type="checkbox" name="valleyOfShadow" aria-description="${esc(valleyDescription)}" ${valleyCount ? '' : 'disabled'}> Bản mở rộng: Valley of Shadows</label>
           <button class="btn" style="width:100%;margin-top:10px">🎲 Tạo phòng mới</button>
         </form>
