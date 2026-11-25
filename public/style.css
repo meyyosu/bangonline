@@ -16,6 +16,11 @@
   --renegade: #e2b31e; --renegade-light: #fff1b3; --renegade-ink: #8a6500; /* nền vàng → chữ tối */
   --law: var(--deputy); /* màu cả phe Luật pháp */
   --radius: 10px;
+  /* Viền lá đúng như lá thật: lá nâu, lá xanh (trang bị, súng) và lá xanh lá Dodge City — dải viền lấy màu từ ảnh lá,
+     mép ngoài sẫm hơn bản thật một chút cho dễ nhìn trên nền giấy/bàn tối */
+  --card-brown: #cfab63; --card-brown-edge: #8a6c34;
+  --card-blue: #6d8cc4; --card-blue-edge: #556c95; --card-blue-bg: #f3f6fc; --card-blue-3d: #3f5784;
+  --card-green: #dde1c0; --card-green-edge: #3a3b35; --card-green-bg: #fafbf2; --card-green-3d: #6f7358;
 }
 * { box-sizing: border-box; }
 html, body { margin: 0; height: 100%; }
@@ -379,24 +384,34 @@ body.eq-sm { --eq: 34px; } body.eq-md { --eq: 44px; } body.eq-lg { --eq: 56px; }
   background: #2a160a; border-right: 2px solid var(--gold); border-bottom: 2px solid var(--gold); }
 .eqs { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 8px; }
 .eqt { position: relative; width: var(--eqs); height: var(--eqs); flex-shrink: 0; border-radius: 7px; display: flex; flex-direction: column; align-items: center; justify-content: center;
-  background: #eef4fa; border: 2px solid var(--blue); box-shadow: 0 3px 0 #1c3a57; cursor: help; transition: transform .12s; }
+  background: var(--card-blue-bg); border: 3px solid var(--card-blue); outline: 1px solid var(--card-blue-edge); outline-offset: -1px;
+  box-shadow: 0 3px 0 var(--card-blue-3d); cursor: help; transition: transform .12s; }
 .eqt:hover { transform: translateY(-3px) scale(1.1); z-index: 5; }
 .eqt.inactive { opacity: .5; }
 button.eqt[data-act="patDraw"] { cursor: pointer; outline: 2px solid var(--gold); }
 .eqt .ic { font-size: calc(var(--eqs) * .44); line-height: 1; }
+/* Thẻ trang bị có tranh lá thật: tranh phủ kín ô, tên thành dải dưới đáy, viền màu theo loại giữ nguyên */
+.eqt.has-art { background: #fffaf0; }
+.eqt .ic.art { position: absolute; inset: 0; border-radius: 4px; overflow: hidden; font-size: 0; }
+.eqt .ic.art img { display: block; width: 100%; height: 100%; object-fit: cover; pointer-events: none; }
+.eqt.has-art .nm { position: absolute; left: 0; right: 0; bottom: 0; max-width: none; margin: 0; padding: 1px 2px; text-align: center;
+  background: rgba(255,250,240,.88); color: var(--ink); border-radius: 0 0 5px 5px; }
+.eqt.has-art .bd { z-index: 1; }
+.eqt.has-art.inactive .ic.art { filter: grayscale(1); }
+.btn-art { width: 22px; height: 22px; border-radius: 4px; object-fit: cover; vertical-align: middle; margin-right: 2px; }
 .eqt .nm { font-size: 8px; font-weight: 700; margin-top: 2px; max-width: calc(var(--eqs) - 4px); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ink); }
 body.eq-sm .eqt .nm { display: none; }
 body.eq-lg .eqt .nm { font-size: 10px; }
 .eqt .bd { position: absolute; top: -7px; right: -7px; min-width: 17px; height: 17px; padding: 0 4px; border-radius: 99px; font-size: 10px; font-weight: 700;
-  display: grid; place-items: center; color: #fff; background: var(--blue); border: 2px solid #fffaf0; }
-.eqt.gun { background: #f3ead9; border-color: #5c3d1e; box-shadow: 0 3px 0 #3a2410; } .eqt.gun .bd { background: #5c3d1e; }
-.eqt.horse { background: #eaf4e6; border-color: var(--green); box-shadow: 0 3px 0 #23481f; } .eqt.horse .bd { background: var(--green); }
-.eqt.green { background: #eaf4e6; border-color: var(--green); box-shadow: 0 3px 0 #23481f; }
-.eqt.green .bd { background: var(--green); }
-.eqt.jail { background: repeating-linear-gradient(90deg, #4a4f55 0 6px, #2c3035 6px 9px); border-color: #1b1d20; box-shadow: 0 3px 0 #111; }
-.eqt.jail .nm { color: #f3e3c3; }
-.eqt.dyn { background: #fbe3d6; border-color: var(--red); box-shadow: 0 3px 0 #6e1d17, 0 0 12px rgba(255,120,40,.8); animation: fuse 1s infinite; }
-@keyframes fuse { 50% { box-shadow: 0 3px 0 #6e1d17, 0 0 20px rgba(255,160,40,1); } }
+  display: grid; place-items: center; color: #fff; background: var(--card-blue-edge); border: 2px solid #fffaf0; }
+/* Mọi trang bị xanh (súng, Mustang, Scope, Jail, Dynamite, Barrel…) cùng viền xanh như lá thật; lá Dodge City viền xanh xám */
+.eqt.green { background: var(--card-green-bg); border-color: var(--card-green); outline-color: var(--card-green-edge); box-shadow: 0 3px 0 var(--card-green-3d); }
+.eqt.green::before { content: ''; position: absolute; inset: 0; z-index: 1; border: 1px solid var(--card-green-edge); border-radius: 4px; pointer-events: none; }
+.eqt.green .bd { background: var(--card-green-3d); z-index: 2; }
+.eqt.jail:not(.has-art) { background: repeating-linear-gradient(90deg, #4a4f55 0 6px, #2c3035 6px 9px); }
+.eqt.jail:not(.has-art) .nm { color: #f3e3c3; }
+.eqt.dyn { box-shadow: 0 3px 0 var(--card-blue-3d), 0 0 12px rgba(255,120,40,.8); animation: fuse 1s infinite; } /* Dynamite: viền xanh, vẫn cháy ngòi */
+@keyframes fuse { 50% { box-shadow: 0 3px 0 var(--card-blue-3d), 0 0 20px rgba(255,160,40,1); } }
 @media (prefers-reduced-motion: reduce) { .eqt.dyn, .hpbar.low, .player.acting .av { animation: none; } }
 
 /* ⚙️ Cài đặt hiển thị */
@@ -411,6 +426,15 @@ body.eq-lg .eqt .nm { font-size: 10px; }
 .seg button + button { border-left: 2px solid #c9a46a; }
 .seg button.on { background: var(--red); color: #fff; }
 .seg i { display: block; background: currentColor; border-radius: 3px; opacity: .8; }
+/* Công tắc kiểu xem bài trên tay (xoè bài / khung bài) */
+.hand-views { display: grid; gap: 6px; }
+.hand-views .hv { display: flex; align-items: center; gap: 8px; padding: 6px 8px; border: 2px solid #c9a46a; border-radius: 8px;
+  background: #fffaf0; color: var(--muted); font: inherit; font-size: 13px; font-weight: 600; text-align: left; cursor: pointer; }
+.hand-views .hv .tick { width: 16px; height: 16px; border: 2px solid #c9a46a; border-radius: 4px; flex: none; display: grid; place-items: center; font-size: 12px; line-height: 1; background: #fff; }
+.hand-views .hv.on { color: var(--ink); border-color: var(--red); }
+.hand-views .hv.on .tick { background: var(--red); border-color: var(--red); }
+.hand-views .hv.on .tick::after { content: '✓'; color: #fff; font-weight: 700; }
+.hand-views .hv.locked { cursor: not-allowed; }
 
 .pchar { font-size: 13px; color: var(--muted); cursor: help; border-bottom: 1px dotted var(--muted); display: inline-block; }
 .role { font-size: 11px; font-weight: 700; padding: 2px 7px; border-radius: 99px; color: #fff; margin-left: auto; white-space: nowrap; }
@@ -447,13 +471,17 @@ body.eq-lg .eqt .nm { font-size: 10px; }
 .actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 12px; align-items: center; }
 
 /* ---------- cards ---------- */
-.card { color: var(--ink); width: 84px; height: 112px; border-radius: 8px; background: #fffaf0; border: 3px solid #8b5a2b; padding: 4px; position: relative; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; cursor: default; user-select: none; transition: transform .12s, box-shadow .12s; box-shadow: 0 3px 6px rgba(0,0,0,.25); }
-.card.blue { border-color: var(--blue); background: #eef4fa; }
-.card.green { border-color: var(--green); background: #eaf4e6; }
-.card.gun { border-color: #5c3d1e; background: #f3ead9; }
+.card { color: var(--ink); width: 84px; height: 112px; border-radius: 8px; background: #fffaf0; border: 4px solid var(--card-brown); outline: 1px solid var(--card-brown-edge); outline-offset: -1px; padding: 3px; position: relative; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; cursor: default; user-select: none; transition: transform .12s, box-shadow .12s; box-shadow: 0 3px 6px rgba(0,0,0,.25); }
+/* Lá xanh (cả súng): dải viền xanh, mép ngoài sẫm. Lá Dodge City: dải xanh xám nhạt kẹp giữa 2 nét sẫm (như lá thật) */
+.card.blue, .card.gun { border-color: var(--card-blue); outline: 1px solid var(--card-blue-edge); outline-offset: -1px; background: var(--card-blue-bg); }
+.card.green { border-color: var(--card-green); outline: 1px solid var(--card-green-edge); outline-offset: -1px; background: var(--card-green-bg); }
+.card.green::before { content: ''; position: absolute; inset: 0; border: 1px solid var(--card-green-edge); border-radius: 5px; pointer-events: none; }
 .card .corner { position: absolute; top: 3px; left: 5px; font-size: 12px; font-weight: 700; }
 .card .corner.red { color: var(--red); }
 .card .icon { font-size: 28px; line-height: 1; }
+/* Tranh lá thật (cardIconHTML): ô vuông giữa số/chất ở góc trên và tên ở dưới; co theo bề ngang lá nên vừa mọi cỡ lá */
+.card .icon.art { font-size: 0; width: 74%; aspect-ratio: 1; margin-top: 10%; flex: none; }
+.card .icon.art img { display: block; width: 100%; height: 100%; object-fit: cover; border-radius: 4px; box-shadow: 0 0 0 1px rgba(42,26,14,.35); pointer-events: none; }
 .card .cname { font-size: 12px; font-weight: 700; margin-top: 6px; line-height: 1.1; }
 .card .range { position: absolute; bottom: 3px; right: 5px; font-size: 10px; color: var(--muted); }
 .card.playable { cursor: pointer; }
@@ -462,6 +490,37 @@ body.eq-lg .eqt .nm { font-size: 10px; }
 .card.dim { opacity: .55; }
 .card.small { width: 70px; height: 94px; }
 .card.small .icon { font-size: 22px; }
+
+/* ---------- Xoè bài ở mép dưới màn hình (applyHandViews/fanLayout trong app.js; không dùng trên điện thoại) ---------- */
+body.hand-panel-off .right-col #hand { display: none; } /* tắt khung bài: chỉ ẩn, vẫn giữ để bấm lá ở quạt */
+body.fan-on main { padding-bottom: 110px; } /* chừa chỗ cho phần lá nhô lên */
+#fanHand { --cw: 100px; --ch: 140px; --zoom: 1.6; --sink: .4;
+  position: fixed; left: 50%; bottom: 0; width: 0; height: 0; z-index: 45; } /* dưới .modal (50) */
+#fanHand .fan-empty { position: absolute; bottom: 14px; transform: translateX(-50%); white-space: nowrap; color: var(--paper); opacity: .7; }
+#fanHand .fan-slot { position: absolute; left: 0; bottom: 0; width: var(--cw); height: var(--ch); margin-left: calc(var(--cw) / -2);
+  transform-origin: 50% 100%; transform: translate(var(--x), var(--y)) rotate(var(--r));
+  transition: transform .22s cubic-bezier(.2,.8,.3,1); }
+#fanHand .fan-slot > .card { width: 100%; height: 100%; padding: 6px 5px; border-radius: 9px; transform-origin: 50% 100%; transform: none; opacity: 1;
+  box-shadow: 0 3px 10px rgba(0,0,0,.45);
+  transition: transform .2s cubic-bezier(.2,.8,.3,1), box-shadow .2s, filter .2s; }
+#fanHand.instant .fan-slot, #fanHand.instant .fan-slot > .card { transition: none; }
+#fanHand .card .icon { font-size: 32px; }
+#fanHand .card .cname { font-size: 13px; margin-top: 7px; }
+#fanHand .card .corner { font-size: 13px; }
+#fanHand .card .desc { font-size: 8.5px; line-height: 1.25; color: var(--muted); margin-top: 4px; opacity: 0; max-height: 0; overflow: hidden; transition: opacity .15s .05s; }
+/* Đang trỏ: dựng thẳng, phóng to, đáy chạm mép màn hình */
+#fanHand .fan-slot.hover > .card { transform: rotate(calc(var(--r) * -1)) translateY(var(--lift)) scale(var(--zoom)); box-shadow: 0 18px 34px rgba(0,0,0,.6); }
+#fanHand .fan-slot.hover .desc { opacity: 1; max-height: 60px; }
+#fanHand .fan-slot.hover .icon.art { width: 58%; margin-top: 12%; } /* nhường chỗ cho dòng mô tả */
+#fanHand .icon.art { transition: width .2s; }
+/* Đã chọn (chờ chọn mục tiêu / lá trả giá): nhô lên nửa chừng, viền đỏ */
+#fanHand .fan-slot.selected:not(.hover) > .card { transform: translateY(calc(var(--ch) * -0.3)); }
+/* Đánh được: viền phát sáng xanh; không đánh được: xám nhẹ (trỏ vào vẫn đọc được) */
+#fanHand .fan-slot.playable > .card { box-shadow: 0 0 0 2px #7fe06a, 0 0 14px 3px rgba(127,224,106,.7), 0 3px 10px rgba(0,0,0,.45); }
+#fanHand .fan-slot.playable.hover > .card { box-shadow: 0 0 0 2px #7fe06a, 0 0 22px 6px rgba(127,224,106,.8), 0 18px 34px rgba(0,0,0,.6); }
+#fanHand .fan-slot.selected > .card { box-shadow: 0 0 0 3px var(--red), 0 0 22px 6px rgba(181,51,42,.7), 0 14px 26px rgba(0,0,0,.55); }
+#fanHand .fan-slot.dim > .card { filter: saturate(.5) brightness(.8); }
+#fanHand .fan-slot.dim.hover > .card { filter: none; }
 .discard-stack { position: relative; height: 94px; width: calc(70px + (var(--n) - 1) * 52px); margin: 0 auto; }
 .ds-slot { position: absolute; top: 0; right: calc(var(--i) * 52px); z-index: calc(10 - var(--i)); }
 .ds-slot .card { box-shadow: -3px 2px 6px rgba(0,0,0,.35); }

@@ -70,6 +70,14 @@
         "tools/serve-drafts.js"
       ],
       "port": 3013
+    },
+    {
+      "name": "bang-demo-fan-hand",
+      "runtimeExecutable": "node\\node.exe",
+      "runtimeArgs": [
+        "tools/demo-fan-hand.js"
+      ],
+      "port": 3016
     }
   ]
 }

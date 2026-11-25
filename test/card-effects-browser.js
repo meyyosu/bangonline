@@ -62,7 +62,7 @@ test('browser: Panic and Cat Balou fly from hands/equipment for players and spec
               const start = origins[`${event.from}:${event.sourceZone}:${event.cards[0]?.id}`] || origins[`${event.from}:hand`];
               const seat = [...document.querySelectorAll('.player[data-player]')].find((el) => el.dataset.player === after.players[event.to]?.name);
               const target = event.to === 'discard' ? document.querySelector('#discardPile .ds-slot:last-child .card') || document.querySelector('#discardPile')
-                : event.to === after.me?.index ? document.querySelector(`#hand [data-card="${event.cards[0].id}"]`) : seat.querySelector('.hand-fan') || seat;
+                : event.to === after.me?.index ? shownHand().querySelector(`.card[data-card="${event.cards[0].id}"]`) : seat.querySelector('.hand-fan') || seat;
               const end = target.getBoundingClientRect();
               const animation = flyer.getAnimations()[0];
               const frames = animation.effect.getKeyframes();

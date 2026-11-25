@@ -9,6 +9,7 @@ const BASE = 'http://localhost:3000';
   const pages = [];
   for (const n of names) {
     const ctx = await browser.newContext({ viewport: { width: 1360, height: 900 } });
+    await ctx.addInitScript(() => localStorage.setItem('bang.handViews', JSON.stringify({ fan: true, panel: true }))); // bấm bài qua khung bài #hand
     const page = await ctx.newPage();
     page.on('pageerror', (e) => { console.error('PAGE ERROR', n, e.message); process.exitCode = 1; });
     await page.goto(BASE);

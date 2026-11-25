@@ -166,6 +166,7 @@ test('card flights use the deck, discard, or donor hand and skip old events', ()
     const context = {
       window: { matchMedia: () => ({ matches: reduced }) },
       $: (selector) => selector.startsWith('#hand') ? destination : origin,
+      shownHand: () => ({ ...destination, querySelector: () => null }), // tay bài đang hiện (quạt hoặc khung bài)
       cardHTML: () => '<div class="card">Known card</div>',
       document: {
         querySelectorAll: () => [{ dataset: { player: 'Donor' }, querySelector: () => origin }],

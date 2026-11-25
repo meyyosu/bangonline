@@ -294,6 +294,7 @@ function characterFields(choices = 3, seconds = 60) {
 // ---------- sảnh ----------
 function showLobby() {
   closeStreams();
+  $('#fanHand')?.remove();
   ROOM = null;
   history.replaceState(null, '', '/');
   app.innerHTML = `
@@ -418,7 +419,7 @@ function enterRoom(code) {
     const previous = ROOM;
     const previousGame = previous?.game;
     const previousLiveGame = receivedSnapshot ? previousGame : null;
-    const handOrigins = Object.fromEntries([...document.querySelectorAll('#hand [data-card]')].map((el) => [el.dataset.card, el.getBoundingClientRect()]));
+    const handOrigins = Object.fromEntries(shownHandCards().map((el) => [el.dataset.card, el.getBoundingClientRect()]));
     const drawOrigins = [...document.querySelectorAll('.draw-stage .draw-slot')].map((el) => el.getBoundingClientRect());
     const transferOrigins = captureTransferOrigins(previousGame);
     ROOM = d.room;
@@ -492,6 +493,7 @@ function renderRoom(previousGame) {
   else if (!openResult.dataset.roomWaiting) { openResult.dataset.roomWaiting = '1'; openResult.refresh?.(); }
   if (!g) {
     ui.lastCheckSeq = null;
+    $('#fanHand')?.remove();
     return renderWaiting();
   }
   renderGame();
@@ -677,13 +679,22 @@ function groupSameCards(cards) {
   cards.forEach((c, i) => { if (!first.has(c.name)) first.set(c.name, i); });
   return cards.map((c, i) => [c, i]).sort((a, b) => first.get(a[0].name) - first.get(b[0].name) || a[1] - b[1]).map(([c]) => c);
 }
+// Tranh lá bài thật: public/cards/<tên-không-dấu>.jpg (160x160, cắt bằng tools/crop-card-art.ps1). Lá chưa có ảnh dùng icon.
+const CARD_ART = new Set(['Bang', 'Missed', 'Beer', 'Saloon', 'Stagecoach', 'Wells Fargo', 'General Store', 'Panic', 'Cat Balou', 'Duel',
+  'Indians', 'Gatling', 'Barrel', 'Mustang', 'Scope', 'Jail', 'Dynamite', 'Volcanic', 'Schofield', 'Remington', 'Rev. Carabine', 'Winchester',
+  'Bible', 'Buffalo Rifle', 'Can Can', 'Canteen', 'Conestoga', 'Derringer', 'Howitzer', 'Iron Plate', 'Knife', 'Pepperbox', 'Pony Express',
+  'Sombrero', 'Ten Gallon Hat', 'Rag Time', 'Brawl', 'Dodge', 'Springfield', 'Tequila', 'Whisky', 'Binocular', 'Hideout', 'Punch']);
+const cardArtSrc = (name) => `/cards/${name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')}.jpg`;
+function cardIconHTML(c, info) {
+  return CARD_ART.has(c.name) ? `<div class="icon art"><img src="${cardArtSrc(c.name)}" alt="" draggable="false"></div>` : `<div class="icon">${info.icon}</div>`;
+}
 function cardHTML(c, cls = '', pressed = null) {
   const info = cardInfo(c);
   const red = c.suit === 'H' || c.suit === 'D';
   const choice = pressed === null ? '' : `role="button" tabindex="0" aria-pressed="${pressed}"`;
   return `<div class="card ${info.type} ${cls}" data-card="${c.id}" ${tooltipAttrs(c.name, info.desc)} ${choice}>
     <div class="corner ${red ? 'red' : ''}">${c.rank}${SUIT[c.suit]}</div>
-    <div class="icon">${info.icon}</div><div class="cname">${esc(c.name)}</div>
+    ${cardIconHTML(c, info)}<div class="cname">${esc(c.name)}</div>
     ${info.range ? `<div class="range">tầm ${info.range}</div>` : ''}</div>`;
 }
 // Chồng bài bỏ: 3 lá gần nhất, lá sau đè một phần lên lá trước
@@ -703,8 +714,9 @@ function eqTileHTML(c, extra = '', owner = null) {
   const tag = owner === null ? 'div' : 'button';
   const action = owner === null ? '' : `type="button" data-act="patDraw" data-owner="${esc(owner)}" aria-label="Lấy ${esc(c.name)} của ${esc(owner)}"`;
   const desc = c.disabled ? `${info.desc} Đang bị Belle Star vô hiệu hóa.` : info.desc;
-  return `<${tag} class="eqt ${kind} ${extra}${c.disabled ? ' inactive' : ''}" ${action} data-eq="${c.id}" ${tooltipAttrs(c.name, desc)}>
-    <span class="ic">${info.icon}</span><span class="nm">${esc(c.name)}</span>${badge ? `<span class="bd">${badge}</span>` : ''}</${tag}>`;
+  const art = CARD_ART.has(c.name);
+  return `<${tag} class="eqt ${kind} ${extra}${c.disabled ? ' inactive' : ''}${art ? ' has-art' : ''}" ${action} data-eq="${c.id}" ${tooltipAttrs(c.name, desc)}>
+    ${art ? `<span class="ic art"><img src="${cardArtSrc(c.name)}" alt="" draggable="false"></span>` : `<span class="ic">${info.icon}</span>`}<span class="nm">${esc(c.name)}</span>${badge ? `<span class="bd">${badge}</span>` : ''}</${tag}>`;
 }
 // Thanh máu bằng viên đạn: đạn đồng = máu còn, vỏ đạn xám = máu đã mất
 function bulletSVG(full, h) {
@@ -811,15 +823,134 @@ function settingsMenuHTML() {
       <div class="seg">${Object.entries(EQ_SIZES).map(([k, v], i) =>
         `<button type="button" data-eqsize="${k}"><i style="width:${12 + i * 4}px;height:${12 + i * 4}px"></i>${v}</button>`).join('')}</div>
       <div class="muted" style="margin-top:8px">Chỉ áp dụng trên máy của bạn. Cỡ nhỏ ẩn tên thẻ, rê chuột để xem.</div>
+      <div class="lbl" style="margin-top:12px">Bài trên tay</div>
+      <div class="hand-views">${Object.entries(HAND_VIEWS).map(([k, label]) =>
+        `<button type="button" class="hv" data-handview="${k}"><span class="tick"></span>${label}</button>`).join('')}</div>
+      <div class="muted" style="margin-top:6px">Bật một hoặc cả hai. Xoè bài: rê chuột để lá trồi lên. Khung bài ở cột phải dễ xem rõ từng lá. Điện thoại luôn dùng dải bài.</div>
     </div></div>`;
 }
 function bindSettingsMenu() {
   const btn = $('#gearBtn'), pop = $('#settingsPop');
   if (!btn) return;
   btn.onclick = (e) => { e.stopPropagation(); pop.hidden = !pop.hidden; btn.setAttribute('aria-expanded', String(!pop.hidden)); };
-  pop.onclick = (e) => { e.stopPropagation(); const b = e.target.closest('[data-eqsize]'); if (b) applyEqSize(b.dataset.eqsize); };
+  pop.onclick = (e) => {
+    e.stopPropagation();
+    const b = e.target.closest('[data-eqsize]');
+    if (b) applyEqSize(b.dataset.eqsize);
+    const hv = e.target.closest('[data-handview]');
+    if (hv) toggleHandView(hv.dataset.handview);
+  };
   applyEqSize(currentEqSize());
+  syncHandViewButtons();
 }
+
+// ---------- bài trên tay: xoè bài ở mép dưới (kiểu Hearthstone) và/hoặc khung bài ở cột phải ----------
+// Lưu trên máy (bang.handViews), luôn bật ít nhất một kiểu; mặc định chỉ xoè bài. Điện thoại dọc luôn dùng dải bài cũ.
+// #fanHand là bản sao các lá của #hand (gắn vào body); bấm lá ở quạt = bấm lá đó trong #hand nên dùng nguyên xử lý của bindGame.
+const HAND_VIEWS = { fan: 'Xoè bài ở mép dưới', panel: 'Khung bài ở cột phải' };
+function handViews() {
+  let v = { fan: true, panel: false };
+  try { v = { ...v, ...JSON.parse(localStorage.getItem('bang.handViews') || '{}') }; } catch {}
+  if (!v.panel && !v.fan) v.fan = true;
+  return v;
+}
+function toggleHandView(key) {
+  const v = handViews(), other = key === 'panel' ? 'fan' : 'panel';
+  if (v[key] && !v[other]) return; // không cho tắt kiểu cuối cùng
+  v[key] = !v[key];
+  try { localStorage.setItem('bang.handViews', JSON.stringify(v)); } catch {}
+  applyHandViews();
+}
+function syncHandViewButtons() {
+  const v = handViews();
+  document.querySelectorAll('[data-handview]').forEach((b) => {
+    const k = b.dataset.handview, last = v[k] && !v[k === 'panel' ? 'fan' : 'panel'];
+    b.classList.toggle('on', v[k]);
+    b.setAttribute('aria-pressed', String(v[k]));
+    b.classList.toggle('locked', last);
+    b.title = last ? 'Phải bật ít nhất một kiểu xem bài' : '';
+  });
+}
+// Lá trên tay đang hiện trên màn hình (cho hiệu ứng bay): ưu tiên quạt bài
+const shownHand = () => $('#fanHand') || $('#hand');
+const shownHandCards = () => [...(shownHand()?.querySelectorAll('.card[data-card]') || [])];
+const FAN = { hoverId: null, leave: 0 };
+function applyHandViews() {
+  const v = handViews(), hand = $('#hand');
+  const fanOn = v.fan && !isPhone() && !!hand;
+  document.body.classList.toggle('hand-panel-off', fanOn && !v.panel);
+  document.body.classList.toggle('fan-on', fanOn);
+  syncHandViewButtons();
+  let fan = $('#fanHand');
+  if (!fanOn) { fan?.remove(); return; }
+  if (!fan) { fan = document.createElement('div'); fan.id = 'fanHand'; document.body.appendChild(fan); }
+  fan.setAttribute('aria-hidden', String(v.panel)); // cả hai cùng bật thì trình đọc màn hình chỉ đọc khung bài
+  fan.innerHTML = '';
+  // Vẽ lại (mỗi bản tin SSE) thì đặt lá vào chỗ ngay, không cho lá bay từ giữa ra
+  fan.classList.add('instant');
+  requestAnimationFrame(() => requestAnimationFrame(() => fan.classList.remove('instant')));
+  const cards = [...hand.querySelectorAll(':scope > .card')];
+  if (!cards.length) { fan.innerHTML = '<span class="fan-empty">Không có bài trên tay</span>'; return; }
+  for (const src of cards) {
+    const el = src.cloneNode(true);
+    const c = ROOM.game.me?.hand.find((x) => String(x.id) === src.dataset.card);
+    // Lá phóng to ghi mô tả ngay trên mặt lá → bỏ tooltip để khỏi che
+    if (c) el.insertAdjacentHTML('beforeend', `<div class="desc">${esc(cardInfo(c).desc)}</div>`);
+    el.removeAttribute('data-tooltip'); el.removeAttribute('data-tooltip-title');
+    if (v.panel) el.removeAttribute('tabindex');
+    const slot = document.createElement('div');
+    slot.className = 'fan-slot ' + ['playable', 'dim', 'selected'].filter((k) => src.classList.contains(k)).join(' ');
+    slot.dataset.card = src.dataset.card;
+    slot.appendChild(el);
+    const forward = () => $(`#hand .card[data-card="${src.dataset.card}"]`)?.click();
+    slot.onclick = forward;
+    el.onkeydown = (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); forward(); } };
+    fan.appendChild(slot);
+  }
+  fan.onmouseover = (e) => { const s = e.target.closest('.fan-slot'); if (s) fanHover(s.dataset.card); };
+  fan.onmouseout = (e) => {
+    if (e.relatedTarget && fan.contains(e.relatedTarget)) return;
+    clearTimeout(FAN.leave);
+    FAN.leave = setTimeout(() => fanHover(null), 70); // đi qua khe giữa hai lá không bị giật
+  };
+  fanLayout();
+}
+function fanHover(id) {
+  clearTimeout(FAN.leave);
+  if (id === FAN.hoverId) return;
+  FAN.hoverId = id;
+  fanLayout();
+}
+/* Lá i nằm trên một cung: khoảng cách co lại khi nhiều lá, góc nghiêng tăng ra hai mép, mép thấp xuống.
+   Trỏ vào một lá: dựng thẳng + phóng to + đáy chạm mép màn hình; hai bên dạt ra (gần thì dạt nhiều). */
+const FAN_ARC = 6; // độ nghiêng mỗi lá khi ít lá
+function fanLayout() {
+  const fan = $('#fanHand');
+  if (!fan) return;
+  const slots = [...fan.querySelectorAll('.fan-slot')];
+  const n = slots.length, st = getComputedStyle(fan);
+  const cw = parseFloat(st.getPropertyValue('--cw')), ch = parseFloat(st.getPropertyValue('--ch'));
+  const zoom = parseFloat(st.getPropertyValue('--zoom')), sink = parseFloat(st.getPropertyValue('--sink'));
+  const maxW = Math.min(window.innerWidth * .5, 820);
+  const gap = n > 1 ? Math.min(cw * .78, (maxW - cw) / (n - 1)) : 0;
+  const step = n > 1 ? Math.min(FAN_ARC, (FAN_ARC * 7) / (n - 1)) : 0;
+  const mid = (n - 1) / 2;
+  const hov = slots.findIndex((s) => s.dataset.card === FAN.hoverId);
+  if (hov < 0) FAN.hoverId = null;
+  slots.forEach((el, i) => {
+    const d = i - mid;
+    let x = d * gap;
+    const y = ch * sink + Math.abs(d) ** 1.7 * (FAN_ARC * .55);
+    if (hov >= 0 && i !== hov) x += Math.sign(i - hov) * Math.max(0, (cw * zoom - gap) * .55) / Math.abs(i - hov) ** .9;
+    el.style.setProperty('--x', x + 'px');
+    el.style.setProperty('--y', y + 'px');
+    el.style.setProperty('--r', d * step + 'deg');
+    el.style.setProperty('--lift', -(y + 6) + 'px');
+    el.style.zIndex = i === hov ? 100 : i + 1;
+    el.classList.toggle('hover', i === hov);
+  });
+}
+window.addEventListener('resize', fanLayout);
 // Bàn đổi bán kính ghế khi qua mốc màn hình hẹp
 window.matchMedia('(max-width: 900px)').addEventListener('change', () => { if (ROOM?.game && $('#mainArea')) renderGame(); });
 // Bấm ra ngoài hoặc nhấn Esc thì đóng bảng cài đặt
@@ -963,7 +1094,7 @@ function renderCharacterSelection() {
 
 function renderGame() {
   const g = ROOM.game;
-  if (g.phase === 'character') return renderCharacterSelection();
+  if (g.phase === 'character') { $('#fanHand')?.remove(); return renderCharacterSelection(); }
   ui.choosePick = null;
   const meIdx = g.me?.index ?? -1;
   const meP = g.players[meIdx];
@@ -1098,6 +1229,7 @@ function renderGame() {
   lb.scrollTop = lb.scrollHeight;
 
   bindGame(g, meIdx, meP, canPlay, myPrompt);
+  applyHandViews();
   watchDock();
   renderAttackLine(g);
   animateDrawStage(g);
@@ -1169,6 +1301,7 @@ function capsuleSeat(k, n) {
 // bàn tròn lấy phần chiều cao còn lại nên cần biết thanh đáy cao bao nhiêu (--dock-h).
 const PHONE_MQ = window.matchMedia('(max-width: 600px)');
 const isPhone = () => PHONE_MQ.matches;
+PHONE_MQ.addEventListener('change', () => { if (ROOM?.game) applyHandViews(); }); // qua mốc điện thoại: bật/tắt xoè bài
 let dockObserver = null;
 function watchDock() {
   const dock = $('.right-col'), board = $('.board.playing');
@@ -1410,14 +1543,14 @@ function captureTransferOrigins(g) {
   const origins = {};
   for (const [index, player] of (g?.players || []).entries()) {
     const seat = [...document.querySelectorAll('.player[data-player]')].find((el) => el.dataset.player === player.name);
-    const hand = index === g.me?.index ? $('#hand') : seat?.querySelector('.hand-fan');
+    const hand = index === g.me?.index ? shownHand() : seat?.querySelector('.hand-fan');
     origins[`${index}:hand`] = (hand || seat)?.getBoundingClientRect();
     for (const el of seat?.querySelectorAll('[data-eq]') || []) {
       const rect = el.getBoundingClientRect();
       if (rect.width && rect.height) origins[`${index}:eq:${el.dataset.eq}`] = rect;
     }
     if (index === g.me?.index) {
-      for (const el of document.querySelectorAll('#hand [data-card]')) {
+      for (const el of shownHandCards()) {
         origins[`${index}:hand:${el.dataset.card}`] = el.getBoundingClientRect();
       }
     }
@@ -1440,7 +1573,7 @@ function showCardTransfers(g, previous, drawOrigins = [], transferOrigins = {}) 
       : seatHand(event.from);
     for (const [index, card] of event.cards.entries()) {
       const target = event.to === 'discard' ? $('#discardPile .ds-slot:last-child .card') || $('#discardPile')
-        : event.to === 'deck' ? $('#deck .card-back') : event.to === g.me?.index ? (card && $(`#hand [data-card="${card.id}"]`)) || $('#hand') : seatHand(event.to);
+        : event.to === 'deck' ? $('#deck .card-back') : event.to === g.me?.index ? (card && shownHand()?.querySelector(`.card[data-card="${card.id}"]`)) || shownHand() : seatHand(event.to);
       const origin = ['kit', 'reveal'].includes(event.from) ? drawOrigins[event.slots?.[index] ?? 0]
         : event.sourceZone ? transferOrigins[`${event.from}:${event.sourceZone}:${card?.id}`] || transferOrigins[`${event.from}:hand`] : null;
       if ((!source && !origin) || !target) continue;
@@ -2771,7 +2904,7 @@ function chooseTargetCard(card, p, type, costCardId) {
       ${p.handCount ? `<button class="btn" data-tc="hand">🂠 1 lá ngẫu nhiên trên tay (${p.handCount})</button>` : ''}
       ${p.eq.map((c) => {
         const info = cardInfo(c);
-        return `<button class="btn ${info.type === 'green' ? 'green' : 'blue'}" data-tc="${c.id}" ${tooltipAttrs(c.name, info.desc)}>${info.icon} ${esc(c.name)}</button>`;
+        return `<button class="btn ${info.type === 'green' ? 'green' : 'blue'}" data-tc="${c.id}" ${tooltipAttrs(c.name, info.desc)}>${CARD_ART.has(c.name) ? `<img class="btn-art" src="${cardArtSrc(c.name)}" alt="">` : info.icon} ${esc(c.name)}</button>`;
       }).join('')}
     </div>
     <div class="row" style="margin-top:14px"><button class="btn secondary small" data-tc="cancel">Huỷ</button></div></div>`;

@@ -1,0 +1,4 @@
+/* ----- chỉ dành cho trang demo tay bài (xoè bài nằm trong public/style.css) ----- */
+.demo-bar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; padding: 6px 10px; background: #1c1008f5; border: 1px solid #ad792c; border-radius: 10px; color: #fde68a; font-size: 13px; }
+.demo-bar button { padding: 7px 10px; border: 1px solid #8c6239; border-radius: 6px; background: #382315; color: #fff; cursor: pointer; font: inherit; }
+.demo-bar button.on { background: #d9a441; color: #2a1a0e; border-color: #d9a441; font-weight: 700; }

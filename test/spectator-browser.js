@@ -42,6 +42,7 @@ test('browser: lobby spectator and mid-game spectator follow the same live match
     for (const name of names) {
       const context = await browser.newContext({ viewport: { width: 1366, height: 768 }, reducedMotion: 'reduce' });
       await context.addInitScript(() => {
+        localStorage.setItem('bang.handViews', JSON.stringify({ fan: true, panel: true })); // bấm bài qua khung bài #hand
         window.audioStarts = [];
         const start = AudioBufferSourceNode.prototype.start;
         AudioBufferSourceNode.prototype.start = function (...args) {

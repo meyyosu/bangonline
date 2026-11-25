@@ -24,7 +24,7 @@ test('spectator client renders character selection, live play and results withou
     tooltipAttrs: () => '', charTipAttrs: () => '', logLineHTML: (line) => line,
     roleBadge: () => '', hpBarHTML: () => '', handFanHTML: () => '',
     playerAvatarHTML: () => '', jailBarsHTML: () => '', discardStackHTML: () => '',
-    drawStageHTML: () => '', animateDrawStage() {}, showCheckReveal() {}, updateClock() {}, renderTurnRing() {},
+    drawStageHTML: () => '', animateDrawStage() {}, showCheckReveal() {}, updateClock() {}, renderTurnRing() {}, applyHandViews() {},
     winnerHTML: () => '<div>Results</div>',
   };
   vm.createContext(c);
