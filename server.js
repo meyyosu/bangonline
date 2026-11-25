@@ -5,7 +5,7 @@ const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 const { Game, GameError, CARD_INFO, CHAR_INFO, ROLE_INFO, RULES_PREVIEW, SOUND_FILES,
-  greenCardCount, dodgeCityCardCount, dodgeCityRevision } = require('./game');
+  greenCardCount, dodgeCityCardCount, dodgeCityRevision, valleyOfShadowCardCount, valleyOfShadowRevision } = require('./game');
 const { syncTimer, tickTimer } = require('./room-timer');
 const { pauseAction, finishPause, pauseView } = require('./room-pause');
 const { tickBots } = require('./room-bots');
@@ -57,7 +57,7 @@ function newCode() {
 function roomCapacity(r) { return r.dodgeCity ? 8 : 7; }
 
 function roomSummary(r) {
-  return { code: r.code, name: r.name, host: r.host, players: r.players, bots: r.bots, spectators: r.spectators, status: r.status, max: roomCapacity(r), hasPassword: !!r.passwordHash, turnSeconds: r.turnSeconds, characterChoices: r.characterChoices, characterSeconds: r.characterSeconds, dodgeCity: r.dodgeCity };
+  return { code: r.code, name: r.name, host: r.host, players: r.players, bots: r.bots, spectators: r.spectators, status: r.status, max: roomCapacity(r), hasPassword: !!r.passwordHash, turnSeconds: r.turnSeconds, characterChoices: r.characterChoices, characterSeconds: r.characterSeconds, dodgeCity: r.dodgeCity, valleyOfShadow: r.valleyOfShadow };
 }
 
 function roomView(r, user) {
@@ -176,7 +176,8 @@ function serveSound(req, res, name) {
 const server = http.createServer(async (req, res) => {
   const { pathname } = new URL(req.url, 'http://x');
   if (req.method === 'GET' && pathname === '/api/health') {
-    return send(res, 200, { app: 'bang-online', pid: process.pid, revision: runtimeRevision, greenCardsRevision: dodgeCityRevision, greenCardCount, dodgeCityCardCount, startedAt });
+    return send(res, 200, { app: 'bang-online', pid: process.pid, revision: runtimeRevision, greenCardsRevision: dodgeCityRevision,
+      greenCardCount, dodgeCityCardCount, valleyOfShadowCardCount, valleyOfShadowRevision, startedAt });
   }
   if (pathname.startsWith('/sounds/')) return serveSound(req, res, pathname.slice('/sounds/'.length));
   if (!pathname.startsWith('/api/')) return serveStatic(req, res, pathname);
@@ -187,7 +188,7 @@ const server = http.createServer(async (req, res) => {
 
   try {
     // ----- tài khoản -----
-    if (pathname === '/api/meta') return send(res, 200, { cards: CARD_INFO, chars: CHAR_INFO, roles: ROLE_INFO, rulesPreview: RULES_PREVIEW, greenCardCount, dodgeCityCardCount });
+    if (pathname === '/api/meta') return send(res, 200, { cards: CARD_INFO, chars: CHAR_INFO, roles: ROLE_INFO, rulesPreview: RULES_PREVIEW, greenCardCount, dodgeCityCardCount, valleyOfShadowCardCount });
     if (pathname === '/api/me') return send(res, 200, { user, room: user ? findRoomOf(user)?.code || null : null });
 
     if (method === 'POST' && (pathname === '/api/register' || pathname === '/api/login')) {
@@ -233,6 +234,8 @@ const server = http.createServer(async (req, res) => {
       const body = await readBody(req);
       if (body.dodgeCity !== undefined && typeof body.dodgeCity !== 'boolean') return err(res, 'Tuỳ chọn Dodge City phải là bật hoặc tắt.');
       if (body.dodgeCity && !dodgeCityCardCount) return err(res, 'Máy chủ chưa nạp dữ liệu Dodge City.');
+      if (body.valleyOfShadow !== undefined && typeof body.valleyOfShadow !== 'boolean') return err(res, 'Tuỳ chọn Valley of Shadow phải là bật hoặc tắt.');
+      if (body.valleyOfShadow && !valleyOfShadowCardCount) return err(res, 'Máy chủ chưa nạp dữ liệu Valley of Shadow.');
       const { name } = body;
       const code = newCode();
       const r = { code, name: String(name || `Phòng của ${user}`).slice(0, 40), host: user, players: [user], bots: [], spectators: [], status: 'waiting', game: null, chat: [] };
@@ -240,6 +243,7 @@ const server = http.createServer(async (req, res) => {
       r.characterChoices = 3;
       r.characterSeconds = 60;
       r.dodgeCity = body.dodgeCity === true;
+      r.valleyOfShadow = body.valleyOfShadow === true;
       updateSettings(r, body);
       rooms.set(code, r);
       broadcastLobby();
@@ -323,7 +327,7 @@ const server = http.createServer(async (req, res) => {
         if (r.players.length < 4) return err(res, 'Cần ít nhất 4 người để chơi Bang!.');
         updateSettings(r, body);
         r.pause = null; r.clock = null; r.botNextAt = null;
-        r.game = new Game(r.players, { characterChoices: r.characterChoices, dodgeCity: r.dodgeCity });
+        r.game = new Game(r.players, { characterChoices: r.characterChoices, dodgeCity: r.dodgeCity, valleyOfShadow: r.valleyOfShadow });
         r.status = 'playing';
         r.chat.push({ system: true, text: 'Ván đấu bắt đầu!' });
       } else if (sub === 'reset') {

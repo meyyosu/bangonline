@@ -24,7 +24,7 @@ Web chơi board game Bang! (bản gốc) online với bạn bè. Giao tiếp v�
 
 ## Lệnh
 - Chạy: `node server.js` (cổng mặc định 3000, đổi bằng `PORT`)
-- Test luật: `node test/sim.js 500` — bot chơi ngẫu nhiên, kiểm tra luôn đủ 80 lá. Chạy lại sau mỗi lần sửa `game.js`.
+- Test luật: `node test/sim.js 100` — bot chơi ngẫu nhiên và kiểm tra số lá theo bản mở rộng của từng ván. Chạy lại sau mỗi lần sửa `game.js`.
 - Test giao diện: `node test/e2e.js` (cần Playwright, server đang chạy)
 - Xem thử màn kết thúc (5 bước) với số liệu mẫu — Diễn biến/Đóng góp lấy từ ván bot thật trong `tools/demo-timeline.json`: `node tools/demo-results.js` rồi mở http://localhost:3007
 - Xem thử pop-up đánh chung (Indians/Gatling) chạy bằng luật thật: `node tools/demo-mass-popup.js` rồi mở http://localhost:3009

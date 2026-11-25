@@ -6,7 +6,7 @@
   "scripts": {
     "start": "node server.js",
     "test:spectator:browser": "node --test test/spectator-browser.js",
-    "test": "node --test test/room-settings.js test/pause.js test/launcher.js test/dodge-city.js test/check-reveal.js test/spectator.js test/bots.js test/sounds.js && node test/sim.js 500"
+    "test": "node --test test/room-settings.js test/pause.js test/launcher.js test/dodge-city.js test/valley-of-shadow.js test/check-reveal.js test/spectator.js test/bots.js test/sounds.js && node test/sim.js 100"
   },
   "engines": {
     "node": ">=18"

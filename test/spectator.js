@@ -21,7 +21,8 @@ test('spectator client renders character selection, live play and results withou
     document: { querySelectorAll: () => [] },
     window: { matchMedia: () => ({ matches: false, addEventListener() {} }) },
     esc: (s) => String(s ?? ''), ROLE_VI: {}, ROLE_ICON: {}, CHAR_ICON: {},
-    tooltipAttrs: () => '', roleBadge: () => '', hpBarHTML: () => '', handFanHTML: () => '',
+    tooltipAttrs: () => '', charTipAttrs: () => '', logLineHTML: (line) => line,
+    roleBadge: () => '', hpBarHTML: () => '', handFanHTML: () => '',
     playerAvatarHTML: () => '', jailBarsHTML: () => '', discardStackHTML: () => '',
     drawStageHTML: () => '', animateDrawStage() {}, showCheckReveal() {}, updateClock() {}, renderTurnRing() {},
     winnerHTML: () => '<div>Results</div>',
@@ -44,7 +45,7 @@ test('spectator client renders character selection, live play and results withou
     c.renderGame();
     const html = nodes.get('#mainArea').innerHTML;
     assert.match(html, /Bạn đang xem trận đấu/);
-    assert.match(html, /class="arena"/);
+    assert.match(html, /class="arena\b/);
     assert.doesNotMatch(html, /id="hand"|id="actions"|data-act=/);
     assert.equal(c.ui.mode, null);
   }

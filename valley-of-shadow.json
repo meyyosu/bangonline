@@ -1,0 +1,29 @@
+{
+  "cards": [
+    { "name": "Bounty", "type": "blue", "icon": "💰", "desc": "Đặt một khoản thưởng trước mặt một người chơi. Ai đánh trúng người đó bằng lá Bang! sẽ rút 1 lá.", "copies": [{ "rank": "9", "suit": "C" }] },
+    { "name": "Ghost", "type": "blue", "icon": "👻", "desc": "Đưa một người đã bị loại trở lại bàn dưới dạng Ghost với 0 máu.", "copies": [{ "rank": "9", "suit": "S" }, { "rank": "10", "suit": "S" }] },
+    { "name": "LeMat", "type": "gun", "range": 1, "icon": "🔫", "desc": "Trong lượt, có thể dùng một lá bất kỳ trên tay như Bang! trong giới hạn thông thường.", "copies": [{ "rank": "4", "suit": "D" }] },
+    { "name": "Rattlesnake", "type": "blue", "icon": "🐍", "desc": "Đặt trước mặt một người chơi. Đầu lượt, người đó rút kiểm tra và mất 1 máu nếu lật lá Bích.", "copies": [{ "rank": "7", "suit": "H" }] },
+    { "name": "Shotgun", "type": "gun", "range": 1, "icon": "🔫", "desc": "Khi lá Bang! của bạn trúng đích, người bị trúng chọn bỏ một lá trên tay.", "copies": [{ "rank": "K", "suit": "S" }] },
+    { "name": "Aim", "type": "brown", "icon": "🎯", "desc": "Dùng kèm một lá Bang! để gây 2 sát thương nếu trúng.", "copies": [{ "rank": "6", "suit": "C" }] },
+    { "name": "Backfire", "type": "brown", "icon": "↩️", "desc": "Dùng để né một đòn và phản công lại người đã tấn công bạn.", "defense": true, "copies": [{ "rank": "Q", "suit": "C" }] },
+    { "name": "Bandidos", "type": "brown", "icon": "🤠", "desc": "Mỗi người chọn bỏ 2 lá trên tay (1 lá nếu chỉ còn 1) hoặc chịu 1 sát thương.", "copies": [{ "rank": "Q", "suit": "D" }] },
+    { "name": "Escape", "type": "brown", "icon": "💨", "desc": "Né phần hiệu ứng nhắm vào bạn của một lá viền nâu, trừ lá đóng vai trò Bang!.", "copies": [{ "rank": "3", "suit": "H" }] },
+    { "name": "Fanning", "type": "brown", "icon": "🔫", "desc": "Dùng lượt Bang! để bắn người trong tầm, rồi bắn thêm một người ở khoảng cách 1 tính từ mục tiêu đầu nếu có.", "copies": [{ "rank": "2", "suit": "S" }] },
+    { "name": "Last Call", "type": "brown", "effect": "heal", "heal": 1, "icon": "🍺", "desc": "Hồi 1 máu trong lượt của bạn, kể cả khi chỉ còn hai người.", "copies": [{ "rank": "8", "suit": "D" }] },
+    { "name": "Poker", "type": "brown", "icon": "🃏", "desc": "Những người khác bỏ một lá trên tay. Nếu không có Át, bạn được lấy tối đa 2 trong số lá vừa bỏ.", "copies": [{ "rank": "J", "suit": "H" }] },
+    { "name": "Saved!", "type": "brown", "icon": "🛟", "desc": "Ngăn một người khác mất 1 máu. Nếu họ sống sót, bạn chọn lấy 2 lá từ tay họ hoặc rút 2 lá từ chồng bài.", "copies": [{ "rank": "5", "suit": "H" }] },
+    { "name": "Tomahawk", "type": "brown", "effect": "attack", "maxDistance": 2, "icon": "🪓", "desc": "Tấn công một người ở khoảng cách tối đa 2.", "copies": [{ "rank": "A", "suit": "D" }] },
+    { "name": "Tornado", "type": "brown", "icon": "🌪️", "desc": "Mỗi người bỏ một lá trên tay nếu có, sau đó rút 2 lá từ chồng bài.", "copies": [{ "rank": "A", "suit": "C" }] }
+  ],
+  "characters": {
+    "Black Flower": { "hp": 4, "desc": "Một lần mỗi lượt, dùng một lá Chuồn trên tay như một Bang! bổ sung." },
+    "Colorado Bill": { "hp": 4, "desc": "Khi dùng một lá Bang!, rút kiểm tra. Nếu lật lá Bích, mục tiêu không thể né đòn đó." },
+    "Der Spot-Burst Ringer": { "hp": 4, "desc": "Một lần mỗi lượt, dùng một lá Bang! như Gatling mà vẫn giữ lượt Bang! thông thường." },
+    "Evelyn Shebang": { "hp": 4, "desc": "Trước khi rút đầu lượt, có thể đổi một hoặc cả hai lượt rút lấy đòn bắn vào các mục tiêu khác nhau trong tầm." },
+    "Henry Block": { "hp": 4, "desc": "Khi người chơi định lấy hoặc bỏ một lá của bạn, bạn phản công trước khi lá đó được chuyển." },
+    "Lemonade Jim": { "hp": 4, "desc": "Khi người khác dùng Beer, có thể bỏ một lá trên tay để hồi 1 máu." },
+    "Mick Defender": { "hp": 4, "desc": "Khi hiệu ứng của một lá viền nâu nhắm vào bạn, dù trong hay ngoài lượt của mình, bạn có thể bỏ một lá Missed! trên tay để né hiệu ứng đó." },
+    "Tuco Franziskaner": { "hp": 5, "desc": "Đầu lượt rút thêm 2 lá nếu trước mặt bạn không có lá viền xanh dương." }
+  }
+}
