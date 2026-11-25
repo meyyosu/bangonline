@@ -71,7 +71,7 @@ Khi dùng khoảng cách cố định, `maxDistance` nhận giá trị từ 1 đ
 
 Trong phòng chờ, chủ phòng bấm **Thêm bot** để thêm một bot mỗi lần (tổng tối đa 7 ghế, hoặc 8 ghế khi bật Dodge City). Bot tự chọn nhân vật và chơi bài; bấm **Mời ra** cạnh bot để kick giống người chơi. Bot tự đồng ý biểu quyết tạm dừng. Nếu chủ phòng rời đi, quyền chủ phòng chỉ chuyển cho người thật; phòng tự đóng khi không còn người thật.
 
-Bot chờ ít nhất 0,5 giây giữa các hành động. Chủ phòng có thể bật **Faster Bots** khi tạo phòng hoặc trong cài đặt phòng chờ để bot hành động ở nhịp xử lý kế tiếp của máy chủ.
+Bot chờ ít nhất 3 giây giữa các hành động. Chủ phòng có thể bật **Faster Bots** khi tạo phòng hoặc trong cài đặt phòng chờ để bot hành động ở nhịp xử lý kế tiếp của máy chủ.
 
 Trong phòng chờ, bấm **Làm khán giả** hoặc **Tham gia chơi** để đổi chỗ. Chỉ người chơi được tính vào giới hạn 4–7 người bắt đầu ván (4–8 khi bật Dodge City). Người vào phòng giữa trận (hoặc khi đủ ghế) tự vào làm khán giả. Khán giả xem diễn biến trực tiếp, chat và kết quả; bài trên tay, vai trò bí mật và lựa chọn riêng vẫn được ẩn. Khán giả không đánh bài hay biểu quyết tạm dừng. Sau ván, chủ phòng có thể về phòng chờ để mọi người đổi chỗ.
 
