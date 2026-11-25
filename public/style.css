@@ -16,11 +16,10 @@
   --renegade: #e2b31e; --renegade-light: #fff1b3; --renegade-ink: #8a6500; /* nền vàng → chữ tối */
   --law: var(--deputy); /* màu cả phe Luật pháp */
   --radius: 10px;
-  /* Viền lá đúng như lá thật: lá nâu, lá xanh (trang bị, súng) và lá xanh lá Dodge City — dải viền lấy màu từ ảnh lá,
-     mép ngoài sẫm hơn bản thật một chút cho dễ nhìn trên nền giấy/bàn tối */
+  /* Viền bài trên tay và trang bị dùng chung màu; xanh dương và xanh lá sáng để dễ phân biệt. */
   --card-brown: #cfab63; --card-brown-edge: #8a6c34;
-  --card-blue: #6d8cc4; --card-blue-edge: #556c95; --card-blue-bg: #f3f6fc; --card-blue-3d: #3f5784;
-  --card-green: #dde1c0; --card-green-edge: #3a3b35; --card-green-bg: #fafbf2; --card-green-3d: #6f7358;
+  --card-blue: #8080ff; --card-blue-edge: #556c95; --card-blue-bg: #f3f6fc; --card-blue-3d: #3f5784;
+  --card-green: #66ff66; --card-green-edge: #3a3b35; --card-green-bg: #e5ffe5; --card-green-3d: #6f7358;
 }
 * { box-sizing: border-box; }
 html, body { margin: 0; height: 100%; }
@@ -411,7 +410,7 @@ body.eq-sm .eqt .nm { display: none; }
 body.eq-lg .eqt .nm { font-size: 10px; }
 .eqt .bd { position: absolute; top: -7px; right: -7px; min-width: 17px; height: 17px; padding: 0 4px; border-radius: 99px; font-size: 10px; font-weight: 700;
   display: grid; place-items: center; color: #fff; background: var(--card-blue-edge); border: 2px solid #fffaf0; }
-/* Mọi trang bị xanh (súng, Mustang, Scope, Jail, Dynamite, Barrel…) cùng viền xanh như lá thật; lá Dodge City viền xanh xám */
+/* Trang bị xanh dương (kể cả súng) và xanh lá dùng cùng màu viền với bài trên tay. */
 .eqt.green { background: var(--card-green-bg); border-color: var(--card-green); outline-color: var(--card-green-edge); box-shadow: 0 3px 0 var(--card-green-3d); }
 .eqt.green::before { content: ''; position: absolute; inset: 0; z-index: 1; border: 1px solid var(--card-green-edge); border-radius: 4px; pointer-events: none; }
 .eqt.green .bd { background: var(--card-green-3d); z-index: 2; }
@@ -479,7 +478,7 @@ body.eq-lg .eqt .nm { font-size: 10px; }
 
 /* ---------- cards ---------- */
 .card { color: var(--ink); width: 84px; height: 112px; border-radius: 8px; background: #fffaf0; border: 4px solid var(--card-brown); outline: 1px solid var(--card-brown-edge); outline-offset: -1px; padding: 3px; position: relative; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; cursor: default; user-select: none; transition: transform .12s, box-shadow .12s; box-shadow: 0 3px 6px rgba(0,0,0,.25); }
-/* Lá xanh (cả súng): dải viền xanh, mép ngoài sẫm. Lá Dodge City: dải xanh xám nhạt kẹp giữa 2 nét sẫm (như lá thật) */
+/* Lá xanh dương (cả súng) và xanh lá: dải viền sáng, mép ngoài sẫm. */
 .card.blue, .card.gun { border-color: var(--card-blue); outline: 1px solid var(--card-blue-edge); outline-offset: -1px; background: var(--card-blue-bg); }
 .card.green { border-color: var(--card-green); outline: 1px solid var(--card-green-edge); outline-offset: -1px; background: var(--card-green-bg); }
 .card.green::before { content: ''; position: absolute; inset: 0; border: 1px solid var(--card-green-edge); border-radius: 5px; pointer-events: none; }
