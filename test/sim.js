@@ -24,10 +24,9 @@ function candidates(g, pi, rng) {
   const pend = g.pending;
   if (pend) {
     if (pend.type === 'draw') for (const from of pend.options) {
-      const target = pick(others);
+      const target = pick(from === 'evelyn' ? others.filter((name) => g.distance(pi, g.idx(name)) <= g.range(p)) : others);
       const eq = pick(g.players[g.idx(target)]?.eq || []);
-      const targets = others.filter((name) => g.distance(pi, g.idx(name)) <= g.range(p)).slice(0, 1 + Number(rng() < 0.5));
-      out.push({ type: 'drawChoice', from, target, cardId: eq?.id, targets });
+      out.push({ type: 'drawChoice', from, target, cardId: eq?.id });
     }
     if (pend.type === 'kit') out.push({ type: 'kit', cardIds: pend.cards.slice(0, 2).map((c) => c.id) });
     if (pend.type === 'store') out.push({ type: 'pick', cardId: pick(pend.cards).id });

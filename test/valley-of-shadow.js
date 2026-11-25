@@ -352,3 +352,67 @@ test('Henry Block responds before a card leaves his table, including a Ghost anc
   assert.ok(game.discard.includes(ghost));
   assertConservation(game);
 });
+
+function evelynGame() {
+  const { game, actor, target } = setup();
+  actor.char = 'Evelyn Shebang';
+  target.hp = 4;
+  game.beginDraw();
+  return { game, actor, target, shot: { type: 'drawChoice', from: 'evelyn', target: target.name } };
+}
+
+test('Evelyn can fire her two draw-phase shots at the same target', () => {
+  const { game, actor, target, shot } = evelynGame();
+  assert.equal(game.viewFor(actor.name).pending.remaining, 2);
+  assert.throws(() => game.act(actor.name, { ...shot, target: actor.name }), /trong tầm súng/);
+  for (let i = 0; i < 2; i++) {
+    game.act(actor.name, shot);
+    assert.equal(game.phase, 'play');
+    assert.equal(game.pending.type, 'bang');
+    assert.equal(game.players[game.pending.player], target);
+    game.act(target.name, { type: 'take' });
+    if (i === 0) assert.equal(game.viewFor(actor.name).pending.remaining, 1);
+  }
+  assert.equal(target.hp, 2);
+  assert.equal(actor.hand.length, 0);
+  assert.equal(game.bangsPlayed, 0);
+  assert.equal(game.pending, null);
+  assertConservation(game);
+});
+
+test('Evelyn can draw two at once or mix a one-card draw with a shot', () => {
+  const drawOne = { type: 'drawChoice', from: 'deckOne' };
+  const drawAll = { type: 'drawChoice', from: 'deck' };
+  const first = evelynGame();
+  first.game.act(first.actor.name, drawAll);
+  assert.equal(first.actor.hand.length, 2);
+  assert.equal(first.game.pending, null);
+  assertConservation(first.game);
+
+  const { game, actor, target, shot } = evelynGame();
+  game.act(actor.name, drawOne);
+  assert.equal(actor.hand.length, 1);
+  assert.equal(game.pending.remaining, 1);
+  game.act(actor.name, shot);
+  game.act(target.name, { type: 'take' });
+  assert.equal(actor.hand.length, 1);
+  assert.equal(target.hp, 3);
+  assert.equal(game.pending, null);
+  assertConservation(game);
+});
+
+test('Evelyn finishes a Backfire counter before spending her remaining draw choice', () => {
+  const { game, actor, target, shot } = evelynGame();
+  const backfire = deal(game, target, 'Backfire');
+  game.act(actor.name, shot);
+  game.act(target.name, { type: 'respond', cardId: backfire.id });
+  assert.equal(game.pending.type, 'bang');
+  assert.equal(game.players[game.pending.player], actor);
+  game.act(actor.name, { type: 'take' });
+  assert.equal(game.phase, 'draw');
+  assert.equal(game.pending.remaining, 1);
+  game.timeout();
+  assert.equal(actor.hand.length, 1);
+  assert.equal(game.pending, null);
+  assertConservation(game);
+});

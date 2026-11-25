@@ -239,7 +239,10 @@ label { font-weight: 600; font-size: 14px; display: block; margin: 10px 0 4px; }
 .verdict.win { background: #e8f5e3; color: #2e6b29; border-color: #3f7d3a; }
 .verdict.lose { background: #fbe3d6; color: #9b2218; border-color: var(--red); }
 .verdict small { display: block; font-family: 'Be Vietnam Pro', sans-serif; font-size: 13px; font-weight: 700; text-align: center; text-shadow: none; }
-@media (prefers-reduced-motion: reduce) { .deck.ready .card-back, .deck.waiting .card-back, .tap, .flyer.boom .card { animation: none; } }
+@media (prefers-reduced-motion: reduce) {
+  .deck.ready .card-back, .deck.waiting .card-back, .tap, .flyer.boom .card { animation: none; }
+  .deck.ready .card-back { outline: 3px solid var(--gold); }
+}
 
 /* Chọn nhân vật trước khi vào trận */
 select { width: 100%; padding: 9px 10px; border-radius: 8px; border: 2px solid #c9a46a; background: #fffaf0; font: inherit; }
