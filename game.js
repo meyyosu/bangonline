@@ -73,6 +73,7 @@ const DODGE_CITY_CHAR_INFO = {
 };
 const BASE_CHARACTERS = Object.keys(CHAR_INFO);
 Object.assign(CHAR_INFO, DODGE_CITY_CHAR_INFO);
+CHAR_INFO['Annie Versary'] = { hp: 4, desc: 'Dùng một lá bất kỳ trên tay như Bang!, kể cả để đáp Duel hoặc Indians!. Khi bắn, vẫn tính vào giới hạn Bang! của lượt.' };
 
 const ROLE_INFO = {
   Sheriff: { vi: 'Cảnh sát trưởng', goal: 'Tiêu diệt tất cả Outlaw và Renegade.' },
@@ -242,7 +243,7 @@ const PROJECTILE_BY_CARD = { Punch: 'fist', Knife: 'knife' };
 const HURT_SOUNDS = { female: numberedSounds('hurt_f', 4), male: numberedSounds('hurt_m', 4) };
 const FEMALE_CHARACTERS = new Set([
   'Calamity Janet', 'Rose Doolan', 'Suzy Lafayette', 'Belle Star', 'Elena Fuente', 'Molly Stark', 'Vera Custer',
-  'Black Flower', 'Evelyn Shebang',
+  'Black Flower', 'Evelyn Shebang', 'Annie Versary',
 ]);
 const AIM_SOUNDS = { play: 'Aim', female: 'aim_success_f', male: 'aim_success_m' };
 const EFFECT_SOUNDS = {
@@ -250,7 +251,7 @@ const EFFECT_SOUNDS = {
   bountyPlaced: 'bounty', bountyEarned: 'bounty_earned',
 };
 const PLAY_SOUNDS = { Punch: 'punch1', Gatling: 'gatling', Howitzer: 'howitzer1', Duel: 'duelo1',
-  'General Store': 'generalstore1', Indians: 'indian1',
+  'General Store': 'generalstore1', Indians: 'indian1', Brawl: 'brawl',
   'Buffalo Rifle': 'bangsound_buffalorifle', Derringer: 'bangsound_derringer', Pepperbox: 'bangsound_pepperbox',
   Knife: 'bangsound_knife', Springfield: 'bangsound_springfield',
   Bandidos: 'bandidos', Fanning: 'fanning', Poker: 'poker', Tomahawk: 'tomahawk', Tornado: 'tornado',
@@ -298,7 +299,7 @@ class Game {
     if (names.length < 4 || names.length > maxPlayers) fail(`Cần 4–${maxPlayers} người chơi.`);
     this.rng = opts.rng || Math.random;
     const roles = shuffle([...ROLE_SETS[names.length]], this.rng);
-    const pool = [...BASE_CHARACTERS];
+    const pool = [...BASE_CHARACTERS, 'Annie Versary'];
     if (opts.dodgeCity) pool.push(...Object.keys(DODGE_CITY_CHAR_INFO));
     if (opts.valleyOfShadow) pool.push(...VALLEY.characters);
     const chars = shuffle(pool, this.rng);
@@ -310,7 +311,7 @@ class Game {
       return { name, role, char, maxHp, hp: maxHp, hand: [], eq: [], coolingGreen: new Set(), alive: true, jailed: 0 };
     });
     if (opts.dodgeCity && !DODGE_CITY.cards.length) fail('Chưa nạp bộ lá Dodge City.');
-    if (opts.valleyOfShadow && !VALLEY.cards.length) fail('Chưa nạp bộ lá Valley of Shadow.');
+    if (opts.valleyOfShadow && !VALLEY.cards.length) fail('Chưa nạp bộ lá Valley of Shadows.');
     this.valleyOfShadow = !!opts.valleyOfShadow;
     this.fullDeck = buildDeck(opts.dodgeCity, this.valleyOfShadow); // Dùng bộ bài ban đầu của phòng để tính xác suất rút kiểm tra.
     this.deck = shuffle([...this.fullDeck], this.rng);
@@ -719,20 +720,29 @@ class Game {
     this.recordDamage(ti, lost, src);
     t.hp -= amount;
     if (lost > 0) this.recordCombatEffect({ type: 'damage', player: ti, amount: lost });
-    if (response?.aim && lost === 2) {
+    this.addLog(`${t.name} mất ${amount} máu (còn ${Math.max(t.hp, 0)}).`);
+    if (t.hp <= 0) this.trySave(t, response);
+    if (response?.aim && (lost === 2 || t.hp <= 0)) {
       const voice = FEMALE_CHARACTERS.has(this.players[src]?.char) ? 'female' : 'male';
       this.recordSound(AIM_SOUNDS[voice]);
     }
-    this.addLog(`${t.name} mất ${amount} máu (còn ${Math.max(t.hp, 0)}).`);
-    if (t.hp <= 0) this.trySave(t, response);
-    if (t.hp <= 0) return this.kill(ti, src);
-    this.recordSound(randomSound(FEMALE_CHARACTERS.has(t.char) ? HURT_SOUNDS.female : HURT_SOUNDS.male));
-    if (this.ability(t) === 'Bart Cassidy') { this.give(t, amount); this.addLog(`${t.name} rút ${amount} lá (Bart Cassidy).`); }
-    if (this.ability(t) === 'El Gringo' && src != null && src !== ti) {
-      for (let k = 0; k < amount; k++) {
-        if (this.stealRandom(this.players[src], t)) this.addLog(`${t.name} lấy 1 lá từ tay ${this.players[src].name} (El Gringo).`);
+    if (t.hp > 0) {
+      this.recordSound(randomSound(FEMALE_CHARACTERS.has(t.char) ? HURT_SOUNDS.female : HURT_SOUNDS.male));
+      if (this.ability(t) === 'Bart Cassidy') { this.give(t, amount); this.addLog(`${t.name} rút ${amount} lá (Bart Cassidy).`); }
+      if (this.ability(t) === 'El Gringo' && src != null && src !== ti) {
+        for (let k = 0; k < amount; k++) {
+          if (this.stealRandom(this.players[src], t)) this.addLog(`${t.name} lấy 1 lá từ tay ${this.players[src].name} (El Gringo).`);
+        }
       }
     }
+    const shooter = this.players[src];
+    if (lost > 0 && response?.trueBang && response.countsTowardBangLimit && shooter?.alive &&
+        this.equipmentActive(t) && this.hasEq(t, 'Bounty') &&
+        this.give(shooter, 1)) {
+      this.recordSound(EFFECT_SOUNDS.bountyEarned);
+      this.addLog(`${shooter.name} rút 1 lá nhờ Bounty trước mặt ${t.name}.`);
+    }
+    if (t.hp <= 0) return this.kill(ti, src);
   }
 
   trySave(t, response) {
@@ -929,6 +939,10 @@ class Game {
     if (res.hurt && !this.players[pend.player].alive) res = { dead: true };
     t.res = res;
     m.t = Date.now();
+    if (m.card.name === 'Brawl') {
+      t.revealAt = Math.max(m.t, m.revealAt ?? m.t0) + 500;
+      m.revealAt = t.revealAt;
+    }
   }
 
   // ---------- hàng đợi phản hồi ----------
@@ -947,6 +961,8 @@ class Game {
   }
 
   hasLeMat(p) { return this.equipmentActive(p) && this.gun(p)?.name === 'LeMat'; }
+  canPlayAnyCardAsBang(p) { return this.ability(p) === 'Annie Versary' || this.hasLeMat(p); }
+  canRespondWithBang(p, card) { return this.ability(p) === 'Annie Versary' || this.bangCard(p, card); }
 
   fanningTargets(source, target) {
     return this.alive().filter((i) => i !== source && i !== target && this.distance(target, i) === 1);
@@ -961,9 +977,12 @@ class Game {
     }
   }
 
-  beforeRemoval(actor, target, apply) {
+  beforeRemoval(actor, target, apply, skip) {
     if (actor === target || this.ability(this.players[target]) !== 'Henry Block') return apply();
-    this.queue.unshift({ run: () => { if (this.players[actor].alive && this.players[target].alive) apply(); } });
+    this.queue.unshift({ run: () => {
+      if (this.players[actor].alive && this.players[target].alive) apply();
+      else skip?.();
+    } });
     this.startShot(target, actor);
   }
 
@@ -978,11 +997,11 @@ class Game {
     } else apply();
   }
 
-  startShot(source, target, { projectile = 'bullet', trueBang = false, amount = 1, canEscape = false, aim = false } = {}) {
+  startShot(source, target, { projectile = 'bullet', trueBang = false, countsTowardBangLimit = false, amount = 1, canEscape = false, aim = false } = {}) {
     const p = this.players[source];
     if (!p.alive || !this.players[target].alive || this.winner) return;
     const need = trueBang && amount === 1 && this.ability(p) === 'Slab the Killer' ? 2 : 1;
-    const shot = { ...this.attackPrompt(source, target, need), amount, trueBang, canEscape, aim };
+    const shot = { ...this.attackPrompt(source, target, need), amount, trueBang, countsTowardBangLimit, canEscape, aim };
     this.pending = shot;
     this.recordCombatEffect({ type: 'shot', source, target, projectile });
     if (trueBang && this.ability(p) === 'Colorado Bill' && this.check(p, (c) => c.suit === 'S', 'Colorado Bill')) {
@@ -992,14 +1011,11 @@ class Game {
 
   takeShot(shot) {
     const target = this.players[shot.player], source = this.players[shot.source];
-    const bounty = this.equipmentActive(target) && this.hasEq(target, 'Bounty');
     this.resolveDamage(shot.player, shot.amount ?? 1, shot.source, shot, (amount) => {
       this.noteMass(shot, target.ghost ? { ghost: true } : amount ? { hurt: amount } : { saved: true });
-      if (amount > 0 && shot.trueBang && source.alive && !this.winner) {
-        if (bounty && this.give(source, 1)) this.recordSound(EFFECT_SOUNDS.bountyEarned);
-        if (target.alive && target.hand.length && this.equipmentActive(source) && this.gun(source)?.name === 'Shotgun') {
-          this.queue.unshift({ type: 'valleyDiscard', player: shot.player, name: 'Shotgun', count: 1 });
-        }
+      if (amount > 0 && shot.trueBang && source.alive && !this.winner && target.alive && target.hand.length &&
+          this.equipmentActive(source) && this.gun(source)?.name === 'Shotgun') {
+        this.queue.unshift({ type: 'valleyDiscard', player: shot.player, name: 'Shotgun', count: 1 });
       }
       this.finishResponse(shot);
     });
@@ -1507,8 +1523,7 @@ class Game {
       case 'duel': {
         if (a.type === 'respond') {
           const c = p.hand.find((x) => x.id === a.cardId);
-          const ok = c && (c.name === 'Bang' || (c.name === 'Missed' && this.ability(p) === 'Calamity Janet'));
-          if (!ok) fail('Cần dùng lá Bang!.');
+          if (!c || !this.canRespondWithBang(p, c)) fail('Cần dùng lá Bang!.');
           this.toDiscard(this.takeFromHand(p, c.id));
           this.recordPlay(pi, c);
           this.mollyDraw(p, pend.type === 'duel' ? pend : null);
@@ -1535,11 +1550,11 @@ class Game {
     const aim = !activate && name === 'Aim' && !a.asBang;
     let bang = card;
     if (!activate && a.asBang) {
-      if (!this.hasLeMat(p)) fail('Bạn cần trang bị LeMat để dùng lá này như Bang!.');
+      if (!this.canPlayAnyCardAsBang(p)) fail('Cần LeMat hoặc kỹ năng Annie Versary để dùng lá này như Bang!.');
       name = 'Bang';
     } else if (aim) {
       bang = p.hand.find((c) => c.id === a.bangCardId && c !== card);
-      if (!bang || (!this.bangCard(p, bang) && !this.hasLeMat(p))) fail('Chọn một lá Bang! dùng kèm Aim.');
+      if (!bang || (!this.bangCard(p, bang) && !this.canPlayAnyCardAsBang(p))) fail('Chọn một lá Bang! dùng kèm Aim.');
       name = 'Bang';
     } else if (this.bangCard(p, card)) name = 'Bang';
     const info = CARD_INFO[name];
@@ -1599,7 +1614,8 @@ class Game {
         if (this.ignoredCard(t, bang)) return;
         this.addLog(`💥 ${p.name} bắn ${t.name}${aim ? ' bằng Aim' : regularBang ? '' : ` bằng ${name}`}!`);
         this.startShot(pi, ti, {
-          trueBang: regularBang, aim, amount: aim ? 2 : 1, canEscape: !regularBang && info.type === 'brown',
+          trueBang: regularBang, countsTowardBangLimit: regularBang, aim,
+          amount: aim ? 2 : 1, canEscape: !regularBang && info.type === 'brown',
           projectile: regularBang ? 'bullet' : PROJECTILE_BY_CARD[card.name] ?? 'bullet',
         });
         return;
@@ -1708,16 +1724,20 @@ class Game {
           return { i, target, selected: this.targetCard(target, selections.get(target.name)) };
         });
         use(); this.toDiscard(card);
+        const mass = this.startMass(pi, card, targets);
         this.queue = removals.map(({ i, target, selected }) => ({ run: () => {
-          if (!p.alive || !target.alive) return;
+          const step = { player: i, mass: mass.seq };
+          const skip = () => this.noteMass(step, { skipped: true });
+          if (!p.alive || !target.alive) return skip();
           this.stats[i].targeted++;
-          if (this.ignoredCard(target, card)) return;
+          if (this.ignoredCard(target, card)) return this.noteMass(step, { immune: true });
           this.applyBrown(pi, i, name, () => this.beforeRemoval(pi, i, () => {
-            if (selected ? !target.eq.includes(selected) : !target.hand.length) return;
+            if (selected ? !target.eq.includes(selected) : !target.hand.length) return skip();
             const removed = this.removeTargetCard(target, selected);
             this.toDiscard(removed);
+            this.noteMass(step, { discarded: [removed] });
             this.addLog(`${p.name} dùng ${name}: ${target.name} bỏ ${cardStr(removed)}.`);
-          }));
+          }, skip), mass.seq);
         } }));
         return this.nextPending();
       }
@@ -1813,6 +1833,7 @@ class Game {
       case 'Rattlesnake':
       case 'Bounty': {
         const t = this.players[this.idx(a.target)];
+        if (name === 'Bounty' && t === p) fail('Không thể tự đặt Bounty.');
         if (!t?.alive || this.hasEq(t, name)) fail(`Chọn người đang chơi chưa có ${name}.`);
         use();
         if (t !== p && this.ignoredCard(t, card)) this.toDiscard(card);
@@ -2025,6 +2046,10 @@ class Game {
       if (pend.type === 'character' && pend.player === me) pending.options = [...pend.options];
       if (pend.type === 'bang') Object.assign(pending, { source: pend.source, need: pend.need, got: pend.got, barrels: pend.barrels, amount: pend.amount ?? 1 });
       if (pend.type === 'bang' && pend.player === me) pending.responseCardIds = this.dodgeCards(this.players[me]).map((c) => c.id);
+      if (['indians', 'duel'].includes(pend.type) && pend.player === me) {
+        const player = this.players[me];
+        pending.responseCardIds = player.hand.filter((c) => this.canRespondWithBang(player, c)).map((c) => c.id);
+      }
       if (pend.canEscape && pend.player === me) pending.escapeIds = this.escapeCards(this.players[me]).map((c) => c.id);
       if (pend.type === 'saved' && !privateReaction) Object.assign(pending, { target: pend.target, amount: pend.amount });
       if (!privateReaction && ['avoid', 'valleyDiscard'].includes(pend.type)) Object.assign(pending, { name: pend.name, count: pend.count });

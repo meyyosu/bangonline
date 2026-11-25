@@ -239,8 +239,8 @@ const server = http.createServer(async (req, res) => {
       const body = await readBody(req);
       if (body.dodgeCity !== undefined && typeof body.dodgeCity !== 'boolean') return err(res, 'Tuỳ chọn Dodge City phải là bật hoặc tắt.');
       if (body.dodgeCity && !dodgeCityCardCount) return err(res, 'Máy chủ chưa nạp dữ liệu Dodge City.');
-      if (body.valleyOfShadow !== undefined && typeof body.valleyOfShadow !== 'boolean') return err(res, 'Tuỳ chọn Valley of Shadow phải là bật hoặc tắt.');
-      if (body.valleyOfShadow && !valleyOfShadowCardCount) return err(res, 'Máy chủ chưa nạp dữ liệu Valley of Shadow.');
+      if (body.valleyOfShadow !== undefined && typeof body.valleyOfShadow !== 'boolean') return err(res, 'Tuỳ chọn Valley of Shadows phải là bật hoặc tắt.');
+      if (body.valleyOfShadow && !valleyOfShadowCardCount) return err(res, 'Máy chủ chưa nạp dữ liệu Valley of Shadows.');
       const { name } = body;
       const code = newCode();
       const r = { code, name: String(name || `Phòng của ${user}`).slice(0, 40), host: user, players: [user], bots: [], spectators: [], status: 'waiting', game: null, chat: [] };

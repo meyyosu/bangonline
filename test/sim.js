@@ -50,12 +50,12 @@ function candidates(g, pi, rng) {
     const targetCard = (q) => !q?.eq.length || (q.hand.length && rng() < 0.6) ? 'hand' : pick(q.eq).id;
     const cost = pick(p.hand.filter((q) => q !== c));
     const second = tp?.alive ? pick(g.fanningTargets(pi, g.idx(t))) : undefined;
-    const bang = p.hand.find((q) => q !== c && (g.bangCard(p, q) || g.hasLeMat(p)));
+    const bang = p.hand.find((q) => q !== c && (g.bangCard(p, q) || g.canPlayAnyCardAsBang(p)));
     const targets = others.map((name) => g.players[g.idx(name)]).filter((q) => !q.ghost && (q.hand.length || q.eq.length))
       .map((q) => ({ target: q.name, targetCard: targetCard(q) }));
     out.push({ type: p.eq.includes(c) ? 'activate' : 'play', cardId: c.id, target: t,
       targetCard: targetCard(tp), costCardId: cost?.id, bangCardId: bang?.id, secondTarget: g.players[second]?.name, targets });
-    if (g.hasLeMat(p) && p.hand.includes(c)) out.push({ type: 'play', cardId: c.id, target: t, asBang: true });
+    if (g.canPlayAnyCardAsBang(p) && p.hand.includes(c)) out.push({ type: 'play', cardId: c.id, target: t, asBang: true });
   }
   if (p.hand.length > g.handLimit(p) && !p.ghost) out.push({ type: 'discard', cardIds: [p.hand[0].id] });
   if (g.activeSkill(p)) {
@@ -79,7 +79,7 @@ for (let s = 1; s <= N; s++) {
   const names = Array.from({ length: 4 + (s % 4) }, (_, i) => `P${i + 1}`);
   const mode = ((s - 1) + Math.floor((s - 1) / 4)) % 4;
   const dodgeCity = Boolean(mode & 1), valleyOfShadow = Boolean(mode & 2);
-  const variant = ['Gốc', 'Dodge City', 'Valley of Shadow', 'Cả hai'][mode];
+  const variant = ['Gốc', 'Dodge City', 'Valley of Shadows', 'Cả hai'][mode];
   variants[variant] = (variants[variant] || 0) + 1;
   const g = new Game(names, { rng, characterChoices: 1 + (s % 4), dodgeCity, valleyOfShadow });
   let steps = 0;

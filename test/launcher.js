@@ -60,7 +60,8 @@ test('Windows launcher starts current source, recognizes an existing server, and
     assert.equal(meta.cards.Bible.type, 'green');
     assert.equal(meta.valleyOfShadowCardCount, 16);
     assert.equal(meta.cards.Ghost.type, 'blue');
-    assert.equal(Object.keys(meta.chars).length, 39);
+    assert.equal(Object.keys(meta.chars).length, 40);
+    assert.equal(meta.chars['Annie Versary'].hp, 4);
     const cookies = [];
     const request = async (user, url, body) => {
       const response = await fetch(`http://127.0.0.1:${port}${url}`, {

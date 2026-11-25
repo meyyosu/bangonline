@@ -954,6 +954,19 @@ body.match-result-open { overflow: hidden; }
 .mp-discard .cname { margin: 2px 0 0; font-size: 9px; overflow-wrap: anywhere; }
 .mp-discard .icon, .mp-discard .range { display: none; }
 .mp-picked, .mp-drawn { color: var(--gold); font-size: 9px; }
+.group-pop.poker-picking { cursor: default; }
+.group-pop.poker-picking .mp-col { width: 76px; }
+.mp-batch .mp-poker-card { min-height: 84px; cursor: pointer; touch-action: manipulation; }
+.mp-poker-card .corner { position: absolute; }
+.mp-poker-card .icon { display: block; font-size: 23px; }
+.mp-poker-card .cname { margin-top: 4px; font-size: 10px; }
+.mp-poker-card:hover, .mp-poker-card:focus-visible { outline: 2px solid var(--gold); outline-offset: 1px; }
+.mp-poker-card[aria-pressed="true"] {
+  box-shadow: inset 0 0 0 2px #37723c, 0 0 0 2px #85d78c;
+  background: #edf8e9;
+}
+.mp-poker-actions { display: flex; align-items: center; justify-content: center; gap: 8px; }
+.mp-poker-actions .btn { min-height: 36px; }
 .arena .group-pop .mp-facedown {
   width: 100%; height: 52px; font: 700 10px system-ui, sans-serif;
   border-width: 2px; box-shadow: none;
