@@ -47,10 +47,34 @@ test('Store, Indians, Gatling and equipment publish main sound cues', () => {
   }
 });
 
-test('Aim uses the shooter’s voice for a kill or two life points lost', () => {
-  for (const { shooter, hp, response, beers = 0, dead = false, clip } of [
+test('Cat Balou uses relief clips for hazards in play and its usual clip for a hand discard', (t) => {
+  const rng = t.mock.method(Math, 'random', () => 0);
+  for (const [name, equipped, sample, clip] of [
+    ['Jail', true, 0, 'ohyeah1'],
+    ['Dynamite', true, 0.5, 'ohyeah2'],
+    ['Rattlesnake', true, 0.99, 'ohyeah3'],
+    ['Dynamite', false, 0, 'catbalou1'],
+  ]) {
+    const g = setup({ valleyOfShadow: true });
+    const p = g.players[g.turn], target = g.players[g.nextAlive(g.turn)];
+    g.toDiscard(...target.hand.splice(0));
+    const hazard = give(g, target, name);
+    if (equipped) target.eq.push(g.takeFromHand(target, hazard.id));
+    const cat = give(g, p, 'Cat Balou');
+    rng.mock.mockImplementation(() => sample);
+    const before = g.soundSeq;
+    g.act(p.name, { type: 'play', cardId: cat.id, target: target.name, targetCard: equipped ? hazard.id : 'hand' });
+    assert.ok(g.discard.includes(hazard));
+    assert.deepEqual(g.viewFor(null).sounds.filter(({ seq }) => seq > before).flatMap(({ files }) => files), [clip]);
+    assert.ok(SOUND_FILES.has(`${clip}.mp3`));
+  }
+});
+
+test('Aim samples both play clips and uses the shooter’s voice for a kill or two life points lost', (t) => {
+  const rng = t.mock.method(Math, 'random', () => 0);
+  for (const { shooter, hp, response, beers = 0, dead = false, clip, playClip = 'Aim' } of [
     { shooter: 'Black Flower', hp: 2, response: 'take', dead: true, clip: 'aim_success_f' },
-    { shooter: 'Willy the Kid', hp: 4, response: 'take', clip: 'aim_success_m' },
+    { shooter: 'Willy the Kid', hp: 4, response: 'take', clip: 'aim_success_m', playClip: 'Aim2' },
     { shooter: 'Evelyn Shebang', hp: 1, response: 'take', dead: true, clip: 'aim_success_f' },
     { shooter: 'Willy the Kid', hp: 1, response: 'saved', dead: true, clip: 'aim_success_m' },
     { shooter: 'Willy the Kid', hp: 2, response: 'take', beers: 1, clip: 'aim_success_m' },
@@ -66,9 +90,11 @@ test('Aim uses the shooter’s voice for a kill or two life points lost', () => 
     target.hp = hp;
     for (let i = 0; i < beers; i++) give(g, target, 'Beer');
     const aim = give(g, p, 'Aim'), bang = give(g, p, 'Bang');
+    rng.mock.mockImplementation(() => playClip === 'Aim2' ? 0.99 : 0);
     const playedAt = g.soundSeq;
     g.act(p.name, { type: 'play', cardId: aim.id, target: target.name, bangCardId: bang.id });
-    assert.deepEqual(g.viewFor(null).sounds.filter((cue) => cue.seq > playedAt).flatMap((cue) => cue.files), ['Aim']);
+    assert.deepEqual(g.viewFor(null).sounds.filter((cue) => cue.seq > playedAt).flatMap((cue) => cue.files), [playClip]);
+    assert.ok(SOUND_FILES.has(`${playClip}.mp3`));
     if (response === 'saved') {
       const saved = give(g, saver, 'Saved!');
       g.act(saver.name, { type: 'saved', cardId: saved.id, target: target.name, from: 'deck' });
