@@ -237,6 +237,7 @@ const IRON_PLATE_SOUNDS = [
 const BARREL_SOUND = 'missedsound_barrel';
 const STEAL_SOUNDS = ['cardswap', 'cardswap2'];
 const TARGET_DISCARD_SOUND = 'catbalou1';
+const TEAMKILLER_SOUND = 'teamkiller';
 const PROJECTILE_BY_CARD = { Punch: 'fist', Knife: 'knife' };
 const HURT_SOUNDS = { female: numberedSounds('hurt_f', 4), male: numberedSounds('hurt_m', 4) };
 const FEMALE_CHARACTERS = new Set([
@@ -258,7 +259,7 @@ const EQUIP_SOUNDS = { Mustang: 'mustang1', Dynamite: 'dynamite_start.wav', Jail
 const SOUND_FILES = new Set([
   'bangload', 'playerjoin', 'yourturn1', 'equipment1', 'prisonfree', 'playereliminated', 'outlawkilled1', 'dynamite_explode.wav',
   'victory', 'defeat',
-  BARREL_SOUND, TARGET_DISCARD_SOUND, ...MISSED_SOUNDS, ...IRON_PLATE_SOUNDS, ...STEAL_SOUNDS,
+  BARREL_SOUND, TARGET_DISCARD_SOUND, TEAMKILLER_SOUND, ...MISSED_SOUNDS, ...IRON_PLATE_SOUNDS, ...STEAL_SOUNDS,
   ...Object.values(HURT_SOUNDS).flat(), ...Object.values(GUN_SOUNDS).flat(),
   ...Object.values(AIM_SOUNDS), ...Object.values(EFFECT_SOUNDS),
   ...Object.values(PLAY_SOUNDS).flat(), ...Object.values(EQUIP_SOUNDS),
@@ -812,8 +813,11 @@ class Game {
 
     const won = this.checkWin();
     const sounds = ['playereliminated'];
-    if (!won && src != null && src !== ti && this.players[src].alive) {
-      const k = this.players[src];
+    const k = this.players[src];
+    if ((k?.role === 'Sheriff' && t.role === 'Deputy') || (k?.role === 'Deputy' && t.role === 'Sheriff')) {
+      sounds.push(TEAMKILLER_SOUND);
+    }
+    if (!won && k?.alive && k !== t) {
       if (t.role === 'Outlaw') {
         const before = k.hand.length;
         this.give(k, 3);
@@ -1959,13 +1963,14 @@ class Game {
     const pend = this.pending;
     let pending = null;
     if (pend) {
-      pending = { type: pend.type, player: pend.player };
+      const privateReaction = pend.type === 'avoid' && pend.player !== me;
+      pending = { type: pend.type, player: privateReaction ? null : pend.player };
       if (pend.type === 'character' && pend.player === me) pending.options = [...pend.options];
       if (pend.type === 'bang') Object.assign(pending, { source: pend.source, need: pend.need, got: pend.got, barrels: pend.barrels, amount: pend.amount ?? 1 });
       if (pend.type === 'bang' && pend.player === me) pending.responseCardIds = this.dodgeCards(this.players[me]).map((c) => c.id);
       if (pend.canEscape && pend.player === me) pending.escapeIds = this.escapeCards(this.players[me]).map((c) => c.id);
       if (pend.type === 'saved') Object.assign(pending, { target: pend.target, amount: pend.amount });
-      if (['avoid', 'valleyDiscard'].includes(pend.type)) Object.assign(pending, { name: pend.name, count: pend.count });
+      if (!privateReaction && ['avoid', 'valleyDiscard'].includes(pend.type)) Object.assign(pending, { name: pend.name, count: pend.count });
       if (pend.type === 'poker' && pend.player === me) pending.cards = this.discard.filter((c) => pend.ids.includes(c.id));
       if (meAlive && this.hasSaved(this.players[me])) {
         const reaction = this.savedReaction(pend, me);

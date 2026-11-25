@@ -57,21 +57,22 @@ function newCode() {
 function roomCapacity(r) { return r.dodgeCity ? 8 : 7; }
 
 function roomSummary(r) {
-  return { code: r.code, name: r.name, host: r.host, players: r.players, bots: r.bots, spectators: r.spectators, status: r.status, max: roomCapacity(r), hasPassword: !!r.passwordHash, turnSeconds: r.turnSeconds, characterChoices: r.characterChoices, characterSeconds: r.characterSeconds, dodgeCity: r.dodgeCity, valleyOfShadow: r.valleyOfShadow };
+  return { code: r.code, name: r.name, host: r.host, players: r.players, bots: r.bots, spectators: r.spectators, status: r.status, max: roomCapacity(r), hasPassword: !!r.passwordHash, turnSeconds: r.turnSeconds, characterChoices: r.characterChoices, characterSeconds: r.characterSeconds, dodgeCity: r.dodgeCity, valleyOfShadow: r.valleyOfShadow, fasterBots: r.fasterBots };
 }
 
 function roomView(r, user) {
   syncTimer(r);
   const online = [...(roomClients.get(r.code) || [])].map((c) => c.user);
+  const game = r.game ? r.game.viewFor(r.spectators.includes(user) ? null : user) : null;
   return {
     ...roomSummary(r),
     online: [...new Set([...online, ...(r.bots || [])])],
     chat: r.chat.slice(-60),
-    game: r.game ? r.game.viewFor(r.spectators.includes(user) ? null : user) : null,
+    game,
     serverNow: Date.now(),
     server: { features: SERVER_FEATURES, stale: codeChanged },
     pause: pauseView(r),
-    timer: r.clock ? { deadline: r.clock.deadline, player: r.clock.player, response: !!r.clock.pending, character: !!r.clock.character, draw: !!r.clock.draw, seconds: r.clock.seconds } : null,
+    timer: r.clock ? { deadline: r.clock.deadline, player: game?.pending?.type === 'avoid' ? game.pending.player : r.clock.player, response: !!r.clock.pending, character: !!r.clock.character, draw: !!r.clock.draw, seconds: r.clock.seconds } : null,
   };
 }
 
@@ -105,6 +106,9 @@ function updateSettings(r, body) {
   if (body.password !== undefined && (typeof body.password !== 'string' || body.password.length > 64)) {
     throw new GameError('Mật khẩu phòng tối đa 64 ký tự.');
   }
+  if (body.fasterBots !== undefined && typeof body.fasterBots !== 'boolean') {
+    throw new GameError('Tuỳ chọn Faster Bots phải là bật hoặc tắt.');
+  }
   if (body.password !== undefined) {
     r.passwordSalt = body.password ? crypto.randomBytes(16).toString('hex') : null;
     r.passwordHash = body.password ? hashPw(body.password, r.passwordSalt) : null;
@@ -112,6 +116,7 @@ function updateSettings(r, body) {
   if (body.turnSeconds !== undefined) r.turnSeconds = body.turnSeconds;
   if (body.characterChoices !== undefined) r.characterChoices = body.characterChoices;
   if (body.characterSeconds !== undefined) r.characterSeconds = body.characterSeconds;
+  if (body.fasterBots !== undefined) r.fasterBots = body.fasterBots;
 }
 
 function leaveRoom(r, user) {
@@ -244,6 +249,7 @@ const server = http.createServer(async (req, res) => {
       r.characterSeconds = 60;
       r.dodgeCity = body.dodgeCity === true;
       r.valleyOfShadow = body.valleyOfShadow === true;
+      r.fasterBots = false;
       updateSettings(r, body);
       rooms.set(code, r);
       broadcastLobby();

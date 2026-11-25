@@ -261,6 +261,24 @@ test('Fanning still attacks the second target after Escape and Backfire retaliat
   assertConservation(game);
 });
 
+test('the Escape-only response hides the responder from other players and spectators', () => {
+  const { game, actor, target } = setup();
+  const escape = deal(game, target, 'Escape');
+  play(game, actor, 'Cat Balou', target, { targetCard: 'hand' });
+  assert.equal(game.pending.type, 'avoid');
+  for (const viewer of [null, ...names.filter((name) => name !== target.name)]) {
+    assert.deepEqual(game.viewFor(viewer).pending, { type: 'avoid', player: null });
+  }
+  const view = game.viewFor(target.name);
+  assert.equal(view.pending.player, view.me.index);
+  assert.equal(view.pending.name, 'Cat Balou');
+  assert.deepEqual(view.pending.escapeIds, [escape.id]);
+  game.act(target.name, { type: 'escape', cardId: escape.id });
+  assert.ok(game.discard.includes(escape));
+  assert.equal(game.pending, null);
+  assertConservation(game);
+});
+
 test('the Bandidos caster can select the required cards from their hand and discard without losing health', async () => {
   const source = readFileSync(join(__dirname, '../public/app.js'), 'utf8');
   const client = source.slice(source.indexOf('function isClickable('), source.indexOf('function actionsHTML('))

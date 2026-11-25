@@ -279,6 +279,10 @@ function timerField(value = 60) {
     <input id="turnSeconds" type="number" name="turnSeconds" min="0" max="600" step="1" value="${esc(value)}" required>
     <p class="muted">0 = tắt; từ 10–600 giây. Tạm dừng lượt khi chờ phản hồi; mỗi phản hồi có timer riêng cùng thời lượng.</p>`;
 }
+function fasterBotsField(checked = false) {
+  return `<label><input type="checkbox" name="fasterBots" ${checked ? 'checked' : ''}> Faster Bots</label>
+    <p class="muted">Bỏ khoảng chờ 0,5 giây giữa các hành động của bot.</p>`;
+}
 function characterFields(choices = 3, seconds = 60) {
   return `<label for="characterChoices">Số nhân vật để chọn đầu game</label>
     <select id="characterChoices" name="characterChoices">${[1, 2, 3, 4].map((n) => `<option value="${n}" ${Number(choices) === n ? 'selected' : ''}>${n}${n === 1 ? ' (chia ngẫu nhiên)' : ''}</option>`).join('')}</select>
@@ -302,6 +306,7 @@ function showLobby() {
           <label for="createPassword">Mật khẩu phòng (không bắt buộc)</label><input id="createPassword" type="password" name="password" maxlength="64" autocomplete="new-password">
           ${characterFields()}
           ${timerField()}
+          ${fasterBotsField()}
           <label><input type="checkbox" name="dodgeCity" aria-describedby="dodgeCityDetails" ${(META.dodgeCityCardCount ?? META.greenCardCount) ? '' : 'disabled'}> Bản mở rộng: Dodge City</label>
           <p class="muted" id="dodgeCityDetails">${(META.dodgeCityCardCount ?? META.greenCardCount) ? `Thêm ${META.dodgeCityCardCount ?? META.greenCardCount} lá Dodge City vào bộ bài của phòng.` : 'Máy chủ chưa nạp dữ liệu Dodge City.'}</p>
           <label><input type="checkbox" name="valleyOfShadow" ${META.valleyOfShadowCardCount ? '' : 'disabled'}> Bản mở rộng: Valley of Shadow</label>
@@ -322,7 +327,7 @@ function showLobby() {
   $('#createForm').onsubmit = run(async (e) => {
     e.preventDefault();
     const f = new FormData(e.target);
-    const r = await api('/api/rooms', { name: f.get('name'), password: f.get('password'), turnSeconds: Number(f.get('turnSeconds')), characterChoices: Number(f.get('characterChoices')), characterSeconds: Number(f.get('characterSeconds')), dodgeCity: f.has('dodgeCity'), valleyOfShadow: f.has('valleyOfShadow') });
+    const r = await api('/api/rooms', { name: f.get('name'), password: f.get('password'), turnSeconds: Number(f.get('turnSeconds')), characterChoices: Number(f.get('characterChoices')), characterSeconds: Number(f.get('characterSeconds')), dodgeCity: f.has('dodgeCity'), valleyOfShadow: f.has('valleyOfShadow'), fasterBots: f.has('fasterBots') });
     enterRoom(r.code);
   });
   $('#joinForm').onsubmit = run(async (e) => {
@@ -340,7 +345,7 @@ function showLobby() {
     list.innerHTML = d.rooms.map((r) => `
       <div class="room-item">
         <div>
-          <div><b>${esc(r.name)}</b> <span class="code">${r.code}</span> ${r.hasPassword ? '🔒' : ''} ${r.dodgeCity ? '· Dodge City' : ''} ${r.valleyOfShadow ? '· Valley of Shadow' : ''}</div>
+          <div><b>${esc(r.name)}</b> <span class="code">${r.code}</span> ${r.hasPassword ? '🔒' : ''} ${r.dodgeCity ? '· Dodge City' : ''} ${r.valleyOfShadow ? '· Valley of Shadow' : ''} ${r.fasterBots ? '· Faster Bots' : ''}</div>
           <div class="muted">Chủ phòng: ${esc(r.host)} · ${r.players.length}/${r.max} người chơi · ${(r.spectators || []).length} khán giả · ${r.turnSeconds ? r.turnSeconds + ' giây/lượt' : 'Không giới hạn giờ'}</div>
         </div>
         <div class="row">
@@ -503,7 +508,7 @@ function renderRoom(previousGame) {
 
 function roomSettingsBody(form) {
   const f = new FormData(form);
-  const body = { turnSeconds: Number(f.get('turnSeconds')), characterChoices: Number(f.get('characterChoices')), characterSeconds: Number(f.get('characterSeconds')) };
+  const body = { turnSeconds: Number(f.get('turnSeconds')), characterChoices: Number(f.get('characterChoices')), characterSeconds: Number(f.get('characterSeconds')), fasterBots: f.has('fasterBots') };
   if (f.has('removePassword')) body.password = '';
   else if (f.get('password')) body.password = f.get('password');
   return body;
@@ -550,12 +555,14 @@ function renderWaiting() {
         ${r.valleyOfShadow ? '<p>Bản mở rộng: Valley of Shadow</p>' : ''}
         <p>${r.hasPassword ? '🔒 Có mật khẩu' : '🔓 Không có mật khẩu'} · ${r.turnSeconds ? r.turnSeconds + ' giây/lượt' : 'Không giới hạn thời gian'}</p>
         <p>Chọn 1 trong ${r.characterChoices} nhân vật · ${r.characterSeconds ? r.characterSeconds + ' giây/người để chọn' : 'Không giới hạn giờ chọn nhân vật'}</p>
+        ${!isHost && r.fasterBots ? '<p>Faster Bots</p>' : ''}
         ${isHost ? `<form id="settingsForm">
           <label for="roomPassword">Mật khẩu mới (để trống để giữ nguyên)</label>
           <input id="roomPassword" type="password" name="password" maxlength="64" autocomplete="new-password" value="${esc(ui.settingsDraft?.password || '')}">
           <label><input type="checkbox" name="removePassword" ${ui.settingsDraft?.removePassword ? 'checked' : ''}> Xóa mật khẩu phòng</label>
           ${characterFields(ui.settingsDraft?.characterChoices ?? r.characterChoices, ui.settingsDraft?.characterSeconds ?? r.characterSeconds)}
           ${timerField(ui.settingsDraft?.turnSeconds ?? r.turnSeconds)}
+          ${fasterBotsField(ui.settingsDraft?.fasterBots ?? r.fasterBots)}
           <button class="btn small blue">Lưu cài đặt</button>
         </form>` : '<p class="muted">Chủ phòng có thể đổi cài đặt trước khi bắt đầu.</p>'}
       </div>
@@ -595,7 +602,7 @@ function renderWaiting() {
   if (settings) {
     settings.oninput = () => {
       const f = new FormData(settings);
-      ui.settingsDraft = { turnSeconds: f.get('turnSeconds'), characterChoices: f.get('characterChoices'), characterSeconds: f.get('characterSeconds'), password: f.get('password'), removePassword: f.has('removePassword') };
+      ui.settingsDraft = { turnSeconds: f.get('turnSeconds'), characterChoices: f.get('characterChoices'), characterSeconds: f.get('characterSeconds'), fasterBots: f.has('fasterBots'), password: f.get('password'), removePassword: f.has('removePassword') };
     };
     settings.onsubmit = run(async (e) => {
       e.preventDefault();
@@ -623,7 +630,7 @@ function updateClock() {
   document.querySelectorAll('[data-draw-clock]').forEach((el) => { el.textContent = p?.frozen ? 'Đang tạm dừng' : `${seconds} giây`; });
   const drawLabels = { blackJack: 'Black Jack lật bài', kit: 'Chọn 2 lá', copyAbility: 'Chọn kỹ năng' };
   const drawLabel = drawLabels[g?.pending?.type] || `Rút bài (tự động sau ${t?.seconds || 5} giây)`;
-  const text = p?.frozen ? '⏸ Ván chơi tạm dừng · Đồng hồ lượt được giữ nguyên' : t ? `⏱ ${name} · ${t.character ? 'Chọn nhân vật' : t.draw ? drawLabel : t.response ? 'Phản hồi' : 'Lượt chơi'}: ${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`
+  const text = p?.frozen ? '⏸ Ván chơi tạm dừng · Đồng hồ lượt được giữ nguyên' : t ? `⏱ ${name ? `${name} · ` : ''}${t.character ? 'Chọn nhân vật' : t.draw ? drawLabel : t.response ? 'Phản hồi' : 'Lượt chơi'}: ${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`
     : `⏱ ${g?.phase === 'character' ? 'Chọn nhân vật' : 'Lượt chơi'}: không giới hạn`;
   document.querySelectorAll('[data-room-clock]').forEach((el) => {
     el.hidden = !g || !!g.winner;
@@ -1598,7 +1605,7 @@ function promptHTML(g, meIdx, meP) {
   const cardChoices = (cards) => cards.map((c) => `<label><input type="checkbox" data-valley-card value="${c.id}"> ${esc(c.name)} ${c.rank}${SUIT[c.suit]}</label>`).join('');
   switch (pend.type) {
     case 'avoid':
-      if (!mine) return `<h4>${P(pend.player)} đang phản ứng với ${esc(pend.name)}…</h4>`;
+      if (!mine) return '<h4>Đang chờ phản hồi…</h4>';
       return `<h4>${esc(pend.name)} · Hiệu ứng nhắm vào bạn</h4><div class="row">${escapeButtons()}
         <button class="btn secondary" data-act="take">Chấp nhận</button></div>`;
     case 'saved': {

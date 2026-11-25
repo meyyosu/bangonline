@@ -458,20 +458,22 @@ for (const dodgeCity of [false, true]) test(`room API protects settings and pass
     }
     for (let i = 0; i < 4; i++) assert.equal((await request(i, '/api/register', { username: names[i], password: 'secret' })).status, 200);
     assert.equal((await request(0, '/api/rooms', { turnSeconds: 5 })).status, 400);
+    assert.equal((await request(0, '/api/rooms', { fasterBots: 'yes' })).status, 400);
     for (const characterChoices of [0, 5, 1.5, '2']) assert.equal((await request(0, '/api/rooms', { characterChoices })).status, 400);
     for (const characterSeconds of [-1, 5, 601, '30']) assert.equal((await request(0, '/api/rooms', { characterSeconds })).status, 400);
     assert.equal((await request(4, '/api/register', { username: 'Watcher', password: 'secret' })).status, 200);
     const max = dodgeCity ? 8 : 7;
-    const created = await request(0, '/api/rooms', { password: 'room-secret', turnSeconds: 10, dodgeCity });
+    const created = await request(0, '/api/rooms', { password: 'room-secret', turnSeconds: 10, dodgeCity, ...(dodgeCity ? { fasterBots: true } : {}) });
     assert.equal(created.status, 200);
     const code = created.body.code;
     const url = `/api/rooms/${code}`;
+    assert.equal((await view(0, code)).fasterBots, dodgeCity);
     const denied = await request(1, url + '/join', {});
     assert.equal(denied.status, 403);
     assert.equal(denied.body.passwordRequired, true);
     assert.equal((await request(1, url + '/join', { password: 'wrong' })).status, 403);
     assert.equal((await request(1, url + '/join', { password: 'room-secret' })).status, 200);
-    assert.equal((await request(1, url + '/settings', { password: '' })).status, 403);
+    assert.equal((await request(1, url + '/settings', { password: '', fasterBots: true })).status, 403);
     assert.equal((await request(1, url + '/add-bot', {})).status, 403);
     for (let i = 1; i <= max - 2; i++) {
       assert.equal((await request(0, url + '/add-bot', {})).status, 200);
@@ -504,9 +506,12 @@ for (const dodgeCity of [false, true]) test(`room API protects settings and pass
     assert.deepEqual(room.server, { features: ['endSummary', 'freeReset', 'winProb3'], stale: false });
     assert.equal(room.hasPassword, true);
     assert.equal(room.turnSeconds, 10);
+    assert.equal(room.fasterBots, dodgeCity);
     assert.ok(!JSON.stringify(room).includes('room-secret'));
     assert.ok(!JSON.stringify(room).includes('passwordHash'));
-    assert.equal((await request(0, url + '/settings', { password: 'changed', turnSeconds: 20 })).status, 200);
+    assert.equal((await request(0, url + '/settings', { fasterBots: 1 })).status, 400);
+    assert.equal((await request(0, url + '/settings', { password: 'changed', turnSeconds: 20, fasterBots: true })).status, 200);
+    assert.equal((await view(0, code)).fasterBots, true);
     assert.equal((await request(1, url + '/join', {})).status, 200);
     assert.equal((await request(2, url + '/join', { password: 'room-secret' })).status, 403);
     assert.equal((await request(2, url + '/join', { password: 'changed' })).status, 200);
@@ -526,10 +531,11 @@ for (const dodgeCity of [false, true]) test(`room API protects settings and pass
     assert.equal((await request(4, '/api/rooms', {})).status, 400);
     assert.equal((await request(0, url + '/chat', { text: 'hello' })).status, 200);
     assert.equal((await request(1, url + '/settings', { characterChoices: 4 })).status, 403);
-    assert.equal((await request(0, url + '/start', { characterChoices: 4, characterSeconds: 45 })).status, 200);
+    assert.equal((await request(0, url + '/start', { characterChoices: 4, characterSeconds: 45, fasterBots: false })).status, 200);
     room = await view(0, code);
     assert.equal(room.characterChoices, 4);
     assert.equal(room.characterSeconds, 45);
+    assert.equal(room.fasterBots, false);
     assert.equal(room.game.phase, 'character');
     assert.equal(room.timer.character, true);
     assert.ok(room.timer.deadline - room.serverNow > 40000);

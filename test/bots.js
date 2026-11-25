@@ -25,9 +25,9 @@ for (const [dodgeCity, valleyOfShadow] of [[false, false], [true, false], [false
   }
 });
 
-function targetingGame(roles) {
+function targetingGame(roles, options) {
   const names = roles.map((_, i) => `Player ${i + 1}`);
-  const game = new Game(names, { valleyOfShadow: true, rng: () => 0.4 });
+  const game = new Game(names, { valleyOfShadow: true, rng: () => 0.4, ...options });
   for (const [i, player] of game.players.entries()) {
     player.role = roles[i];
     player.char = 'Willy the Kid';
@@ -124,6 +124,111 @@ test('a Renegade removes the third player’s Ghost equipment before shooting Sh
   assert.equal(tickBots(room, 1000), true);
   assert.equal(game.pending.type, 'bang');
   assert.equal(game.players[game.pending.player], sheriff);
+});
+
+test('bots hold a lone Missed! against Slab unless a Barrel check supplies the other dodge', () => {
+  for (const suit of [null, 'S', 'H']) {
+    const { game, room } = targetingGame(['Outlaw', 'Sheriff', 'Renegade', 'Outlaw']);
+    const [slab, bot] = game.players;
+    room.bots = [bot.name];
+    slab.char = 'Slab the Killer';
+    const missed = deal(game, bot, 'Missed');
+    if (suit) {
+      const barrel = deal(game, bot, 'Barrel');
+      bot.eq.push(game.takeFromHand(bot, barrel.id));
+      game.deck.push(...game.deck.splice(game.deck.findIndex((card) => card.suit === suit), 1));
+    }
+    const hp = bot.hp;
+    const bang = deal(game, slab, 'Bang');
+    game.act(slab.name, { type: 'play', cardId: bang.id, target: bot.name });
+    assert.equal(game.pending.need, 2);
+    assert.equal(tickBots(room, 0), true);
+    if (suit) {
+      assert.equal(game.pending.kind, 'Barrel');
+      assert.equal(tickBots(room, 1000), true);
+      assert.equal(tickBots(room, 2000), true);
+    }
+    assert.equal(game.pending, null);
+    assert.equal(bot.hand.includes(missed), suit !== 'H');
+    assert.equal(bot.hp, suit === 'H' ? hp : hp - 1);
+  }
+});
+
+test('a bot can spend two dodges to avoid Slab’s Bang!', () => {
+  const { game, room } = targetingGame(['Outlaw', 'Sheriff', 'Renegade', 'Outlaw']);
+  const [slab, bot] = game.players;
+  room.bots = [bot.name];
+  slab.char = 'Slab the Killer';
+  const bang = deal(game, slab, 'Bang');
+  const misses = [deal(game, bot, 'Missed'), deal(game, bot, 'Missed')];
+  const hp = bot.hp;
+  game.act(slab.name, { type: 'play', cardId: bang.id, target: bot.name });
+  assert.equal(tickBots(room, 0), true);
+  assert.equal(game.pending.got, 1);
+  assert.equal(tickBots(room, 1000), true);
+  assert.equal(game.pending, null);
+  assert.equal(bot.hp, hp);
+  assert.ok(misses.every((card) => game.discard.includes(card)));
+});
+
+test('a Sheriff at one life plays Saloon before a shot', () => {
+  const { game, room } = targetingGame(['Sheriff', 'Outlaw', 'Renegade', 'Outlaw']);
+  const bot = game.players[0];
+  bot.hp = 1;
+  const bang = deal(game, bot, 'Bang');
+  const saloon = deal(game, bot, 'Saloon');
+  assert.equal(tickBots(room, 0), true);
+  assert.equal(bot.hp, 2);
+  assert.ok(bot.hand.includes(bang));
+  assert.ok(game.discard.includes(saloon));
+});
+
+test('a Sheriff at one life discards an attack card before a dodge', () => {
+  const { game, room } = targetingGame(['Sheriff', 'Outlaw', 'Renegade', 'Outlaw']);
+  const [bot, ...others] = game.players;
+  for (const other of others) other.char = 'Paul Regret';
+  bot.hp = 1;
+  const missed = deal(game, bot, 'Missed');
+  const bang = deal(game, bot, 'Bang');
+  assert.equal(tickBots(room, 0), true);
+  assert.deepEqual(bot.hand, [missed]);
+  assert.ok(game.discard.includes(bang));
+});
+
+test('a Sheriff at one life pays for Springfield with a spare attack card', () => {
+  const { game, room } = targetingGame(['Sheriff', 'Outlaw', 'Renegade', 'Outlaw'], { dodgeCity: true });
+  const bot = game.players[0];
+  bot.hp = 1;
+  deal(game, bot, 'Springfield');
+  const missed = deal(game, bot, 'Missed');
+  const bang = deal(game, bot, 'Bang');
+  assert.equal(tickBots(room, 0), true);
+  assert.equal(game.pending.type, 'bang');
+  assert.deepEqual(bot.hand, [missed]);
+  assert.ok(game.discard.includes(bang));
+});
+
+test('bots wait 500 ms between gameplay actions unless Faster Bots is enabled', () => {
+  for (const fasterBots of [false, true]) {
+    const { game, room } = targetingGame(['Renegade', 'Sheriff', 'Outlaw', 'Outlaw']);
+    const bot = game.players[0];
+    room.fasterBots = fasterBots;
+    room.botNextAt = null;
+    bot.hp = 1;
+    const misses = [deal(game, bot, 'Missed'), deal(game, bot, 'Missed')];
+    const first = fasterBots ? 0 : 500;
+    if (!fasterBots) {
+      assert.equal(tickBots(room, 0), false);
+      assert.equal(tickBots(room, first - 1), false);
+      assert.deepEqual(bot.hand, misses);
+    }
+    assert.equal(tickBots(room, first), true);
+    assert.equal(bot.hand.length, 1);
+    assert.equal(game.turn, 0);
+    if (!fasterBots) assert.equal(tickBots(room, first + 499), false);
+    assert.equal(tickBots(room, first + (fasterBots ? 250 : 500)), true);
+    assert.notEqual(game.turn, 0);
+  }
 });
 
 test('bots accept pauses, remain frozen, and never play a human turn', () => {
