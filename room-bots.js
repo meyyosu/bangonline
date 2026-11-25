@@ -71,7 +71,8 @@ function tickBots(room, now = Date.now()) {
     const targets = g.players.filter((q) => q.alive && q !== p);
     targets.sort((a, b) => Number(!!a.ghost) - Number(!!b.ghost) ||
       (p.role === 'Outlaw' ? Number(b.role === 'Sheriff') - Number(a.role === 'Sheriff') : 0));
-    const keepSheriffAlive = p.role === 'Renegade' && targets.length === 2 && targets.some((q) => q.role === 'Sheriff');
+    const livingTargets = targets.filter((q) => !q.ghost);
+    const keepSheriffAlive = p.role === 'Renegade' && livingTargets.length === 2 && livingTargets.some((q) => q.role === 'Sheriff');
     const avoidSheriff = keepSheriffAlive || ['Sheriff', 'Deputy'].includes(p.role);
     const enemies = targets.filter((q) => !avoidSheriff || q.role !== 'Sheriff');
     const shootable = enemies.filter((q) => !q.ghost);
@@ -95,7 +96,7 @@ function tickBots(room, now = Date.now()) {
         continue;
       }
       if (info.effect === 'discardAll') {
-        const choices = targets.filter((q) => q.hand.length || q.eq.length).map((q) => ({
+        const choices = livingTargets.filter((q) => q.hand.length || q.eq.length).map((q) => ({
           target: q.name, targetCard: targetCards(q)[0],
         }));
         actions.push({ type, cardId: c.id, ...payment, targets: choices });

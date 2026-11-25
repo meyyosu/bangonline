@@ -402,6 +402,7 @@ class Game {
   addLog(msg) { this.log.push(msg); if (this.log.length > 150) this.log.shift(); if (this.tlLog) this.tlLog.push(msg); }
   idx(name) { return this.players.findIndex((p) => p.name === name); }
   alive() { return this.players.map((p, i) => i).filter((i) => this.players[i].alive); }
+  living() { return this.alive().filter((i) => !this.players[i].ghost); }
   nextAlive(i) {
     const n = this.players.length;
     for (let k = 1; k <= n; k++) { const j = (i + k) % n; if (this.players[j].alive) return j; }
@@ -479,13 +480,18 @@ class Game {
     const equipment = this.equipmentActive(p) ? p.eq.filter((c) => CARD_INFO[c.name].defense && !p.coolingGreen.has(c.id)) : [];
     return [...hand, ...equipment];
   }
-  distance(a, b) {
+  seatDistance(a, b) {
     if (a === b) return 0;
-    const al = this.alive();
+    // Ghost có thể là người đánh hoặc mục tiêu, nhưng ghế Ghost ở giữa không tăng khoảng cách.
+    const al = this.alive().filter((i) => i === a || i === b || !this.players[i].ghost);
     const ia = al.indexOf(a), ib = al.indexOf(b);
     if (ia < 0 || ib < 0) return null;
     const d = Math.abs(ia - ib);
-    let dist = Math.min(d, al.length - d);
+    return Math.min(d, al.length - d);
+  }
+  distance(a, b) {
+    let dist = this.seatDistance(a, b);
+    if (dist === null || dist === 0) return dist;
     const pa = this.players[a], pb = this.players[b];
     if (this.equipmentActive(pb)) dist += Number(this.hasEq(pb, 'Mustang')) + pb.eq.filter((c) => CARD_INFO[c.name].effect === 'distanceOut').length;
     if (this.ability(pb) === 'Paul Regret') dist++;
@@ -596,7 +602,9 @@ class Game {
         return this.turnStartDamage(pi, 3, true);
       } else {
         let next = this.nextAlive(pi);
-        while (next !== pi && this.hasEq(this.players[next], 'Dynamite')) next = this.nextAlive(next);
+        while (next !== pi && (this.players[next].ghost || this.hasEq(this.players[next], 'Dynamite'))) {
+          next = this.nextAlive(next);
+        }
         const nx = this.players[next];
         nx.eq.push(dyn);
         if (next !== pi) this.recordSound(EQUIP_SOUNDS.Dynamite);
@@ -884,7 +892,8 @@ class Game {
     const al = this.alive().map((i) => this.players[i]);
     const sheriffAlive = al.some((p) => p.role === 'Sheriff');
     if (!sheriffAlive) {
-      this.winner = al.length === 1 && al[0].role === 'Renegade' ? 'Renegade' : 'Outlaw';
+      const survivors = al.filter((p) => !p.ghost);
+      this.winner = survivors.length === 1 && survivors[0].role === 'Renegade' ? 'Renegade' : 'Outlaw';
     } else if (!al.some((p) => p.role === 'Outlaw' || p.role === 'Renegade')) {
       this.winner = 'Sheriff';
     }
@@ -900,7 +909,7 @@ class Game {
   isWinner(p) {
     if (!this.winner) return false;
     if (this.winner === 'Sheriff') return p.role === 'Sheriff' || p.role === 'Deputy';
-    if (this.winner === 'Renegade') return p.role === 'Renegade' && p.alive;
+    if (this.winner === 'Renegade') return p.role === 'Renegade' && p.alive && !p.ghost;
     return p.role === this.winner;
   }
 
@@ -1129,7 +1138,7 @@ class Game {
     if (skill === 'Der Spot-Burst Ringer') {
       this.recordSound(PLAY_SOUNDS.Gatling);
       this.addLog(`${p.name} dùng Bang! như Gatling (${skill}).`);
-      this.queue = this.alive().filter((i) => i !== pi && !this.ignoredCard(this.players[i], cards[0]))
+      this.queue = this.living().filter((i) => i !== pi && !this.ignoredCard(this.players[i], cards[0]))
         .map((i) => ({ ...this.attackPrompt(pi, i, 1), canEscape: true, area: true }));
       return this.nextPending();
     }
@@ -1562,7 +1571,11 @@ class Game {
         this.recordPlay(pi, cost, 'discard');
       }
     };
-    const others = () => { const out = []; let j = this.nextAlive(pi); while (j !== pi) { out.push(j); j = this.nextAlive(j); } return out; };
+    const groupOrder = () => {
+      const living = this.living();
+      const start = living.findIndex((i) => i >= pi);
+      return start > 0 ? [...living.slice(start), ...living.slice(0, start)] : living;
+    };
 
     switch (info.effect || name) {
       case 'Bang':
@@ -1626,7 +1639,7 @@ class Game {
       }
       case 'Saloon': {
         use(); this.toDiscard(card);
-        for (const i of this.alive()) {
+        for (const i of this.living()) {
           const q = this.players[i];
           if (this.canHeal(q)) { q.hp++; this.stats[i].healed++; }
         }
@@ -1644,8 +1657,8 @@ class Game {
       }
       case 'General Store': {
         use(); this.toDiscard(card);
-        const order = [pi, ...others()];
-        this.pending = { type: 'store', player: pi, order, cards: this.draw(order.length) };
+        const order = groupOrder();
+        this.pending = { type: 'store', player: order[0], order, cards: this.draw(order.length) };
         // Lịch sử chọn (công khai) cho pop-up General Store
         this.storeSeq = (this.storeSeq || 0) + 1;
         this.store = { seq: this.storeSeq, by: pi, card, order: [...order], revealed: [...this.pending.cards], picks: [], t: Date.now(), t0: Date.now() };
@@ -1685,7 +1698,7 @@ class Game {
         return;
       }
       case 'discardAll': {
-        const targets = others().filter((i) => this.players[i].hand.length || this.players[i].eq.length);
+        const targets = groupOrder().filter((i) => i !== pi && (this.players[i].hand.length || this.players[i].eq.length));
         if (!Array.isArray(a.targets) || a.targets.length !== targets.length || a.targets.some((choice) => !choice || typeof choice.target !== 'string')) {
           fail('Chọn một lá cho mỗi người chơi khác có bài.');
         }
@@ -1720,7 +1733,7 @@ class Game {
       case 'Poker':
       case 'Tornado': {
         use(); this.toDiscard(card);
-        const group = name === 'Poker' ? others() : [pi, ...others()];
+        const group = groupOrder().filter((i) => name !== 'Poker' || i !== pi);
         const mass = this.startMass(pi, card, group);
         const discards = [], discardBy = [], draws = [];
         this.addLog(`${p.name} dùng ${name}.`);
@@ -1751,7 +1764,7 @@ class Game {
           if (draws.length) mass.t = Date.now();
           if (name === 'Poker') {
             mass.ace = discards.some((c) => c.rank === 'A');
-            if (p.alive && discards.length && !mass.ace) {
+            if (p.alive && !p.ghost && discards.length && !mass.ace) {
               this.pending = { type: 'poker', player: pi, ids: discards.map((c) => c.id), mass: mass.seq };
             }
           }
@@ -1764,7 +1777,7 @@ class Game {
         use(); this.toDiscard(card);
         if (name === 'Indians' || name === 'Gatling') this.stats[pi].mass++;
         this.addLog(name === 'Indians' ? `🪶 ${p.name} thả thổ dân tấn công!` : `🔫 ${p.name} dùng ${name}!`);
-        const targets = others().filter((j) => !this.ignoredCard(this.players[j], card));
+        const targets = groupOrder().filter((j) => j !== pi && !this.ignoredCard(this.players[j], card));
         const mass = this.startMass(pi, card, targets);
         this.queue = targets.map((j) => name === 'Indians'
           ? { type: 'indians', player: j, source: pi, mass: mass.seq, canEscape: true }

@@ -852,7 +852,7 @@ const canFire = (g) => !g.bangsPlayed || g.me.unlimitedBang;
 const aimPayment = (c, aimId, g, p) => c.id !== aimId && (effectiveName(c, p) === 'Bang' || g.me.lemat);
 const blueCard = (c) => ['blue', 'gun'].includes(cardInfo(c).type);
 const hasCards = (p) => p.handCount > 0 || p.eq.length > 0;
-const brawlTargets = (g) => g.players.filter((p) => p.alive && p.name !== ME && hasCards(p));
+const brawlTargets = (g) => g.players.filter((p) => p.alive && !p.ghost && p.name !== ME && hasCards(p));
 
 function effectiveName(c, me) {
   if (abilityOf(me) === 'Calamity Janet' && c.name === 'Missed') return 'Bang';

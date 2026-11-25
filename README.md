@@ -45,7 +45,7 @@ Mở [127.0.0.1:3001](http://127.0.0.1:3001) trên máy này và đăng ký tài
 
 `CHAY-GAME.bat` và `node server.js` đều tự nạp `dodge-city.json` trong thư mục game. Chủ phòng tích **Bản mở rộng: Dodge City** ở mục **Tạo phòng** để dùng 114 lá và danh sách 31 nhân vật. Phòng mặc định dùng 80 lá và 16 nhân vật. Launcher phát hiện server còn dùng dữ liệu cũ và hỏi khởi động lại.
 
-**Valley of Shadow** được nạp từ `valley-of-shadow.json` và có ô riêng trong sảnh. Bật riêng Valley of Shadow dùng 96 lá và 24 nhân vật. Bật cả hai mở rộng dùng 130 lá và 39 nhân vật. Ghost tham gia với 0 máu, có thể dùng trang bị và bị Jail. Hết lượt, Ghost tự bỏ bài trên tay cùng các lá đặt trước mặt, trừ chính lá Ghost.
+**Valley of Shadow** được nạp từ `valley-of-shadow.json` và có ô riêng trong sảnh. Bật riêng Valley of Shadow dùng 96 lá và 24 nhân vật. Bật cả hai mở rộng dùng 130 lá và 39 nhân vật. Ghost tham gia với 0 máu, có thể dùng trang bị và bị Jail. Hết lượt, Ghost tự bỏ bài trên tay cùng các lá đặt trước mặt, trừ chính lá Ghost. Dynamite và phép tính khoảng cách đều bỏ qua ghế Ghost. Ghost đứng ngoài các hiệu ứng cả bàn, kể cả khi tự đánh lá đó. Khi Sheriff bị hạ, chỉ người thực sự còn sống được tính khi xét thắng cho Renegade.
 
 Người cầm **Saved!** có thể cứu ngay khi mục tiêu đang chờ phản ứng với đòn tấn công. Lá này chặn 1 sát thương và kết thúc bước phản ứng của mục tiêu. Đòn Aim vẫn gây 1 sát thương còn lại.
 

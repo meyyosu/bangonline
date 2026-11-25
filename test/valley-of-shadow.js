@@ -128,6 +128,120 @@ test('Ghost can be jailed, loses the turn on failure and exits when its card is 
   assertConservation(game);
 });
 
+test('a safe Dynamite passes over consecutive Ghosts', () => {
+  const { game, actor, target } = setup();
+  const second = game.players[game.nextAlive(game.idx(target.name))];
+  const recipient = game.players[game.nextAlive(game.idx(second.name))];
+  for (const ghost of [target, second]) {
+    game.kill(game.idx(ghost.name), null);
+    play(game, actor, 'Ghost', ghost);
+  }
+  const dynamite = play(game, actor, 'Dynamite');
+  game.startTurn();
+  drawCheck(game, actor, 'H');
+  assert.ok(recipient.eq.includes(dynamite));
+  assert.ok(!target.eq.includes(dynamite) && !second.eq.includes(dynamite));
+  assertConservation(game);
+});
+
+test('Ghosts do not increase range between players and can still be shot at directly', () => {
+  const { game, actor, target } = setup();
+  const ghostIndex = game.idx(target.name);
+  const otherIndex = game.nextAlive(ghostIndex);
+  const other = game.players[otherIndex];
+  assert.equal(game.distance(game.turn, otherIndex), 2);
+  game.kill(ghostIndex, null);
+  play(game, actor, 'Ghost', target);
+  actor.char = 'Willy the Kid';
+  assert.equal(game.distance(otherIndex, game.turn), 1);
+  assert.equal(game.viewFor(actor.name).players[otherIndex].distance, 1);
+  assert.equal(game.distance(game.turn, ghostIndex), 1);
+  assert.equal(game.distance(ghostIndex, game.turn), 1);
+  play(game, actor, 'Bang', other);
+  assert.equal(game.pending.player, otherIndex);
+  game.act(other.name, { type: 'take' });
+  play(game, actor, 'Bang', target);
+  game.act(target.name, { type: 'take' });
+  assert.equal(target.alive, true);
+  assert.equal(target.hp, 0);
+  assertConservation(game);
+});
+
+test('General Store skips Ghosts even when a Ghost opens the store', () => {
+  const { game, actor, target } = setup();
+  const ghostIndex = game.idx(target.name);
+  game.kill(ghostIndex, null);
+  play(game, actor, 'Ghost', target);
+  target.char = 'Willy the Kid';
+  const recipient = game.nextAlive(ghostIndex);
+  advanceTo(game, target);
+  game.timeout();
+  const hand = [...target.hand];
+  play(game, target, 'General Store');
+  const view = game.viewFor(target.name);
+  assert.equal(view.pending.player, recipient);
+  assert.equal(view.store.revealed.length, game.players.length - 1);
+  assert.ok(!view.store.order.includes(ghostIndex));
+  for (let i = 0; i < game.players.length - 1; i++) game.timeout();
+  assert.deepEqual(target.hand, hand);
+  assert.equal(game.store.picks.length, game.players.length - 1);
+  assert.equal(game.pending, null);
+  assertConservation(game);
+});
+
+test('shared discards and attacks skip Ghosts without taking any cards from them', () => {
+  for (const name of ['Indians', 'Gatling', 'Howitzer', 'Tornado', 'Bandidos', 'Poker', 'Brawl']) {
+    const { game, actor, target } = setup();
+    const ghostIndex = game.idx(target.name);
+    const other = game.players[game.nextAlive(ghostIndex)];
+    game.kill(ghostIndex, null);
+    const anchor = play(game, actor, 'Ghost', target);
+    const privateCard = deal(game, target, 'Escape');
+    const otherCard = deal(game, other, 'Missed');
+    const costCardId = name === 'Brawl' ? deal(game, actor, 'Bang').id : undefined;
+    if (name === 'Howitzer') {
+      const howitzer = deal(game, actor, name);
+      actor.eq.push(game.takeFromHand(actor, howitzer.id));
+      game.act(actor.name, { type: 'activate', cardId: howitzer.id });
+    } else {
+      play(game, actor, name, undefined, { costCardId, targets: [{ target: other.name, targetCard: 'hand' }] });
+    }
+    if (name === 'Brawl') assert.ok(game.discard.includes(otherCard));
+    else assert.ok(!game.viewFor(null).mass.targets.some(({ i }) => i === ghostIndex));
+    for (let i = 0; game.pending && i < game.players.length + 1; i++) {
+      assert.notEqual(game.pending.player, ghostIndex, name);
+      game.timeout();
+    }
+    assert.equal(game.pending, null, name);
+    assert.deepEqual(target.hand, [privateCard], name);
+    assert.deepEqual(target.eq, [anchor], name);
+    assertConservation(game);
+  }
+});
+
+test('a Ghost who plays Tornado, Bandidos or Poker has no discard, draw or pickup of their own', () => {
+  for (const name of ['Tornado', 'Bandidos', 'Poker']) {
+    const { game, actor, target } = setup();
+    const ghostIndex = game.idx(target.name);
+    game.kill(ghostIndex, null);
+    play(game, actor, 'Ghost', target);
+    target.char = 'Willy the Kid';
+    advanceTo(game, target);
+    game.timeout();
+    const next = game.players[game.nextAlive(ghostIndex)];
+    const beer = deal(game, next, 'Beer');
+    const hand = [...target.hand];
+    play(game, target, name);
+    assert.equal(game.pending.player, game.idx(next.name), name);
+    assert.ok(!game.viewFor(null).mass.targets.some(({ i }) => i === ghostIndex));
+    game.act(next.name, { type: 'valleyDiscard', cardIds: [beer.id] });
+    for (let i = 0; game.pending && i < game.players.length; i++) game.timeout();
+    assert.equal(game.pending, null, name);
+    assert.deepEqual(target.hand, hand, name);
+    assertConservation(game);
+  }
+});
+
 test('Saved! played by a third player ends the Bang response immediately and logs the rescue', () => {
   const { game, actor, target } = setup();
   const saver = game.players.find((p) => p !== actor && p !== target);
