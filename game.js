@@ -1981,13 +1981,13 @@ class Game {
     const pend = this.pending;
     let pending = null;
     if (pend) {
-      const privateReaction = pend.type === 'avoid' && pend.player !== me;
+      const privateReaction = ['avoid', 'saved'].includes(pend.type) && pend.player !== me;
       pending = { type: pend.type, player: privateReaction ? null : pend.player };
       if (pend.type === 'character' && pend.player === me) pending.options = [...pend.options];
       if (pend.type === 'bang') Object.assign(pending, { source: pend.source, need: pend.need, got: pend.got, barrels: pend.barrels, amount: pend.amount ?? 1 });
       if (pend.type === 'bang' && pend.player === me) pending.responseCardIds = this.dodgeCards(this.players[me]).map((c) => c.id);
       if (pend.canEscape && pend.player === me) pending.escapeIds = this.escapeCards(this.players[me]).map((c) => c.id);
-      if (pend.type === 'saved') Object.assign(pending, { target: pend.target, amount: pend.amount });
+      if (pend.type === 'saved' && !privateReaction) Object.assign(pending, { target: pend.target, amount: pend.amount });
       if (!privateReaction && ['avoid', 'valleyDiscard'].includes(pend.type)) Object.assign(pending, { name: pend.name, count: pend.count });
       if (pend.type === 'poker' && pend.player === me) pending.cards = this.discard.filter((c) => pend.ids.includes(c.id));
       if (meAlive && this.hasSaved(this.players[me])) {

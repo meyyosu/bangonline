@@ -281,7 +281,7 @@ function timerField(value = 60) {
 }
 function fasterBotsField(checked = false) {
   return `<label><input type="checkbox" name="fasterBots" ${checked ? 'checked' : ''}> Faster Bots</label>
-    <p class="muted">Bỏ khoảng chờ 3 giây giữa các hành động của bot.</p>`;
+    <p class="muted">Bỏ khoảng chờ 2 giây giữa các hành động của bot.</p>`;
 }
 function characterFields(choices = 3, seconds = 60) {
   return `<label for="characterChoices">Số nhân vật để chọn đầu game</label>
@@ -1612,7 +1612,7 @@ function promptHTML(g, meIdx, meP) {
       return `<h4>${esc(pend.name)} · Hiệu ứng nhắm vào bạn</h4><div class="row">${escapeButtons()}
         <button class="btn secondary" data-act="take">Chấp nhận</button></div>`;
     case 'saved': {
-      if (!mine) return `<h4>${P(pend.player)} có thể cứu ${P(pend.target)}…</h4>`;
+      if (!mine) return '<h4>Đang chờ phản hồi…</h4>';
       const saved = g.me.hand.find((c) => c.name === 'Saved!');
       return `<h4>Saved! · Ngăn ${P(pend.target)} mất 1 máu</h4><div class="row">
         <button class="btn" data-act="saved" data-card-id="${saved?.id}" data-from="deck">Cứu và rút từ chồng bài</button>

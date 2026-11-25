@@ -72,7 +72,7 @@ function roomView(r, user) {
     serverNow: Date.now(),
     server: { features: SERVER_FEATURES, stale: codeChanged },
     pause: pauseView(r),
-    timer: r.clock ? { deadline: r.clock.deadline, player: game?.pending?.type === 'avoid' ? game.pending.player : r.clock.player, response: !!r.clock.pending, character: !!r.clock.character, draw: !!r.clock.draw, seconds: r.clock.seconds } : null,
+    timer: r.clock ? { deadline: r.clock.deadline, player: game?.pending?.player === null ? null : r.clock.player, response: !!r.clock.pending, character: !!r.clock.character, draw: !!r.clock.draw, seconds: r.clock.seconds } : null,
   };
 }
 

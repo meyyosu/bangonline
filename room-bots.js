@@ -27,7 +27,7 @@ function tickBots(room, now = Date.now()) {
   if (room.pause?.frozenAt != null) return changed;
   const p = g.players[g.pending ? g.pending.player : g.turn];
   if (!room.bots?.includes(p?.name)) { room.botNextAt = null; return changed; }
-  const delay = room.fasterBots ? 0 : 3000;
+  const delay = room.fasterBots ? 0 : 2000;
   if (room.botNextAt == null) room.botNextAt = now + delay;
   if (now < room.botNextAt) return changed;
   room.botNextAt = now + delay;
