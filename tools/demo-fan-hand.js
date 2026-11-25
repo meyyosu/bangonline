@@ -21,6 +21,11 @@ function makeView(n, handSize) {
       const idx = game.deck.findIndex((c) => wanted.includes(c.name) && !p.eq.some((e) => e.name === c.name || (CARD_INFO[e.name].type === 'gun' && CARD_INFO[c.name].type === 'gun')));
       if (idx >= 0) p.eq.push(game.deck.splice(idx, 1)[0]);
     }
+    // Có cả trang bị xanh lá và xanh dương để xem màu viền trên bàn.
+    if (i === 1) {
+      const idx = game.deck.findIndex((c) => CARD_INFO[c.name].type === 'green');
+      if (idx >= 0) p.eq.push({ ...game.deck.splice(idx, 1)[0], ready: true });
+    }
   });
   const me = game.players[game.turn];
   while (me.hand.length < handSize && game.deck.length) me.hand.push(game.deck.pop());

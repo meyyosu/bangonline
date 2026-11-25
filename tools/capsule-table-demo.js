@@ -5,6 +5,14 @@ function demoShow(n) {
   clearInterval(demoTimer);
   demoN = n;
   const view = structuredClone(demoViews[n]);
+  if (new URLSearchParams(location.search).get('equipment') === '7') {
+    view.players.forEach((player, index) => {
+      player.eq = ['Volcanic', 'Barrel', 'Mustang', 'Scope', 'Jail', 'Dynamite', 'Hideout']
+        .map((name, i) => ({ id: 99000 + index * 10 + i, name, suit: 'S', rank: 'K' }));
+    });
+    view.discardRecent = ['Bang', 'Missed', 'Beer'].map((name, i) => ({ id: 99100 + i, name, suit: 'H', rank: '7' }));
+    view.discardTop = view.discardRecent[view.discardRecent.length - 1];
+  }
   ME = view.players[view.me.index].name;
   ROOM = {
     code: 'DEMO', name: 'Saloon miền Tây', host: ME, game: view, online: view.players.map((p) => p.name),
@@ -82,6 +90,7 @@ function demoPopup(kind) {
   }, 900);
 }
 document.querySelector('.room-head > .row').appendChild(demoBar);
+
 demoBar.onclick = (e) => {
   const b = e.target.closest('button');
   if (!b) return;
