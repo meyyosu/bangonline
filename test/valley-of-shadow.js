@@ -72,6 +72,16 @@ test('Valley appends all 16 ranked copies and gates the eight characters by room
   assert.equal(CARD_INFO.Bible.type, 'green');
 });
 
+test('Annie Versary is an optional four-life character who does not change the deck', () => {
+  const base = new Game(names, { characterChoices: 3 });
+  const promo = new Game(names, { characterChoices: 3, annieVersary: true });
+  assert.ok(!base.characterPool.includes('Annie Versary'));
+  assert.equal(CHAR_INFO['Annie Versary'].hp, 4);
+  assert.equal(promo.characterPool.filter((name) => name === 'Annie Versary').length, 1);
+  assert.equal(promo.characterPool.length, base.characterPool.length + 1);
+  assert.deepEqual(promo.fullDeck, base.fullDeck);
+});
+
 test('Ghost can equip a gun plus blue and green cards and clears them at end of turn', () => {
   const { game, actor, target } = setup();
   const ti = game.idx(target.name);
@@ -219,6 +229,31 @@ test('shared discards and attacks skip Ghosts without taking any cards from them
   }
 });
 
+test('Brawl reveals Escape only after it is played and waits for Henry Block before reporting his discard', () => {
+  const { game, actor, target } = setup();
+  const henry = game.players[game.nextAlive(game.idx(target.name))];
+  henry.char = 'Henry Block';
+  const escape = deal(game, target, 'Escape');
+  const held = deal(game, henry, 'Beer');
+  const missed = deal(game, actor, 'Missed');
+  const cost = deal(game, actor, 'Bang');
+  play(game, actor, 'Brawl', undefined, {
+    costCardId: cost.id,
+    targets: [target, henry].map((p) => ({ target: p.name, targetCard: 'hand' })),
+  });
+  assert.equal(game.viewFor(null).pending.player, null);
+  assert.ok(game.viewFor(null).mass.targets.every(({ res }) => res === null));
+  game.act(target.name, { type: 'escape', cardId: escape.id });
+  assert.equal(game.pending.type, 'bang');
+  assert.deepEqual(game.viewFor(null).mass.targets.map(({ res }) => res), [{ card: escape }, null]);
+  game.act(actor.name, { type: 'respond', cardId: missed.id });
+  const { mass } = game.viewFor(null);
+  assert.deepEqual(mass.targets[1].res, { discarded: [held] });
+  assert.ok(mass.targets[1].revealAt - mass.targets[0].revealAt >= 500);
+  assert.equal(game.pending, null);
+  assertConservation(game);
+});
+
 test('a Ghost who plays Tornado, Bandidos or Poker has no discard, draw or pickup of their own', () => {
   for (const name of ['Tornado', 'Bandidos', 'Poker']) {
     const { game, actor, target } = setup();
@@ -269,6 +304,29 @@ test('Saved! played by a third player ends the Bang response immediately and log
   assert.ok(game.timeline.at(-1).log.includes(message));
   assert.throws(() => game.act(target.name, { type: 'respond', cardId: missed.id }), /Chưa đến lượt/);
   assertConservation(game);
+});
+
+test('Aim can be chosen first and shares the Bang limit in either play order', () => {
+  for (const aimFirst of [true, false]) {
+    const { game, actor, target } = setup();
+    const aim = deal(game, actor, 'Aim');
+    const payment = deal(game, actor, 'Bang');
+    const bang = deal(game, actor, 'Bang');
+    const aimed = { type: 'play', cardId: aim.id, bangCardId: payment.id, target: target.name };
+    const normal = { type: 'play', cardId: bang.id, target: target.name };
+    if (aimFirst) {
+      assert.throws(() => game.act(actor.name, { ...aimed, bangCardId: aim.id }), /Chọn một lá Bang!/);
+      assert.equal(game.bangsPlayed, 0);
+    }
+    game.act(actor.name, aimFirst ? aimed : normal);
+    assert.equal(game.bangsPlayed, 1);
+    assert.deepEqual(actor.hand, aimFirst ? [bang] : [aim, payment]);
+    const missed = deal(game, target, 'Missed');
+    game.act(target.name, { type: 'respond', cardId: missed.id });
+    assert.throws(() => game.act(actor.name, aimFirst ? normal : aimed), /Mỗi lượt chỉ được dùng 1 Bang!/);
+    assert.deepEqual(actor.hand, aimFirst ? [bang] : [aim, payment]);
+    assertConservation(game);
+  }
 });
 
 test('Saved! can interrupt the Barrel check and Aim still deals one remaining damage', () => {
@@ -352,16 +410,19 @@ test('LeMat conversions count as Bang and a Shotgun hit collects Bounty and forc
   const { game, actor, target } = setup();
   const targetCard = deal(game, target, 'Beer');
   play(game, actor, 'LeMat');
+  const bounty = play(game, actor, 'Bounty', target);
+  assert.deepEqual(game.viewFor(null).sounds.at(-1).files, ['bounty']);
   play(game, actor, 'Missed', target, { asBang: true });
   assert.deepEqual(game.viewFor(null).sounds.at(-1).files, ['bangsound_lemat']);
   assert.equal(game.bangsPlayed, 1);
   assert.equal(game.pending.trueBang, true);
+  assert.ok(!game.viewFor(null).sounds.some((cue) => cue.files.includes('bounty_earned')));
+  const reward = game.deck.at(-1);
   game.act(target.name, { type: 'take' });
+  assert.deepEqual(actor.hand, [reward]);
+  assert.ok(target.eq.includes(bounty));
   game.bangsPlayed = 0;
   play(game, actor, 'Shotgun');
-  play(game, actor, 'Bounty', target);
-  assert.deepEqual(game.viewFor(null).sounds.at(-1).files, ['bounty']);
-  assert.ok(!game.viewFor(null).sounds.some((cue) => cue.files.includes('bounty_earned')));
   play(game, actor, 'Bang', target);
   assert.deepEqual(game.viewFor(null).sounds.at(-1).files, ['bangsound_shotgun']);
   const before = actor.hand.length;
@@ -371,7 +432,120 @@ test('LeMat conversions count as Bang and a Shotgun hit collects Bounty and forc
   assert.equal(game.pending.name, 'Shotgun');
   game.act(target.name, { type: 'valleyDiscard', cardIds: [targetCard.id] });
   assert.equal(target.hand.length, 0);
+  assert.ok(target.eq.includes(bounty));
   assertConservation(game);
+});
+
+test('Calamity Janet collects Bounty when playing Missed as Bang and can take the Bounty with Panic', () => {
+  const { game, actor, target } = setup();
+  actor.char = 'Calamity Janet';
+  const bounty = play(game, actor, 'Bounty', target);
+  play(game, actor, 'Missed', target);
+  const reward = game.deck.at(-1);
+  game.act(target.name, { type: 'take' });
+  assert.deepEqual(actor.hand, [reward]);
+  assert.ok(target.eq.includes(bounty));
+  play(game, actor, 'Panic', target, { targetCard: bounty.id });
+  assert.ok(actor.hand.includes(bounty));
+  assert.ok(!target.eq.includes(bounty));
+  assertConservation(game);
+});
+
+test('a card Annie plays as Bang uses her regular shot and earns Bounty only if it hits', () => {
+  for (const hits of [true, false]) {
+    const { game, actor, target } = setup();
+    actor.char = 'Annie Versary';
+    const bounty = play(game, actor, 'Bounty', target);
+    const convertible = deal(game, actor, 'Stagecoach');
+    const other = deal(game, actor, 'Missed');
+    const dodge = hits ? null : deal(game, target, 'Missed');
+    game.act(actor.name, { type: 'play', cardId: convertible.id, target: target.name, asBang: true });
+    assert.ok(game.discard.includes(convertible));
+    assert.equal(game.pending.countsTowardBangLimit, true);
+    assert.equal(game.bangsPlayed, 1);
+    assert.deepEqual(actor.hand, [other]);
+    const reward = game.deck.at(-1);
+    game.act(target.name, dodge ? { type: 'respond', cardId: dodge.id } : { type: 'take' });
+    assert.deepEqual(actor.hand, hits ? [other, reward] : [other]);
+    assert.equal(game.viewFor(null).sounds.filter((cue) => cue.files.includes('bounty_earned')).length, Number(hits));
+    assert.ok(target.eq.includes(bounty));
+    assert.throws(() => game.act(actor.name, { type: 'play', cardId: other.id, target: target.name, asBang: true }), /Mỗi lượt chỉ được dùng 1 Bang!/);
+    assertConservation(game);
+  }
+});
+
+test('Annie can answer Duel or Indians with any hand card without firing a shot', () => {
+  for (const attack of ['Duel', 'Indians']) {
+    const { game, actor, target } = setup();
+    target.char = 'Annie Versary';
+    const response = deal(game, target, 'Mustang');
+    const hp = target.hp;
+    play(game, actor, attack, target);
+    assert.deepEqual(game.viewFor(target.name).pending.responseCardIds, [response.id]);
+    assert.equal(game.viewFor(null).pending.responseCardIds, undefined);
+    game.act(target.name, { type: 'respond', cardId: response.id });
+    assert.equal(target.hp, hp);
+    assert.equal(game.bangsPlayed, 0);
+    assert.ok(game.discard.includes(response));
+    assertConservation(game);
+  }
+});
+
+test('Bounty rejects self-placement and pays the shooter on a final hit', () => {
+  const { game, actor: sheriff, target: shooter } = setup();
+  game.turn = game.idx(shooter.name);
+  const bounty = deal(game, shooter, 'Bounty');
+  const place = { type: 'play', cardId: bounty.id, target: shooter.name };
+  assert.throws(() => game.act(shooter.name, place), /Không thể tự đặt Bounty/);
+  assert.deepEqual(shooter.hand, [bounty]);
+  assert.deepEqual(shooter.eq, []);
+  game.act(shooter.name, { ...place, target: sheriff.name });
+  assert.deepEqual(sheriff.eq, [bounty]);
+  sheriff.hp = 1;
+  play(game, shooter, 'Bang', sheriff);
+  const reward = game.deck.at(-1);
+  game.act(sheriff.name, { type: 'take' });
+  assert.equal(sheriff.alive, false);
+  assert.ok(game.winner);
+  assert.deepEqual(shooter.hand, [reward]);
+  assert.ok(game.discard.includes(bounty));
+  assert.equal(game.viewFor(null).sounds.filter((cue) => cue.files.includes('bounty_earned')).length, 1);
+  assertConservation(game);
+});
+
+test('Bounty skips extra shots, non-card Bang effects, prevention, and attacks by Belle Star', () => {
+  for (const name of ['Punch', 'Gatling', 'Fanning', 'Doc Holyday', 'Black Flower', 'Missed', 'Saved!', 'Belle Star']) {
+    const { game, actor, target } = setup();
+    if (['Belle Star', 'Doc Holyday', 'Black Flower'].includes(name)) actor.char = name;
+    const bounty = play(game, actor, 'Bounty', target);
+    if (name === 'Doc Holyday') {
+      const cards = [deal(game, actor, 'Bang'), deal(game, actor, 'Missed')];
+      game.act(actor.name, { type: 'skill', cardIds: cards.map((c) => c.id), target: target.name });
+    } else if (name === 'Black Flower') {
+      const club = deal(game, actor, 'Cat Balou', 'C');
+      game.act(actor.name, { type: 'skill', cardIds: [club.id], target: target.name });
+      assert.equal(game.bangsPlayed, 0);
+    } else if (name === 'Fanning') {
+      const [second] = game.fanningTargets(game.turn, game.idx(target.name));
+      play(game, actor, name, target, { secondTarget: game.players[second].name });
+    } else {
+      play(game, actor, ['Punch', 'Gatling'].includes(name) ? name : 'Bang', target);
+    }
+    const hp = target.hp;
+    if (name === 'Saved!') {
+      const saver = game.players.find((p) => p !== actor && p !== target);
+      const saved = deal(game, saver, name);
+      game.act(saver.name, { type: 'saved', cardId: saved.id, target: target.name, from: 'deck' });
+    } else if (name === 'Missed') {
+      const defense = deal(game, target, name);
+      game.act(target.name, { type: 'respond', cardId: defense.id });
+    } else game.act(target.name, { type: 'take' });
+    assert.equal(target.hp, hp - (['Missed', 'Saved!'].includes(name) ? 0 : 1), name);
+    assert.ok(target.eq.includes(bounty), name);
+    assert.equal(actor.hand.length, 0, name);
+    assert.ok(!game.viewFor(null).sounds.some((cue) => cue.files.includes('bounty_earned')), name);
+    assertConservation(game);
+  }
 });
 
 test('Fanning still attacks the second target after Escape and Backfire retaliates once', () => {

@@ -168,8 +168,20 @@ test('Brawl validates all choices before consuming cards and skips a player with
   const soundBefore = g.soundSeq;
   assert.throws(() => g.act(p.name, { ...action, targets: [targets[0], ...targets.slice(0, -1)] }), GameError);
   assert.deepEqual(g.players.map((q) => q.hand.length + q.eq.length), before);
-  g.act(p.name, action);
   assert.equal(g.soundSeq, soundBefore);
+  g.act(p.name, action);
+  const view = g.viewFor(null);
+  assert.deepEqual(view.sounds.filter((cue) => cue.seq > soundBefore).flatMap((cue) => cue.files), ['brawl']);
+  assert.equal(view.mass.card.id, brawl.id);
+  assert.deepEqual(view.mass.targets[0].res, { discarded: [barrel] });
+  assert.equal(view.mass.targets.length, targets.length);
+  let previousReveal = view.mass.t0;
+  for (const { i, res, revealAt } of view.mass.targets) {
+    assert.notEqual(g.players[i], empty);
+    assert.ok(g.discard.includes(res.discarded[0]));
+    assert.ok(revealAt - previousReveal >= 500);
+    previousReveal = revealAt;
+  }
   assert.ok(g.discard.includes(barrel));
   assert.deepEqual(g.players.map((q, i) => before[i] - q.hand.length - q.eq.length), g.players.map((q) => q === p ? 2 : q === empty ? 0 : 1));
   assertDeck(g);

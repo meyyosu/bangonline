@@ -47,21 +47,24 @@ test('Store, Indians, Gatling and equipment publish main sound cues', () => {
   }
 });
 
-test('Aim uses the shooter’s voice only when the shot takes two life points', () => {
-  for (const { shooter, victim, hp, response, clip } of [
-    { shooter: 'Black Flower', victim: 'Willy the Kid', hp: 2, response: 'take', clip: 'aim_success_f' },
-    { shooter: 'Willy the Kid', victim: 'Evelyn Shebang', hp: 4, response: 'take', clip: 'aim_success_m' },
-    { shooter: 'Evelyn Shebang', victim: 'Willy the Kid', hp: 1, response: 'take' },
-    { shooter: 'Willy the Kid', victim: 'Evelyn Shebang', hp: 4, response: 'respond' },
-    { shooter: 'Evelyn Shebang', victim: 'Willy the Kid', hp: 4, response: 'saved' },
+test('Aim uses the shooter’s voice for a kill or two life points lost', () => {
+  for (const { shooter, hp, response, beers = 0, dead = false, clip } of [
+    { shooter: 'Black Flower', hp: 2, response: 'take', dead: true, clip: 'aim_success_f' },
+    { shooter: 'Willy the Kid', hp: 4, response: 'take', clip: 'aim_success_m' },
+    { shooter: 'Evelyn Shebang', hp: 1, response: 'take', dead: true, clip: 'aim_success_f' },
+    { shooter: 'Willy the Kid', hp: 1, response: 'saved', dead: true, clip: 'aim_success_m' },
+    { shooter: 'Willy the Kid', hp: 2, response: 'take', beers: 1, clip: 'aim_success_m' },
+    { shooter: 'Evelyn Shebang', hp: 1, response: 'take', beers: 2 },
+    { shooter: 'Willy the Kid', hp: 4, response: 'respond' },
+    { shooter: 'Evelyn Shebang', hp: 4, response: 'saved' },
   ]) {
     const g = setup({ valleyOfShadow: true });
     for (const p of g.players) { g.toDiscard(...p.hand); p.hand = []; }
     const p = g.players[g.turn], target = g.players[g.nextAlive(g.turn)];
     const saver = g.players.find((player) => player !== p && player !== target);
     p.char = shooter;
-    target.char = victim;
     target.hp = hp;
+    for (let i = 0; i < beers; i++) give(g, target, 'Beer');
     const aim = give(g, p, 'Aim'), bang = give(g, p, 'Bang');
     const playedAt = g.soundSeq;
     g.act(p.name, { type: 'play', cardId: aim.id, target: target.name, bangCardId: bang.id });
@@ -73,6 +76,7 @@ test('Aim uses the shooter’s voice only when the shot takes two life points', 
       const missed = response === 'respond' ? give(g, target, 'Missed') : null;
       g.act(target.name, { type: response, cardId: missed?.id });
     }
+    assert.equal(target.alive, !dead);
     const hitCues = g.viewFor(null).sounds.flatMap((cue) => cue.files).filter((file) => file.startsWith('aim_success_'));
     assert.deepEqual(hitCues, clip ? [clip] : []);
   }

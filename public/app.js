@@ -311,6 +311,7 @@ function showLobby() {
           <label><input type="checkbox" name="dodgeCity" aria-describedby="dodgeCityDetails" ${(META.dodgeCityCardCount ?? META.greenCardCount) ? '' : 'disabled'}> Bản mở rộng: Dodge City</label>
           <p class="muted" id="dodgeCityDetails">${(META.dodgeCityCardCount ?? META.greenCardCount) ? `Thêm ${META.dodgeCityCardCount ?? META.greenCardCount} lá Dodge City vào bộ bài của phòng.` : 'Máy chủ chưa nạp dữ liệu Dodge City.'}</p>
           <label><input type="checkbox" name="valleyOfShadow" ${META.valleyOfShadowCardCount ? '' : 'disabled'}> Bản mở rộng: Valley of Shadow</label>
+          <label><input type="checkbox" name="annieVersary" ${META.chars?.['Annie Versary'] ? '' : 'disabled'}> Nhân vật thưởng: Annie Versary</label>
           <button class="btn" style="width:100%;margin-top:10px">🎲 Tạo phòng mới</button>
         </form>
         <h2 style="margin-top:22px">Vào bằng mã</h2>
@@ -328,7 +329,7 @@ function showLobby() {
   $('#createForm').onsubmit = run(async (e) => {
     e.preventDefault();
     const f = new FormData(e.target);
-    const r = await api('/api/rooms', { name: f.get('name'), password: f.get('password'), turnSeconds: Number(f.get('turnSeconds')), characterChoices: Number(f.get('characterChoices')), characterSeconds: Number(f.get('characterSeconds')), dodgeCity: f.has('dodgeCity'), valleyOfShadow: f.has('valleyOfShadow'), fasterBots: f.has('fasterBots') });
+    const r = await api('/api/rooms', { name: f.get('name'), password: f.get('password'), turnSeconds: Number(f.get('turnSeconds')), characterChoices: Number(f.get('characterChoices')), characterSeconds: Number(f.get('characterSeconds')), dodgeCity: f.has('dodgeCity'), valleyOfShadow: f.has('valleyOfShadow'), annieVersary: f.has('annieVersary'), fasterBots: f.has('fasterBots') });
     enterRoom(r.code);
   });
   $('#joinForm').onsubmit = run(async (e) => {
@@ -555,6 +556,7 @@ function renderWaiting() {
         <h3>Cài đặt phòng</h3>
         ${r.dodgeCity ? '<p>Bản mở rộng: Dodge City</p>' : ''}
         ${r.valleyOfShadow ? '<p>Bản mở rộng: Valley of Shadow</p>' : ''}
+        ${r.annieVersary ? '<p>Nhân vật thưởng: Annie Versary</p>' : ''}
         <p>${r.hasPassword ? '🔒 Có mật khẩu' : '🔓 Không có mật khẩu'} · ${r.turnSeconds ? r.turnSeconds + ' giây/lượt' : 'Không giới hạn thời gian'}</p>
         <p>Chọn 1 trong ${r.characterChoices} nhân vật · ${r.characterSeconds ? r.characterSeconds + ' giây/người để chọn' : 'Không giới hạn giờ chọn nhân vật'}</p>
         ${!isHost && r.fasterBots ? '<p>Faster Bots</p>' : ''}
@@ -759,6 +761,7 @@ const CHAR_ICON = {
 const charSlug = (name) => name.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
 // Chiều rộng, chiều cao ảnh gốc và vùng vuông [x, y, cạnh] quanh khuôn mặt.
 const AVATAR_CROPS = {
+  'annie-versary': [309, 466, 100, 62, 124],
   'black-flower': [194, 310, 45, 51, 90],
   'colorado-bill': [218, 316, 48, 56, 88],
   'der-spot-burst-ringer': [204, 319, 43, 56, 92],
@@ -980,7 +983,8 @@ const docTarget = (p, g) => p.alive && p.name !== ME && p.distance <= g.me.range
 const targetedSkill = (skill) => ['Doc Holyday', 'Black Flower'].includes(skill);
 const skillCardCount = (skill) => skill === 'Doc Holyday' ? 2 : 1;
 const canFire = (g) => !g.bangsPlayed || g.me.unlimitedBang;
-const aimPayment = (c, aimId, g, p) => c.id !== aimId && (effectiveName(c, p) === 'Bang' || g.me.lemat);
+const bangConversion = (g, p) => abilityOf(p) === 'Annie Versary' ? 'Annie Versary' : g.me.lemat ? 'LeMat' : null;
+const aimPayment = (c, aimId, g, p) => c.id !== aimId && (effectiveName(c, p) === 'Bang' || bangConversion(g, p));
 const blueCard = (c) => ['blue', 'gun'].includes(cardInfo(c).type);
 const hasCards = (p) => p.handCount > 0 || p.eq.length > 0;
 const brawlTargets = (g) => g.players.filter((p) => p.alive && !p.ghost && p.name !== ME && hasCards(p));
@@ -1011,7 +1015,7 @@ function targetFilter(card, g, meP) {
     case 'Duel': return others;
     case 'Jail': return (p) => others(p) && p.role !== 'Sheriff' && !p.eq.some((c) => c.name === 'Jail');
     case 'Ghost': return (p) => p.revivable;
-    case 'Bounty':
+    case 'Bounty': return (p) => others(p) && !p.eq.some((c) => c.name === name);
     case 'Rattlesnake': return (p) => p.alive && !p.eq.some((c) => c.name === name);
     default: return null;
   }
@@ -1108,7 +1112,7 @@ function renderGame() {
 
   if (!g.me) { ui.mode = null; ui.selected = []; }
   // validate mode
-  if (['target', 'cost', 'brawl', 'aim', 'lemat', 'fanning'].includes(ui.mode?.kind) && !canPlay) ui.mode = null;
+  if (['target', 'cost', 'brawl', 'aim', 'asBang', 'fanning'].includes(ui.mode?.kind) && !canPlay) ui.mode = null;
   if (ui.mode?.costCardId && !g.me.hand.some((c) => c.id === ui.mode.costCardId)) ui.mode = null;
   if (['cost', 'brawl', 'aim', 'fanning'].includes(ui.mode?.kind) && !g.me.hand.some((c) => c.id === ui.mode.cardId)) ui.mode = null;
   if (ui.mode && ui.mode.kind !== 'target') {
@@ -1317,9 +1321,11 @@ PHONE_MQ.addEventListener('change', () => { if (ROOM?.game) renderGame(); });
 // ---------- pop-up đánh chung ----------
 // Hiện giữa bàn: lá đã đánh ➜ mỗi người bị nhắm một cột (tên + cách phản hồi). Xong hết thì thu gọn rồi tự ẩn.
 const MASS_MINI_MS = 2500, MASS_HIDE_MS = 5000;
-const massDone = (g, m) => !(m.card.name === 'Poker' && g.pending?.type === 'poker') &&
+const massClock = () => Date.now() + (ui.serverOffset || 0);
+const massDone = (g, m, now = massClock()) => !(m.revealAt > now) &&
+  !(m.card.name === 'Poker' && g.pending?.type === 'poker') &&
   m.targets.every((t) => t.res || !g.players[t.i].alive);
-function massResHTML(r, dead, flip, picks) {
+function massResHTML(r, dead, flip, picks, pokerChoices) {
   const f = flip ? ' flip' : '';
   if (r?.card) return cardHTML(r.card, 'mp-res ok' + f);
   if (r?.faceDown) return '<div class="card-back mp-facedown">Đã chọn</div>';
@@ -1327,12 +1333,15 @@ function massResHTML(r, dead, flip, picks) {
     return `<div class="mp-res mp-batch${f}">
       ${r.discarded.map((c) => {
         const picked = picks?.includes(c.id);
-        return `<div class="mp-discard-row">${cardHTML(c, 'mp-discard')}${picked ? '<span class="mp-picked">Đã lấy</span>' : ''}</div>`;
+        const selected = pokerChoices?.get(c.id) ?? null;
+        const cls = selected === null ? 'mp-discard' : 'mp-discard mp-poker-card';
+        return `<div class="mp-discard-row">${cardHTML(c, cls, selected)}${picked ? '<span class="mp-picked">Đã lấy</span>' : ''}</div>`;
       }).join('') || '<span>Không bỏ lá</span>'}
       ${r.drawn != null ? `<span class="mp-drawn">Rút ${r.drawn} lá</span>` : ''}
     </div>`;
   }
   if (r?.immune) return '<div class="mp-res">Miễn nhiễm</div>';
+  if (r?.skipped) return '<div class="mp-res">Bỏ qua</div>';
   if (r?.saved) return `<div class="mp-res ok${f}"><div class="ic">🛟</div>Saved!</div>`;
   if (r?.ghost) return `<div class="mp-res ok${f}"><div class="ic">👻</div>Ghost</div>`;
   if (r?.barrel) return `<div class="mp-res barrel ok${f}"><div class="ic">🛢️</div>Barrel<br>né được</div>`;
@@ -1347,6 +1356,7 @@ function massSum(r, dead) {
     return r.drawn != null ? `−${n}/+${r.drawn} lá` : `Bỏ ${n} lá`;
   }
   if (r?.immune) return 'Miễn nhiễm';
+  if (r?.skipped) return 'Bỏ qua';
   return r?.card ? cardInfo(r.card).icon : r?.saved ? '🛟' : r?.ghost ? '👻' : r?.barrel ? '🛢️' : r?.dead || dead ? '💀' : r?.hurt ? `−${r.hurt}❤` : '…';
 }
 
@@ -1354,15 +1364,32 @@ function renderMassPopup(g) {
   $('.mass-pop:not(.store-pop):not(.out)')?.remove();
   const m = g.mass, arena = $('.arena');
   if (!m || !arena || g.winner || centerPopupKind(g) !== 'mass') return;
+  const now = massClock();
+  const done = massDone(g, m, now);
+  const poker = m.card.name === 'Poker' && g.pending?.type === 'poker';
+  const myPick = poker && g.pending.player === g.me?.index;
   let st = ui.mass;
   if (st?.key !== `${m.seq}:${m.t0}`) {
     // Vào phòng khi lá đánh chung đã xong từ trước thì không hiện lại
-    const age = Date.now() + (ui.serverOffset || 0) - m.t;
     clearTimeout(st?.timer);
-    st = ui.mass = { key: `${m.seq}:${m.t0}`, seen: new Set(), mini: false, hidden: massDone(g, m) && age > MASS_MINI_MS, enter: true };
+    clearTimeout(st?.revealTimer);
+    const age = now - (m.revealAt ?? m.t);
+    st = ui.mass = { key: `${m.seq}:${m.t0}`, seen: new Set(), mini: false, hidden: done && age > MASS_MINI_MS, enter: true };
+  }
+  if (myPick) {
+    st.hidden = false;
+    st.mini = false;
+    if (st.timer === 'manual') st.timer = null;
   }
   if (st.hidden) return;
-  if (massDone(g, m) && !st.timer) {
+  clearTimeout(st.revealTimer);
+  const nextReveal = m.targets.find((t) => t.revealAt > now)?.revealAt;
+  if (nextReveal) {
+    st.revealTimer = setTimeout(() => {
+      if (ui.mass === st && ROOM?.game) renderMassPopup(ROOM.game);
+    }, nextReveal - now);
+  }
+  if (done && !st.timer) {
     st.timer = setTimeout(() => {
       st.mini = true;
       if (ui.mass === st && ROOM?.game) renderMassPopup(ROOM.game);
@@ -1371,36 +1398,70 @@ function renderMassPopup(g) {
   }
   const by = g.players[m.by];
   const active = m.targets.find((t) => t.i === g.pending?.player && !t.res && g.players[t.i].alive);
-  const fresh = m.targets.filter((t) => (t.res || !g.players[t.i].alive) && !t.res?.faceDown && !st.seen.has(t.i));
-  const group = ['Poker', 'Tornado', 'Bandidos'].includes(m.card.name);
+  const result = (t) => t.revealAt > now ? null : t.res;
+  const fresh = m.targets.filter((t) => (result(t) || (!t.res && !g.players[t.i].alive)) && !t.res?.faceDown && !st.seen.has(t.i));
+  const group = ['Poker', 'Tornado', 'Bandidos', 'Brawl'].includes(m.card.name);
+  const selected = myPick ? (st.pokerSelection ??= new Set()) : null;
+  const choices = myPick ? new Map(g.pending.cards.map(({ id }) => [id, selected.has(id)])) : null;
+  const limit = myPick ? Math.min(2, choices.size) : 0;
   let footer = '';
   if (m.card.name === 'Poker') {
     if (m.ace == null) footer = 'Các lá sẽ lật cùng lúc';
     else if (m.ace) footer = 'Có lá Át · Poker kết thúc';
-    else if (g.pending?.type === 'poker') footer = `${esc(by.name)} đang chọn tối đa 2 lá`;
+    else if (myPick) footer = `<div class="mp-poker-actions"><span>Đã chọn ${selected.size}/${limit} lá</span>
+      <button type="button" class="btn small" data-poker-confirm>${selected.size ? 'Lấy bài' : 'Bỏ qua'}</button></div>`;
+    else if (poker) footer = `${esc(by.name)} đang chọn tối đa 2 lá`;
   }
   const targets = `<div class="mp-targets">${m.targets.map((t) => {
     const p = g.players[t.i], dead = !p.alive && !t.res, mine = t.i === g.me?.index;
+    const res = result(t);
     return `<div class="mp-col${mine ? ' mine' : ''}${t === active ? ' active' : ''}">
-      <div class="mp-name" title="${esc(p.name)}" data-sum="${massSum(t.res, dead)}">${mine ? 'Bạn' : esc(p.name)}</div>
-      <div class="mp-slot">${massResHTML(t.res, dead, fresh.includes(t) && !st.enter, m.picks)}</div></div>`;
+      <div class="mp-name" title="${esc(p.name)}" data-sum="${massSum(res, dead)}">${mine ? 'Bạn' : esc(p.name)}</div>
+      <div class="mp-slot">${massResHTML(res, dead, fresh.includes(t) && !st.enter, m.picks, choices)}</div></div>`;
   }).join('')}</div>`;
   // Lúc có người đang rút kiểm tra (Barrel) thì thu gọn để lộ chồng bài
   const mini = st.mini || g.pending?.type === 'check';
   const el = document.createElement('div');
-  el.className = `mass-pop${group ? ' group-pop' : ''}${mini ? ' mini' : ''}${st.enter ? ' enter' : ''}`;
-  el.setAttribute('role', 'status');
-  el.title = mini ? 'Bấm để mở rộng' : 'Bấm để thu gọn';
+  el.className = `mass-pop${group ? ' group-pop' : ''}${myPick ? ' poker-picking' : ''}${mini ? ' mini' : ''}${st.enter ? ' enter' : ''}`;
+  el.setAttribute('role', myPick ? 'group' : 'status');
+  if (myPick) el.setAttribute('aria-label', 'Chọn bài Poker');
+  else el.title = mini ? 'Bấm để mở rộng' : 'Bấm để thu gọn';
   el.innerHTML = `
     <div class="mp-src"><div class="who"><span class="mini-ic">${cardInfo(m.card).icon} </span>${esc(by.name)}</div>${cardHTML(m.card)}</div>
     <div class="mp-arrow">➜</div>
     ${group ? `<div class="mp-group-content">${targets}${footer ? `<div class="mp-group-footer">${footer}</div>` : ''}</div>` : targets}
-    <button type="button" class="mp-close" title="Đóng" aria-label="Đóng">✕</button>`;
+    ${myPick ? '' : '<button type="button" class="mp-close" title="Đóng" aria-label="Đóng">✕</button>'}`;
   el.onclick = (e) => {
+    if (myPick) {
+      if (st.submitting) return;
+      const pick = e.target.closest('.mp-poker-card');
+      if (pick) {
+        const id = Number(pick.dataset.card);
+        if (!selected.delete(id)) {
+          if (selected.size >= limit) return toast(`Chọn tối đa ${limit} lá.`);
+          selected.add(id);
+        }
+        renderMassPopup(ROOM.game);
+        arena.querySelector(`.mp-poker-card[data-card="${id}"]`)?.focus({ preventScroll: true });
+      } else if (e.target.closest('[data-poker-confirm]')) {
+        return run(async () => {
+          st.submitting = true;
+          try { await sendAction({ type: 'poker', cardIds: [...selected] }); }
+          finally { st.submitting = false; }
+        })();
+      }
+      return;
+    }
     if (e.target.closest('.mp-close')) return hideMassPopup(st);
     clearTimeout(st.timer); st.timer = 'manual'; // đã bấm thì giữ nguyên cho tới khi tự đóng
     st.mini = !mini;
     renderMassPopup(ROOM.game);
+  };
+  if (myPick) el.onkeydown = (e) => {
+    const pick = e.target.closest('.mp-poker-card');
+    if (!pick || !['Enter', ' '].includes(e.key)) return;
+    e.preventDefault();
+    pick.click();
   };
   arena.appendChild(el);
   if (!st.enter) {
@@ -1413,6 +1474,7 @@ function renderMassPopup(g) {
 }
 function hideMassPopup(st) {
   clearTimeout(st.timer);
+  clearTimeout(st.revealTimer);
   st.hidden = true;
   const el = $('.mass-pop:not(.store-pop)');
   if (!el || ui.mass !== st) return;
@@ -1676,7 +1738,7 @@ function isClickable(c, g, meP) {
     const n = c.name;
     if (pend.type === 'valleyDiscard') return pend.count > 0;
     if (pend.type === 'bang') return pend.responseCardIds?.includes(c.id) ?? (n === 'Missed' || (n === 'Bang' && abilityOf(meP) === 'Calamity Janet'));
-    if (pend.type === 'indians' || pend.type === 'duel') return n === 'Bang' || (n === 'Missed' && abilityOf(meP) === 'Calamity Janet');
+    if (pend.type === 'indians' || pend.type === 'duel') return pend.responseCardIds?.includes(c.id) ?? (effectiveName(c, meP) === 'Bang');
     return false;
   }
   if (g.turn !== g.me.index || pend || g.phase !== 'play') return false;
@@ -1684,7 +1746,7 @@ function isClickable(c, g, meP) {
   const info = cardInfo(c);
   if (ui.mode?.kind === 'cost') return c.id !== ui.mode.cardId;
   if (ui.mode?.kind === 'aim') return aimPayment(c, ui.mode.cardId, g, meP);
-  if (ui.mode?.kind === 'lemat') return true;
+  if (ui.mode?.kind === 'asBang') return true;
   if (['brawl', 'fanning'].includes(ui.mode?.kind)) return false;
   if (name === 'Missed') return false;
   if (['Saved!', 'Escape'].includes(name)) return false;
@@ -1709,8 +1771,8 @@ function promptHTML(g, meIdx, meP) {
     return `<h4>${esc(c.name)} · Chọn thêm 1 lá trên tay để bỏ</h4>
       <div class="row"><button class="btn secondary small" data-act="cancel">Huỷ</button></div>`;
   }
-  if (['aim', 'lemat'].includes(ui.mode?.kind)) {
-    return `<h4>${ui.mode.kind === 'aim' ? 'Aim · Chọn lá Bang! dùng kèm' : 'LeMat · Chọn lá trên tay để dùng như Bang!'}</h4>
+  if (['aim', 'asBang'].includes(ui.mode?.kind)) {
+    return `<h4>${ui.mode.kind === 'aim' ? 'Aim · Chọn lá Bang! dùng kèm' : `${bangConversion(g, meP)} · Chọn lá trên tay để dùng như Bang!`}</h4>
       <button class="btn secondary small" data-act="cancel">Huỷ</button>`;
   }
   if (ui.mode?.kind === 'fanning') {
@@ -1766,7 +1828,6 @@ function promptHTML(g, meIdx, meP) {
   const mine = pend.player === meIdx;
   const escapeButtons = () => g.me.hand.filter((c) => pend.escapeIds?.includes(c.id)).map((c) =>
     `<button class="btn blue small" data-act="escape" data-card-id="${c.id}">Né hiệu ứng bằng ${esc(c.name)}</button>`).join('');
-  const cardChoices = (cards) => cards.map((c) => `<label><input type="checkbox" data-valley-card value="${c.id}"> ${esc(c.name)} ${c.rank}${SUIT[c.suit]}</label>`).join('');
   switch (pend.type) {
     case 'avoid':
       if (!mine) return '<h4>Đang chờ phản hồi…</h4>';
@@ -1789,8 +1850,7 @@ function promptHTML(g, meIdx, meP) {
         ${pend.name === 'Bandidos' ? '<button class="btn secondary" data-act="take">Chịu đòn</button>' : ''}</div>`;
     case 'poker':
       if (!mine) return `<h4>${P(pend.player)} đang chọn bài từ Poker…</h4>`;
-      return `<h4>Poker · Chọn tối đa 2 lá</h4><div class="row">${cardChoices(pend.cards)}</div>
-        <button class="btn" data-act="poker">Xác nhận</button>`;
+      return '<h4>Poker · Chọn bài giữa bàn</h4>';
     case 'lemonade':
       if (!mine) return `<h4>${P(pend.player)} có thể dùng kỹ năng Lemonade Jim…</h4>`;
       return `<h4>Lemonade Jim · Bỏ một lá để hồi 1 máu</h4><div class="row">
@@ -1876,8 +1936,9 @@ function actionsHTML(g, meP, canPlay) {
       if (filter && !g.players.some(filter)) continue;
       out.push(`<button class="btn green" data-act="activate" data-eqid="${c.id}">Dùng ${esc(c.name)}</button>`);
     }
-    if (g.me.lemat && canFire(g) && g.me.hand.length && g.players.some((p) => docTarget(p, g))) {
-      out.push('<button class="btn blue" data-act="lemat">Dùng LeMat</button>');
+    const conversion = bangConversion(g, meP);
+    if (conversion && canFire(g) && g.me.hand.length && g.players.some((p) => docTarget(p, g))) {
+      out.push(`<button class="btn blue" data-act="asBang">Dùng ${conversion}</button>`);
     }
     if (g.me.activeSkill && (!targetedSkill(g.me.activeSkill) || g.players.some((p) => docTarget(p, g)))) {
       const label = g.me.activeSkill === 'Chuck Wengam' ? 'Trả 1 máu để rút 2 lá' : `Dùng kỹ năng ${g.me.activeSkill}`;
@@ -2718,7 +2779,7 @@ function bindGame(g, meIdx, meP, canPlay, myPrompt) {
       return sendAction({ type: 'respond', cardId: id });
     }
     if (!canPlay) return toast(myPrompt ? 'Hãy xử lý yêu cầu ở giữa bàn trước.' : 'Chưa đến lượt bạn.');
-    if (ui.mode?.kind === 'aim' || ui.mode?.kind === 'lemat') {
+    if (ui.mode?.kind === 'aim' || ui.mode?.kind === 'asBang') {
       if (!isClickable(c, g, meP)) return;
       ui.mode = ui.mode.kind === 'aim' ? { kind: 'target', cardId: ui.mode.cardId, bangCardId: id }
         : { kind: 'target', cardId: id, asBang: true };
@@ -2830,7 +2891,7 @@ function bindGame(g, meIdx, meP, canPlay, myPrompt) {
   main.querySelectorAll('[data-act]').forEach((el) => el.onclick = run(async (event) => {
     const act = el.dataset.act;
     if (act === 'cancel') { ui.mode = null; ui.selected = []; return renderGame(); }
-    if (act === 'lemat') { ui.mode = { kind: 'lemat' }; return renderGame(); }
+    if (act === 'asBang') { ui.mode = { kind: 'asBang' }; return renderGame(); }
     if (act === 'secondTarget' && ui.mode?.kind === 'fanning') {
       const { cardId, target } = ui.mode;
       ui.mode = null;
@@ -2842,11 +2903,6 @@ function bindGame(g, meIdx, meP, canPlay, myPrompt) {
     if (act === 'valleyDiscard') {
       if (ui.mode?.kind !== 'valleyDiscard' || ui.selected.length !== pend.count) return;
       return sendAction({ type: act, cardIds: [...ui.selected] });
-    }
-    if (act === 'poker') {
-      const cardIds = [...main.querySelectorAll('[data-valley-card]:checked')].map((input) => Number(input.value));
-      if (cardIds.length > 2) return toast('Chọn tối đa hai lá.');
-      return sendAction({ type: act, cardIds });
     }
     if (act === 'confirmBrawl' && ui.mode?.kind === 'brawl') {
       const { cardId, costCardId } = ui.mode;

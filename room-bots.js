@@ -49,7 +49,7 @@ function tickBots(room, now = Date.now()) {
       }
     }
     if (['indians', 'duel'].includes(pending.type)) {
-      for (const c of discardOrder) actions.push({ type: 'respond', cardId: c.id });
+      for (const c of discardOrder.filter((card) => g.canRespondWithBang(p, card))) actions.push({ type: 'respond', cardId: c.id });
     }
     if (pending.canEscape) for (const card of g.escapeCards(p)) actions.push({ type: 'escape', cardId: card.id });
     if (pending.type === 'saved' && p.role === g.players[pending.target].role) {
@@ -77,7 +77,7 @@ function tickBots(room, now = Date.now()) {
     const enemies = targets.filter((q) => !avoidSheriff || q.role !== 'Sheriff');
     const shootable = enemies.filter((q) => !q.ghost);
     const canAttackAll = shootable.length > 0 && !keepSheriffAlive;
-    const lemat = g.hasLeMat(p);
+    const convertBang = g.canPlayAnyCardAsBang(p);
     const skill = g.activeSkill(p);
     if (skill === 'Der Spot-Burst Ringer' && canAttackAll) actions.push({ type: 'skill', cardIds: [p.hand.find((card) => card.name === 'Bang').id] });
     const club = skill === 'Black Flower' && spendable.find((card) => card.suit === 'C');
@@ -110,7 +110,7 @@ function tickBots(room, now = Date.now()) {
       } else {
         for (const target of singleAttack ? shootable : enemies) {
           if (c.name === 'Aim') {
-            const bang = spendable.find((card) => card !== c && (g.bangCard(p, card) || lemat));
+            const bang = spendable.find((card) => card !== c && (g.bangCard(p, card) || convertBang));
             if (bang) actions.push({ type, cardId: c.id, target: target.name, bangCardId: bang.id });
           } else if (c.name === 'Fanning') {
             const choices = g.fanningTargets(g.turn, g.idx(target.name));
@@ -127,7 +127,7 @@ function tickBots(room, now = Date.now()) {
         }
         if (!singleAttack) actions.push({ type, cardId: c.id, ...payment });
       }
-      if (type === 'play' && lemat && spendable.includes(c)) {
+      if (type === 'play' && convertBang && spendable.includes(c)) {
         for (const target of shootable) actions.push({ type, cardId: c.id, target: target.name, asBang: true });
       }
     }
