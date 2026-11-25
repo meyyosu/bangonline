@@ -187,6 +187,7 @@ test('Dodge draws after the shot and Molly cannot use the draw to finish the sam
   const before = molly.hand.length;
   g.act(molly.name, { type: 'respond', cardId: dodge.id });
   assert.equal(molly.hand.length, before - 1);
+  assert.equal(g.viewFor(null).pending.directAttack, true);
   assert.ok(!g.viewFor(molly.name).pending.responseCardIds.includes(top.id));
   g.act(molly.name, { type: 'respond', cardId: second.id });
   assert.equal(g.pending, null);
@@ -221,6 +222,7 @@ test('Punch uses distance one and existing defenses, and distance equipment stac
   equip(g, adjacent, 'Barrel');
   assert.throws(() => g.act(p.name, { type: 'play', cardId: punch.id, target: distant.name }), GameError);
   g.act(p.name, { type: 'play', cardId: punch.id, target: adjacent.name });
+  assert.equal(g.viewFor(null).combatEffects.at(-1).projectile, 'fist');
   assert.equal(g.pending.need, 1);
   assert.equal(g.pending.barrels, 1);
   g.act(adjacent.name, { type: 'respond', cardId: missed.id });
@@ -234,12 +236,13 @@ test('Punch uses distance one and existing defenses, and distance equipment stac
   assertDeck(g);
 });
 
-test('Knife plays its attack sound only when a valid activation is accepted', () => {
+test('Knife uses its sound and projectile for a valid activation and only reports damage on hit', () => {
   const { g, p, adjacent, distant } = setup('Willy the Kid');
   g.timeout();
   const knife = play(g, p, 'Knife');
   const activate = { type: 'activate', cardId: knife.id, target: adjacent.name };
   assert.deepEqual(g.viewFor(adjacent.name).sounds.at(-1).files, ['equipment1']);
+  assert.deepEqual(g.viewFor(null).combatEffects, []);
   const equippedAt = g.soundSeq;
   assert.throws(() => g.act(p.name, activate), GameError);
   assert.equal(g.soundSeq, equippedAt);
@@ -251,8 +254,31 @@ test('Knife plays its attack sound only when a valid activation is accepted', ()
   assert.equal(g.soundSeq, readyAt);
   g.act(p.name, activate);
   assert.deepEqual(g.viewFor(adjacent.name).sounds.at(-1), { seq: readyAt + 1, files: ['bangsound_knife'] });
-  assert.equal(g.pending.player, g.idx(adjacent.name));
+  const target = g.idx(adjacent.name);
+  assert.equal(g.pending.player, target);
+  assert.equal(g.viewFor(null).pending.directAttack, true);
+  const shot = { seq: 1, type: 'shot', source: g.idx(p.name), target, projectile: 'knife' };
+  assert.deepEqual(g.viewFor(null).combatEffects, [shot]);
+  g.act(adjacent.name, { type: 'take' });
+  assert.equal(g.viewFor(null).pending, null);
+  assert.deepEqual(g.viewFor(null).combatEffects, [shot, { seq: 2, type: 'damage', player: target, amount: 1 }]);
   assertDeck(g);
+});
+
+test('Gatling and Howitzer report damage without a projectile', () => {
+  for (const name of ['Gatling', 'Howitzer']) {
+    const { g, p, adjacent } = setup('Willy the Kid');
+    g.timeout();
+    if (name === 'Howitzer') {
+      const card = equip(g, p, name);
+      g.act(p.name, { type: 'activate', cardId: card.id });
+    } else play(g, p, name);
+    assert.deepEqual(g.viewFor(null).combatEffects, []);
+    assert.equal(g.viewFor(null).pending.directAttack, undefined);
+    g.act(adjacent.name, { type: 'take' });
+    assert.deepEqual(g.viewFor(null).combatEffects, [{ seq: 1, type: 'damage', player: g.idx(adjacent.name), amount: 1 }]);
+    assertDeck(g);
+  }
 });
 
 test('a safe Dynamite passes over a player who already has one', () => {
@@ -284,6 +310,7 @@ test('a failed Dynamite check uses the explosion WAV', () => {
   g.timeout();
   assert.equal(p.hp, p.maxHp - 3);
   assert.ok(g.discard.includes(dynamite));
+  assert.deepEqual(g.viewFor(null).combatEffects, [{ seq: 1, type: 'damage', player: g.idx(p.name), amount: 3 }]);
   const cues = g.viewFor(adjacent.name).sounds.filter((cue) => cue.seq > before);
   assert.deepEqual(cues[0].files, ['dynamite_explode.wav']);
   assert.match(cues[1].files[0], /^hurt_m[1-4]$/);
@@ -310,6 +337,8 @@ test('confirmed Bang attacks sample default and equipped gun sounds and turn aud
   assert.deepEqual(g.viewFor(adjacent.name).sounds.map((cue) => cue.files), [
     ['bangsound7'], ['missedsound1'], ['bangsound_remington1'],
   ]);
+  assert.deepEqual(g.viewFor(null).combatEffects.map((event) => event.type), ['shot', 'shot']);
+  assert.ok(g.viewFor(null).combatEffects.every((event) => event.projectile === 'bullet'));
   assertDeck(g);
 });
 
@@ -322,7 +351,9 @@ test('Barrel and Iron Plate use their own defense sounds', () => {
   g.deck.push(g.takeFromHand(p, heart.id));
   play(g, p, 'Bang', adjacent, 'C');
   g.act(adjacent.name, { type: 'barrel' });
+  assert.equal(g.viewFor(null).pending.directAttack, true);
   g.timeout();
+  assert.equal(g.viewFor(null).pending, null);
   assert.deepEqual(g.viewFor(p.name).sounds.at(-1).files, ['missedsound_barrel']);
 
   play(g, p, 'Bang', adjacent, 'D');
@@ -587,8 +618,12 @@ test('Pat Brennan takes equipment from any seat including his own', () => {
     const before = p.hand.length;
     const beforeSound = g.soundSeq;
     g.act(p.name, { type: 'drawChoice', from: 'equipment', target: target.name, cardId: card.id });
-    assert.equal(g.soundSeq - beforeSound, own ? 0 : 1);
-    if (!own) assert.match(g.viewFor(p.name).sounds.at(-1).files[0], /^cardswap2?$/);
+    assert.equal(g.soundSeq - beforeSound, 1);
+    const cue = g.viewFor(p.name).sounds.at(-1);
+    if (own) {
+      assert.deepEqual(cue.files, ['drawcard']);
+      assert.ok(g.viewFor(null).sounds.every((sound) => sound.seq !== cue.seq));
+    } else assert.match(cue.files[0], /^cardswap2?$/);
     assert.equal(g.phase, 'play');
     assert.equal(p.hand.length, before + 1);
     assert.ok(p.hand.includes(card));

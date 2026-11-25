@@ -20,7 +20,7 @@ function syncTimer(room, now = Date.now()) {
     if (!room.clock?.draw || room.clock.pending !== g.pending) {
       const type = g.pending.type;
       const character = g.ability(g.players[g.pending.player]);
-      const needsChoice = ['kit', 'copyAbility'].includes(type) || ['Jesse Jones', 'Pedro Ramirez', 'Pat Brennan'].includes(character);
+      const needsChoice = ['kit', 'copyAbility'].includes(type) || ['Jesse Jones', 'Pedro Ramirez', 'Pat Brennan', 'Evelyn Shebang'].includes(character);
       const seconds = type === 'blackJack' ? 3 : needsChoice ? 20 : 5;
       room.clock = { draw: true, seconds, turn: g.turnNumber, deadline: now + seconds * 1000, pending: g.pending, player: g.pending.player };
     }

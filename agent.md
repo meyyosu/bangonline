@@ -77,8 +77,8 @@ and configure the firewall, so use direct Node startup for routine development.
 
 ## Validation
 
-- After any `game.js` change, run `npm test` or `node test/sim.js 500`. The
-  simulation checks conservation of all 80 cards and exercises player views.
+- After any `game.js` change, run `npm test` or `node test/sim.js 100`. The
+  simulation checks card conservation across expansion settings and exercises player views.
   For a specific rule fix, also verify the affected scenario directly; random
   simulation alone does not prove every rule is correct.
 - For syntax checks, use `node --check` on changed JavaScript files.

@@ -166,6 +166,20 @@ label { font-weight: 600; font-size: 14px; display: block; margin: 10px 0 4px; }
 .transfer-card .card-back { display: grid; place-items: center; font-size: 13px; }
 .played-card-flight { position: fixed; z-index: 1100; pointer-events: none; }
 .played-card-flight .card { width: 100%; height: 100%; margin: 0; transform: none; }
+.combat-fx { position: fixed; z-index: 1110; pointer-events: none; transform: translate(-50%, -50%); }
+.combat-line { position: absolute; z-index: 2; border-top: 2px dotted #000; transform-origin: left center; pointer-events: none; }
+.combat-projectile { width: clamp(36px, 7vw, 54px); height: auto; }
+.combat-projectile[data-projectile="knife"] {
+  /* Trim the white background without modifying the supplied PNG. */
+  clip-path: polygon(85% 5.8%, 86.4% 5.9%, 87.2% 11%, 86.8% 17%, 84.8% 27%, 80% 40%,
+    73% 52%, 64% 62%, 56% 70%, 49% 75.7%, 41% 69%, 18% 93.7%, 15.5% 94%, 12% 91.6%, 10% 88%, 10.8% 86%);
+}
+.combat-impact {
+  display: grid; place-items: center; width: clamp(48px, 12vw, 76px); aspect-ratio: 1;
+  background: url('/effects/impact.png') center / contain no-repeat;
+  color: white; font: 900 clamp(20px, 5vw, 28px) / 1 system-ui;
+  -webkit-text-stroke: 3px #482310; paint-order: stroke fill;
+}
 .draw-source { cursor: pointer; }
 .draw-source .ds-slot:last-child .card { animation: deckGlow 1s ease-in-out infinite; }
 .draw-source:hover .ds-slot:last-child .card { filter: brightness(1.15); }
@@ -311,9 +325,11 @@ select { width: 100%; padding: 9px 10px; border-radius: 8px; border: 2px solid #
 .av { position: relative; width: 68px; height: 68px; border-radius: 50%; display: grid; place-items: center; font-size: 32px;
   background: radial-gradient(circle at 35% 30%, #fff4d8, #d9b97f); border: 3px solid #2a160a;
   box-shadow: 0 0 0 4px #2a160a, 0 6px 14px rgba(0,0,0,.5); transition: transform .15s, box-shadow .15s; }
-/* Chân dung nhân vật: ảnh vuông cắt sẵn quanh mặt, bo tròn ở mọi khung (bàn chơi, chọn nhân vật, màn kết thúc) */
+/* Chân dung được bo tròn ở bàn chơi, màn chọn nhân vật và màn kết thúc. */
 .character-avatar.has-img { display: block; width: 100%; height: 100%; border-radius: 50%; overflow: hidden; }
 .char-img { display: block; width: 100%; height: 100%; object-fit: cover; border-radius: 50%; user-select: none; -webkit-user-drag: none; }
+.avatar-crop { position: relative; display: block; width: 100%; height: 100%; overflow: hidden; border-radius: 50%; }
+.avatar-crop .char-img { position: absolute; border-radius: 0; }
 .character-avatar.dead .char-img { filter: grayscale(1) brightness(.75); }
 .ccard .por { overflow: hidden; }
 .player.turn .av { box-shadow: 0 0 0 4px var(--gold), 0 0 26px rgba(217,164,65,.9); }

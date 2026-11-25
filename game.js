@@ -186,13 +186,35 @@ function loadDodgeCity(override) {
 
 const DODGE_CITY = loadDodgeCity(process.env.BANG_DODGE_CITY_FILE || process.env.BANG_GREEN_CARDS_FILE);
 
-function buildDeck(dodgeCity) {
+function loadValley() {
+  try {
+    const bytes = readFileSync(join(__dirname, 'valley-of-shadow.json'));
+    const data = JSON.parse(bytes.toString('utf8'));
+    const cards = [];
+    for (const { name, copies, ...info } of data.cards) {
+      if (name in CARD_INFO || !copies.length || copies.some(({ rank, suit }) => !Object.hasOwn(SUIT_SYMBOL, suit) || !/^(?:[2-9]|10|[JQKA])$/.test(rank))) {
+        throw new Error(`Tên, hạng hoặc chất không hợp lệ: ${name}.`);
+      }
+      CARD_INFO[name] = info;
+      cards.push(...copies.map((copy) => ({ name, ...copy })));
+    }
+    Object.assign(CHAR_INFO, data.characters);
+    return { cards, characters: Object.keys(data.characters), revision: createHash('sha256').update(bytes).digest('hex') };
+  } catch (error) {
+    if (error.code === 'ENOENT') return { cards: [], characters: [], revision: null };
+    throw new Error(`Không nạp được dữ liệu Valley of Shadow. ${error.message}`);
+  }
+}
+const VALLEY = loadValley();
+
+function buildDeck(dodgeCity, valleyOfShadow) {
   const deck = [];
   let id = 1;
   for (const [name, suit, ranks] of DECK_SPEC) {
     for (const rank of ranks.split(' ')) deck.push({ id: id++, name, suit, rank });
   }
   if (dodgeCity) for (const card of DODGE_CITY.cards) deck.push({ ...card, id: id++ });
+  if (valleyOfShadow) for (const card of VALLEY.cards) deck.push({ ...card, id: id++ });
   return deck;
 }
 
@@ -205,6 +227,8 @@ const GUN_SOUNDS = {
   Remington: numberedSounds('bangsound_remington', 3),
   'Rev. Carabine': numberedSounds('bangsound_revcarabine', 3),
   Winchester: numberedSounds('bangsound_winchester', 3),
+  LeMat: 'bangsound_lemat',
+  Shotgun: 'bangsound_shotgun',
 };
 const MISSED_SOUNDS = numberedSounds('missedsound', 6);
 const IRON_PLATE_SOUNDS = [
@@ -213,21 +237,30 @@ const IRON_PLATE_SOUNDS = [
 const BARREL_SOUND = 'missedsound_barrel';
 const STEAL_SOUNDS = ['cardswap', 'cardswap2'];
 const TARGET_DISCARD_SOUND = 'catbalou1';
+const PROJECTILE_BY_CARD = { Punch: 'fist', Knife: 'knife' };
 const HURT_SOUNDS = { female: numberedSounds('hurt_f', 4), male: numberedSounds('hurt_m', 4) };
 const FEMALE_CHARACTERS = new Set([
   'Calamity Janet', 'Rose Doolan', 'Suzy Lafayette', 'Belle Star', 'Elena Fuente', 'Molly Stark', 'Vera Custer',
+  'Black Flower', 'Evelyn Shebang',
 ]);
+const AIM_SOUNDS = { play: 'Aim', female: 'aim_success_f', male: 'aim_success_m' };
+const EFFECT_SOUNDS = {
+  backfire: 'backfired', escape: 'escape', draw: 'drawcard', rattlesnakeHurt: 'rattlesnake_hurt',
+  bountyPlaced: 'bounty', bountyEarned: 'bounty_earned',
+};
 const PLAY_SOUNDS = { Punch: 'punch1', Gatling: 'gatling', Howitzer: 'howitzer1', Duel: 'duelo1',
   'General Store': 'generalstore1', Indians: 'indian1',
   'Buffalo Rifle': 'bangsound_buffalorifle', Derringer: 'bangsound_derringer', Pepperbox: 'bangsound_pepperbox',
-  Knife: 'bangsound_knife',
+  Knife: 'bangsound_knife', Springfield: 'bangsound_springfield',
+  Bandidos: 'bandidos', Fanning: 'fanning', Poker: 'poker', Tomahawk: 'tomahawk', Tornado: 'tornado',
   Beer: 'beerdrink', Saloon: numberedSounds('saloon', 4), Whisky: numberedSounds('whiskey', 2) };
-const EQUIP_SOUNDS = { Mustang: 'mustang1', Dynamite: 'dynamite_start.wav', Jail: 'prison1' };
+const EQUIP_SOUNDS = { Mustang: 'mustang1', Dynamite: 'dynamite_start.wav', Jail: 'prison1', Rattlesnake: 'rattlesnake' };
 const SOUND_FILES = new Set([
   'bangload', 'playerjoin', 'yourturn1', 'equipment1', 'prisonfree', 'playereliminated', 'outlawkilled1', 'dynamite_explode.wav',
   'victory', 'defeat',
   BARREL_SOUND, TARGET_DISCARD_SOUND, ...MISSED_SOUNDS, ...IRON_PLATE_SOUNDS, ...STEAL_SOUNDS,
   ...Object.values(HURT_SOUNDS).flat(), ...Object.values(GUN_SOUNDS).flat(),
+  ...Object.values(AIM_SOUNDS), ...Object.values(EFFECT_SOUNDS),
   ...Object.values(PLAY_SOUNDS).flat(), ...Object.values(EQUIP_SOUNDS),
 ].map((file) => file.includes('.') ? file : `${file}.mp3`));
 const FACTION = { Sheriff: 'law', Deputy: 'law', Outlaw: 'outlaw', Renegade: 'renegade' };
@@ -264,7 +297,10 @@ class Game {
     if (names.length < 4 || names.length > maxPlayers) fail(`Cần 4–${maxPlayers} người chơi.`);
     this.rng = opts.rng || Math.random;
     const roles = shuffle([...ROLE_SETS[names.length]], this.rng);
-    const chars = shuffle(opts.dodgeCity ? Object.keys(CHAR_INFO) : [...BASE_CHARACTERS], this.rng);
+    const pool = [...BASE_CHARACTERS];
+    if (opts.dodgeCity) pool.push(...Object.keys(DODGE_CITY_CHAR_INFO));
+    if (opts.valleyOfShadow) pool.push(...VALLEY.characters);
+    const chars = shuffle(pool, this.rng);
     const order = shuffle([...names], this.rng);
     this.players = order.map((name, i) => {
       const role = roles[i];
@@ -273,12 +309,15 @@ class Game {
       return { name, role, char, maxHp, hp: maxHp, hand: [], eq: [], coolingGreen: new Set(), alive: true, jailed: 0 };
     });
     if (opts.dodgeCity && !DODGE_CITY.cards.length) fail('Chưa nạp bộ lá Dodge City.');
-    this.fullDeck = buildDeck(opts.dodgeCity); // Dùng bộ bài ban đầu của phòng để tính xác suất rút kiểm tra.
+    if (opts.valleyOfShadow && !VALLEY.cards.length) fail('Chưa nạp bộ lá Valley of Shadow.');
+    this.valleyOfShadow = !!opts.valleyOfShadow;
+    this.fullDeck = buildDeck(opts.dodgeCity, this.valleyOfShadow); // Dùng bộ bài ban đầu của phòng để tính xác suất rút kiểm tra.
     this.deck = shuffle([...this.fullDeck], this.rng);
     this.discard = [];
     this.log = [];
     this.sounds = [];
     this.soundSeq = 0;
+    this.combatEffects = [];
     this.queue = [];
     this.pending = null;
     this.winner = null;
@@ -383,13 +422,16 @@ class Game {
   }
   recordTransfer(p, cards, from = 'deck', destination = null, publicCards = false, slots = null, sourceZone = null) {
     if (!cards.length) return;
+    const owner = this.idx(p.name);
     this.transferSeq = (this.transferSeq || 0) + 1;
-    this.transfers = [...(this.transfers || []), { seq: this.transferSeq, to: destination ?? this.idx(p.name), owner: this.idx(p.name), from, cards, publicCards, slots, sourceZone }].slice(-40);
+    this.transfers = [...(this.transfers || []), { seq: this.transferSeq, to: destination ?? owner, owner, from, cards, publicCards, slots, sourceZone }].slice(-40);
+    if (destination === null && (from === 'deck' || from === 'kit')) this.recordSound(EFFECT_SOUNDS.draw, owner);
   }
   give(p, n) {
     const cards = this.draw(n);
     p.hand.push(...cards);
     this.recordTransfer(p, cards);
+    return cards.length;
   }
   recordPlay(player, card, kind = 'play') {
     const recipient = this.players.findIndex((p) => p.eq.some((c) => c.id === card.id));
@@ -401,9 +443,15 @@ class Game {
     this.sounds.push({ seq: ++this.soundSeq, files: Array.isArray(files) ? files : [files], player });
     if (this.sounds.length > 40) this.sounds.shift();
   }
+  recordCombatEffect(effect) {
+    const seq = (this.combatEffects.at(-1)?.seq ?? 0) + 1;
+    this.combatEffects.push({ seq, ...effect });
+    if (this.combatEffects.length > 40) this.combatEffects.shift();
+  }
   toDiscard(...cards) { this.discard.push(...cards); }
   ability(p) { return p.char === 'Vera Custer' ? p.copiedAbility : p.char; }
-  handLimit(p) { return this.ability(p) === 'Sean Mallory' ? 10 : p.hp; }
+  handLimit(p) { return p.ghost ? 0 : this.ability(p) === 'Sean Mallory' ? 10 : p.hp; }
+  canHeal(p) { return !p.ghost && p.hp < p.maxHp; }
   beerHealing(p) { return this.ability(p) === 'Tequila Joe' ? 2 : 1; }
   equipmentActive(p) {
     const current = this.players[this.turn];
@@ -426,7 +474,7 @@ class Game {
   }
   dodgeCards(p) {
     const skill = this.ability(p);
-    const hand = p.hand.filter((c) => skill === 'Elena Fuente' || c.name === 'Missed' || c.name === 'Dodge' || (c.name === 'Bang' && skill === 'Calamity Janet'));
+    const hand = p.hand.filter((c) => skill === 'Elena Fuente' || ['Missed', 'Dodge', 'Backfire'].includes(c.name) || (c.name === 'Bang' && skill === 'Calamity Janet'));
     const equipment = this.equipmentActive(p) ? p.eq.filter((c) => CARD_INFO[c.name].defense && !p.coolingGreen.has(c.id)) : [];
     return [...hand, ...equipment];
   }
@@ -462,6 +510,7 @@ class Game {
     if (!card) return p.hand.splice(Math.floor(this.rng() * p.hand.length), 1)[0];
     p.eq.splice(p.eq.indexOf(card), 1);
     p.coolingGreen.delete(card.id);
+    if (card.name === 'Ghost') this.dismissGhost(p);
     return card;
   }
   stealRandom(from, to) {
@@ -479,13 +528,15 @@ class Game {
     const chosen = cards.find(success) || cards[0];
     this.toDiscard(...cards);
     const ok = !!chosen && success(chosen);
-    const st = this.stats[this.idx(p.name)];
+    const pi = this.idx(p.name);
+    if (cards.length) this.recordSound(EFFECT_SOUNDS.draw, pi);
+    const st = this.stats[pi];
     const chance = this.fullDeck.filter(success).length / this.fullDeck.length;
     st.checks++; if (ok) st.checksOk++;
     st.checkExpected += luckyDuke ? 1 - (1 - chance) ** 2 : chance;
     this.addLog(`${p.name} rút kiểm tra (${label}): ${cards.map(cardStr).join(', ')} → ${ok ? 'thành công' : 'thất bại'}.`);
     this.checkSeq = (this.checkSeq || 0) + 1;
-    this.lastCheck = { seq: this.checkSeq, player: this.idx(p.name), kind: label, cards, chosen: chosen ? chosen.id : null, ok };
+    this.lastCheck = { seq: this.checkSeq, player: pi, kind: label, cards, chosen: chosen ? chosen.id : null, ok };
     return ok;
   }
   // Chờ người chơi tự bấm rút kiểm tra; resume = pending 'bang' cần quay lại sau khi rút Barrel
@@ -513,10 +564,11 @@ class Game {
   }
 
   // Đầu lượt: lần lượt chờ rút kiểm tra Dynamite rồi Jail, sau đó mới tới bước rút bài
-  continueTurnStart(checkDynamite = true) {
+  continueTurnStart(checkDynamite = true, checkSnake = true) {
     const pi = this.turn, p = this.players[pi];
     if (checkDynamite && this.hasEq(p, 'Dynamite')) return this.askCheck(pi, 'Dynamite');
     if (p.eq.some((c) => c.name === 'Jail')) return this.askCheck(pi, 'Jail');
+    if (checkSnake && this.hasEq(p, 'Rattlesnake')) return this.askCheck(pi, 'Rattlesnake');
     if (p.char === 'Vera Custer') {
       this.phase = 'draw';
       this.pending = { type: 'copyAbility', player: pi };
@@ -526,7 +578,10 @@ class Game {
   }
 
   resolveCheck(pi, p, pend) {
-    if (pend.kind !== 'Barrel' && !this.hasEq(p, pend.kind)) { this.pending = null; return this.continueTurnStart(false); }
+    if (pend.kind !== 'Barrel' && !this.hasEq(p, pend.kind)) {
+      this.pending = null;
+      return this.continueTurnStart(false, pend.kind !== 'Rattlesnake');
+    }
     if (pend.kind === 'Dynamite') {
       const dyn = p.eq.find((c) => c.name === 'Dynamite');
       const safe = this.check(p, (c) => !(c.suit === 'S' && rankVal(c.rank) >= 2 && rankVal(c.rank) <= 9), 'Dynamite');
@@ -536,9 +591,7 @@ class Game {
         this.addLog(`💥 Dynamite nổ! ${p.name} mất 3 máu.`);
         this.recordSound('dynamite_explode.wav');
         this.toDiscard(dyn);
-        this.damage(pi, 3, null);
-        if (this.winner) return;
-        if (!p.alive) return this.nextTurn();
+        return this.turnStartDamage(pi, 3, true);
       } else {
         let next = this.nextAlive(pi);
         while (next !== pi && this.hasEq(this.players[next], 'Dynamite')) next = this.nextAlive(next);
@@ -548,6 +601,12 @@ class Game {
         this.addLog(next === pi ? `Dynamite vẫn ở trước ${p.name}.` : `Dynamite được chuyền sang ${nx.name}.`);
       }
       return this.continueTurnStart(false);
+    }
+    if (pend.kind === 'Rattlesnake') {
+      const safe = this.check(p, (c) => c.suit !== 'S', 'Rattlesnake');
+      this.pending = null;
+      if (!safe) return this.turnStartDamage(pi, 1, false, EFFECT_SOUNDS.rattlesnakeHurt);
+      return this.continueTurnStart(false, false);
     }
     if (pend.kind === 'Jail') {
       const jail = p.eq.find((c) => c.name === 'Jail');
@@ -584,12 +643,26 @@ class Game {
     if (skill === 'Jesse Jones' && this.alive().some((i) => i !== pi && this.players[i].hand.length)) options.push('player');
     if (skill === 'Pedro Ramirez' && this.discard.length) options.push('discard');
     if (skill === 'Pat Brennan' && this.players.some((q) => q.alive && q.eq.length)) options.push('equipment');
+    if (skill === 'Evelyn Shebang' && this.alive().some((i) => i !== pi && this.distance(pi, i) <= this.range(p))) options.push('evelyn');
     this.pending = { type: 'draw', player: pi, options };
+  }
+
+  turnStartDamage(pi, amount, checkSnake, hitSound = null) {
+    const taken = this.stats[pi].taken;
+    this.resolveDamage(pi, amount, null, null, () => {
+      if (hitSound && this.stats[pi].taken > taken) this.recordSound(hitSound);
+      this.queue.push({ run: () => {
+        if (!this.players[pi].alive) this.nextTurn();
+        else this.continueTurnStart(false, checkSnake);
+      } });
+      this.nextPending();
+    });
   }
 
   normalDraw(p) {
     const skill = this.ability(p);
-    const n = skill === 'Bill Noface' ? 1 + p.maxHp - p.hp : skill === 'Pixie Pete' ? 3 : 2;
+    const n = skill === 'Bill Noface' ? 1 + p.maxHp - p.hp : skill === 'Pixie Pete' ? 3
+      : skill === 'Tuco Franziskaner' && !p.eq.some((c) => this.isBlue(c)) ? 4 : 2;
     const cards = this.draw(n);
     p.hand.push(...cards);
     this.addLog(`${p.name} rút ${cards.length} lá.`);
@@ -606,6 +679,17 @@ class Game {
   }
 
   nextTurn() {
+    const player = this.players[this.turn];
+    if (player.ghost) {
+      const gear = player.eq.filter((card) => card.name !== 'Ghost');
+      const dropped = [...player.hand, ...gear];
+      this.toDiscard(...dropped);
+      for (const card of dropped) this.recordPlay(this.turn, card, 'discard');
+      player.hand = [];
+      player.eq = player.eq.filter((card) => card.name === 'Ghost');
+      player.coolingGreen.clear();
+      player.jailed = 0;
+    }
     this.pending = null;
     this.queue = [];
     if (this.winner) return;
@@ -616,9 +700,15 @@ class Game {
   // ---------- máu, chết, thắng ----------
   damage(ti, amount, src, response = null) {
     const t = this.players[ti];
-    if (!t.alive) return;
-    this.recordDamage(ti, Math.min(amount, Math.max(t.hp, 0)), src);
+    if (!t.alive || t.ghost || amount <= 0) return;
+    const lost = Math.min(amount, Math.max(t.hp, 0));
+    this.recordDamage(ti, lost, src);
     t.hp -= amount;
+    if (lost > 0) this.recordCombatEffect({ type: 'damage', player: ti, amount: lost });
+    if (response?.aim && lost === 2) {
+      const voice = FEMALE_CHARACTERS.has(this.players[src]?.char) ? 'female' : 'male';
+      this.recordSound(AIM_SOUNDS[voice]);
+    }
     this.addLog(`${t.name} mất ${amount} máu (còn ${Math.max(t.hp, 0)}).`);
     if (t.hp <= 0) this.trySave(t, response);
     if (t.hp <= 0) return this.kill(ti, src);
@@ -642,7 +732,8 @@ class Game {
         this.stats[this.idx(t.name)].healed += heal;
         this.addLog(`🍺 ${t.name} uống Beer để sống sót!`);
         this.recordSound(PLAY_SOUNDS.Beer);
-        this.mollyDraw(t, beer, response);
+        this.mollyDraw(t, response);
+        this.offerLemonade(t);
       } else if (this.ability(t) === 'Sid Ketchum' && t.hand.length >= 2) {
         this.toDiscard(...t.hand.splice(0, 2));
         t.hp++;
@@ -651,9 +742,9 @@ class Game {
     }
   }
 
-  mollyDraw(p, card, response = null) {
+  mollyDraw(p, response = null) {
     const pi = this.idx(p.name);
-    if (pi === this.turn || this.ability(p) !== 'Molly Stark' || !['Bang', 'Missed', 'Beer', 'Dodge'].includes(card.name)) return;
+    if (pi === this.turn || this.ability(p) !== 'Molly Stark') return;
     if (response) this.deferResponseDraw(response, pi, 1);
     else this.give(p, 1);
   }
@@ -671,8 +762,10 @@ class Game {
 
   forfeit(name) {
     const pi = this.idx(name);
-    if (pi < 0 || !this.players[pi].alive || this.winner) return;
+    if (pi < 0 || this.winner) return;
     if (this.phase === 'character') fail('Chưa bắt đầu ván đấu.');
+    this.players[pi].forfeited = true;
+    if (!this.players[pi].alive) return;
     this.addLog(`${name} đã rời phòng và bỏ cuộc.`);
     const cancel = (q) => q && ((q.type === 'duel' && q.other === pi) || (q.player === pi && q.type !== 'store'));
     this.queue = this.queue.filter((q) => {
@@ -687,6 +780,9 @@ class Game {
         this.toDiscard(...pend.cards);
         this.nextPending();
       } else pend.player = pend.order[0];
+    } else if (pend?.type === 'saved' && pend.player === pi) {
+      this.resolveSaved(pi, this.players[pi], pend, { type: 'take' });
+      if (this.winner) return;
     } else if (cancel(pend)) {
       this.toDiscard(...(pend.cards || []));
       this.nextPending();
@@ -701,6 +797,7 @@ class Game {
 
   kill(ti, src) {
     const t = this.players[ti];
+    if (t.ghost) return this.dismissGhost(t);
     if (src != null && src !== ti) {
       const st = this.stats[src];
       st.kills++;
@@ -711,14 +808,7 @@ class Game {
     t.alive = false;
     t.hp = 0;
     this.addLog(`☠️ ${t.name} đã chết! Vai trò: ${t.role} (${ROLE_INFO[t.role].vi}).`);
-    const looters = this.players.map((_, n) => this.players[(ti + 1 + n) % this.players.length])
-      .filter((p) => p.alive && this.ability(p) === 'Vulture Sam');
-    const cards = [...(looters.length > 1 ? shuffle(t.hand, this.rng) : t.hand), ...t.eq];
-    t.hand = []; t.eq = [];
-    if (looters.length && cards.length) {
-      cards.forEach((card, i) => looters[i % looters.length].hand.push(card));
-      this.addLog(`${looters.map((p) => p.name).join(', ')} nhặt bài của ${t.name} (Vulture Sam).`);
-    } else this.toDiscard(...cards);
+    this.dropEliminatedCards(t);
 
     const won = this.checkWin();
     const sounds = ['playereliminated'];
@@ -740,16 +830,45 @@ class Game {
     if (won) {
       this.players.forEach((p, i) => this.recordSound(this.isWinner(p) ? 'victory' : 'defeat', i));
     }
+    this.onElimination();
+  }
+
+  dropEliminatedCards(t) {
+    const ti = this.idx(t.name);
+    const looters = this.players.map((_, n) => this.players[(ti + 1 + n) % this.players.length])
+      .filter((p) => p.alive && this.ability(p) === 'Vulture Sam');
+    const cards = [...(looters.length > 1 ? shuffle(t.hand, this.rng) : t.hand), ...t.eq];
+    t.hand = []; t.eq = [];
+    if (looters.length && cards.length) {
+      cards.forEach((card, i) => looters[i % looters.length].hand.push(card));
+      this.addLog(`${looters.map((p) => p.name).join(', ')} nhặt bài của ${t.name} (Vulture Sam).`);
+    } else this.toDiscard(...cards);
+  }
+
+  onElimination() {
     for (const [i, p] of this.players.entries()) {
       if (!p.alive) continue;
       const skill = this.ability(p);
-      if (skill === 'Greg Digger') {
+      if (skill === 'Greg Digger' && this.canHeal(p)) {
         const heal = Math.min(p.maxHp - p.hp, 2);
         p.hp += heal;
         this.stats[i].healed += heal;
       }
       if (skill === 'Herb Hunter') this.give(p, 2);
     }
+  }
+
+  dismissGhost(p) {
+    p.ghost = false;
+    p.alive = false;
+    this.dropEliminatedCards(p);
+    p.coolingGreen.clear();
+    p.jailed = 0;
+    this.addLog(`👻 ${p.name} rời bàn khi mất lá Ghost.`);
+    if (this.checkWin()) {
+      this.players.forEach((player, i) => this.recordSound(this.isWinner(player) ? 'victory' : 'defeat', i));
+    }
+    this.onElimination();
   }
 
   checkWin() {
@@ -790,10 +909,148 @@ class Game {
   // ---------- hàng đợi phản hồi ----------
   nextPending() {
     this.pending = null;
-    while (this.queue.length) {
+    while (!this.winner && this.queue.length) {
       const q = this.queue.shift();
-      if (this.players[q.player].alive) { this.pending = q; break; }
+      if (q.run) q.run();
+      else if (this.players[q.player].alive) this.pending = q;
+      if (this.pending) break;
     }
+  }
+
+  bangCard(p, card) {
+    return card.name === 'Bang' || (card.name === 'Missed' && this.ability(p) === 'Calamity Janet');
+  }
+
+  hasLeMat(p) { return this.equipmentActive(p) && this.gun(p)?.name === 'LeMat'; }
+
+  fanningTargets(source, target) {
+    return this.alive().filter((i) => i !== source && i !== target && this.distance(target, i) === 1);
+  }
+
+  offerLemonade(beerUser) {
+    for (const i of this.alive()) {
+      const p = this.players[i];
+      if (p !== beerUser && this.ability(p) === 'Lemonade Jim' && this.canHeal(p) && p.hand.length) {
+        this.queue.push({ type: 'lemonade', player: i });
+      }
+    }
+  }
+
+  beforeRemoval(actor, target, apply) {
+    if (actor === target || this.ability(this.players[target]) !== 'Henry Block') return apply();
+    this.queue.unshift({ run: () => { if (this.players[actor].alive && this.players[target].alive) apply(); } });
+    this.startShot(target, actor);
+  }
+
+  escapeCards(p) {
+    return p.hand.filter((c) => c.name === 'Escape' || (this.ability(p) === 'Mick Defender' && c.name === 'Missed'));
+  }
+
+  applyBrown(source, player, name, apply) {
+    if (!this.players[player].alive || this.winner) return;
+    if (this.escapeCards(this.players[player]).length) {
+      this.pending = { type: 'avoid', source, player, name, apply, canEscape: true };
+    } else apply();
+  }
+
+  startShot(source, target, { projectile = 'bullet', trueBang = false, amount = 1, canEscape = false, aim = false } = {}) {
+    const p = this.players[source];
+    if (!p.alive || !this.players[target].alive || this.winner) return;
+    const need = trueBang && amount === 1 && this.ability(p) === 'Slab the Killer' ? 2 : 1;
+    const shot = { ...this.attackPrompt(source, target, need), amount, trueBang, canEscape, aim };
+    this.pending = shot;
+    this.recordCombatEffect({ type: 'shot', source, target, projectile });
+    if (trueBang && this.ability(p) === 'Colorado Bill' && this.check(p, (c) => c.suit === 'S', 'Colorado Bill')) {
+      this.takeShot(shot);
+    }
+  }
+
+  takeShot(shot) {
+    const target = this.players[shot.player], source = this.players[shot.source];
+    const bounty = this.equipmentActive(target) && this.hasEq(target, 'Bounty');
+    this.resolveDamage(shot.player, shot.amount ?? 1, shot.source, shot, (amount) => {
+      this.noteMass(shot, target.ghost ? { ghost: true } : amount ? { hurt: amount } : { saved: true });
+      if (amount > 0 && shot.trueBang && source.alive && !this.winner) {
+        if (bounty && this.give(source, 1)) this.recordSound(EFFECT_SOUNDS.bountyEarned);
+        if (target.alive && target.hand.length && this.equipmentActive(source) && this.gun(source)?.name === 'Shotgun') {
+          this.queue.unshift({ type: 'valleyDiscard', player: shot.player, name: 'Shotgun', count: 1 });
+        }
+      }
+      this.finishResponse(shot);
+    });
+  }
+
+  resolveDamage(player, amount, source, response, done) {
+    const target = this.players[player];
+    if (target.ghost || !target.alive || amount <= 0) return done(0);
+    const savers = this.alive().filter((i) => i !== player && this.hasSaved(this.players[i]));
+    const save = { target: player, amount, source, response, done, savers, saves: [] };
+    if (response?.immediateSave) {
+      const { player: saver, card, from } = response.immediateSave;
+      this.playSaved(save, saver, card, from);
+      save.savers = save.savers.filter((i) => i !== saver);
+    }
+    save.player = save.savers.shift();
+    this.continueSave(save);
+  }
+
+  hasSaved(player) { return player.hand.some((c) => c.name === 'Saved!'); }
+
+  continueSave(save) {
+    if (save.amount > 0 && save.player !== undefined) {
+      this.pending = { ...save, type: 'saved' };
+      return;
+    }
+    const target = this.players[save.target];
+    this.damage(save.target, save.amount, save.source, save.response);
+    for (const { i, from } of save.saves) {
+      const player = this.players[i];
+      const duel = ['bang', 'duel'].includes(save.response?.type);
+      if (target.alive) this.addLog(`${player.name} vừa cứu ${target.name} khỏi ${duel ? 'một pha đấu súng' : 'mất 1 máu'}!`);
+      else this.addLog(`${player.name} đã chặn 1 sát thương cho ${target.name}.`);
+      if (!target.alive || !player.alive || this.winner) continue;
+      if (from === 'hand') {
+        this.stealRandom(target, player);
+        this.stealRandom(target, player);
+      } else this.give(player, 2);
+    }
+    save.done(save.amount);
+  }
+
+  resolveSaved(pi, p, pend, a) {
+    if (a.type !== 'take') {
+      const card = p.hand.find((c) => c.id === a.cardId && c.name === 'Saved!');
+      if (a.type !== 'saved' || !card || !['hand', 'deck'].includes(a.from)) fail('Chọn một lá Saved! và nơi rút bài.');
+      this.playSaved(pend, pi, card, a.from);
+    }
+    pend.player = pend.savers.find((i) => this.players[i].alive && this.hasSaved(this.players[i]));
+    if (pend.player !== undefined) pend.savers = pend.savers.slice(pend.savers.indexOf(pend.player) + 1);
+    this.continueSave(pend);
+  }
+
+  playSaved(save, pi, card, from) {
+    const p = this.players[pi];
+    this.toDiscard(this.takeFromHand(p, card.id));
+    this.recordPlay(pi, card);
+    this.mollyDraw(p, save.response);
+    save.amount--;
+    save.saves.push({ i: pi, from });
+  }
+
+  savedReaction(pend, pi) {
+    const response = pend?.type === 'check' ? pend.resume : pend;
+    if (!response || !['bang', 'indians', 'duel'].includes(response.type) || response.player === pi) return null;
+    const target = this.players[response.player];
+    return target.alive && !target.ghost ? response : null;
+  }
+
+  takeResponse(pend) {
+    if (pend.type === 'bang') return this.takeShot(pend);
+    this.resolveDamage(pend.player, 1, pend.type === 'duel' ? pend.other : pend.source, pend, (amount) => {
+      const ghost = this.players[pend.player].ghost;
+      this.noteMass(pend, ghost ? { ghost: true } : amount ? { hurt: amount } : { saved: true });
+      this.finishResponse(pend);
+    });
   }
 
   finishResponse(response) {
@@ -803,7 +1060,7 @@ class Game {
 
   afterAction() {
     for (const p of this.players) {
-      if (p.alive && this.ability(p) === 'Suzy Lafayette' && p.hand.length === 0 && !this.winner) {
+      if (p.alive && (!p.ghost || p === this.players[this.turn]) && this.ability(p) === 'Suzy Lafayette' && p.hand.length === 0 && !this.winner) {
         this.give(p, 1);
         this.addLog(`${p.name} hết bài, rút 1 lá (Suzy Lafayette).`);
       }
@@ -817,6 +1074,8 @@ class Game {
     if (skill === 'Chuck Wengam' && p.hp > 1) return skill;
     if (skill === 'Doc Holyday' && this.skillUses < 1 && p.hand.length >= 2) return skill;
     if (skill === 'José Delgado' && this.skillUses < 2 && p.hand.some((card) => this.isBlue(card))) return skill;
+    if (skill === 'Black Flower' && this.skillUses === 0 && p.hand.some((c) => c.suit === 'C')) return skill;
+    if (skill === 'Der Spot-Burst Ringer' && this.skillUses === 0 && p.hand.some((c) => c.name === 'Bang')) return skill;
     return null;
   }
 
@@ -835,13 +1094,28 @@ class Game {
     const cards = ids.map((id) => p.hand.find((c) => c.id === id));
     if (cards.some((c) => !c)) fail('Bạn không có lá bài này.');
     const ti = this.idx(a.target), t = this.players[ti];
-    if (skill === 'Doc Holyday') {
+    if (skill === 'Doc Holyday' || skill === 'Black Flower') {
       if (!t?.alive || ti === pi || this.distance(pi, ti) > this.range(p)) fail('Chọn người khác trong tầm súng.');
+      if (skill === 'Black Flower' && cards[0].suit !== 'C') fail('Chọn một lá chất Chuồn.');
+    } else if (skill === 'Der Spot-Burst Ringer') {
+      if (cards[0].name !== 'Bang') fail('Chọn một lá Bang!.');
     } else if (!this.isBlue(cards[0])) fail('Chọn một lá viền xanh dương trên tay.');
 
     this.toDiscard(...ids.map((id) => this.takeFromHand(p, id)));
     for (const card of cards) this.recordPlay(pi, card, 'discard');
     this.skillUses++;
+    if (skill === 'Der Spot-Burst Ringer') {
+      this.recordSound(PLAY_SOUNDS.Gatling);
+      this.addLog(`${p.name} dùng Bang! như Gatling (${skill}).`);
+      this.queue = this.alive().filter((i) => i !== pi && !this.ignoredCard(this.players[i], cards[0]))
+        .map((i) => ({ ...this.attackPrompt(pi, i, 1), canEscape: true, area: true }));
+      return this.nextPending();
+    }
+    if (skill === 'Black Flower') {
+      this.noteTarget(pi, ti, skill);
+      this.addLog(`${p.name} dùng lá Chuồn để bắn ${t.name} (${skill}).`);
+      return this.startShot(pi, ti, { trueBang: true });
+    }
     if (skill === 'Doc Holyday') {
       this.noteTarget(pi, ti, 'Doc Holyday');
       if (cards.every((c) => c.suit === 'D') && this.ignoresDiamonds(t)) {
@@ -849,6 +1123,7 @@ class Game {
         return;
       }
       this.pending = this.attackPrompt(pi, ti, 1);
+      this.recordCombatEffect({ type: 'shot', source: pi, target: ti, projectile: 'bullet' });
       this.addLog(`${p.name} bỏ 2 lá và bắn ${t.name} (${skill}).`);
     } else {
       this.give(p, 2);
@@ -878,7 +1153,7 @@ class Game {
 
     if (a.type === 'sid') {
       if (this.ability(p) !== 'Sid Ketchum') fail('Chỉ người có kỹ năng Sid Ketchum mới dùng được.');
-      if (p.hp >= p.maxHp) fail('Bạn đang đầy máu.');
+      if (!this.canHeal(p)) fail('Bạn không thể hồi máu lúc này.');
       const ids = a.cardIds || [];
       if (ids.length !== 2 || ids[0] === ids[1]) fail('Chọn đúng 2 lá.');
       if (!ids.every((id) => p.hand.some((c) => c.id === id))) fail('Bạn không có lá bài này.');
@@ -890,6 +1165,15 @@ class Game {
 
     const pend = this.pending;
     if (pend) {
+      if (a.type === 'saved' && pend.type !== 'saved') {
+        const response = this.savedReaction(pend, pi);
+        const card = p.hand.find((c) => c.id === a.cardId && c.name === 'Saved!');
+        if (!response || response.player !== this.idx(a.target) || !card || !['hand', 'deck'].includes(a.from)) {
+          fail('Chọn Saved! cho người đang bị tấn công.');
+        }
+        this.takeResponse({ ...response, immediateSave: { player: pi, card, from: a.from } });
+        return this.afterAction();
+      }
       if (pend.player !== pi) fail('Chưa đến lượt bạn phản hồi.');
       this.respond(pi, p, pend, a);
       return this.afterAction();
@@ -904,7 +1188,11 @@ class Game {
       const played = (a.type === 'activate' ? p.eq : p.hand).find((c) => c.id === a.cardId);
       this.playCard(pi, p, a);
       const recipient = this.recordPlay(pi, played, a.type === 'activate' ? 'discard' : 'play');
-      const sound = recipient >= 0 ? (EQUIP_SOUNDS[played.name] || 'equipment1') : PLAY_SOUNDS[played.name];
+      let sound = a.asBang ? null : PLAY_SOUNDS[played.name];
+      if (recipient >= 0) {
+        const placedBounty = played.name === 'Bounty' && recipient !== pi;
+        sound = placedBounty ? EFFECT_SOUNDS.bountyPlaced : EQUIP_SOUNDS[played.name] || 'equipment1';
+      }
       if (sound) this.recordSound(randomSound(sound));
     }
     else if (a.type === 'discard') {
@@ -919,7 +1207,7 @@ class Game {
       this.addLog(`${p.name} bỏ ${cards.length} lá.`);
     } else if (a.type === 'endTurn') {
       const excess = p.hand.length - this.handLimit(p);
-      if (excess > 0) fail(`Bạn phải bỏ bớt ${excess} lá trước khi kết thúc lượt.`);
+      if (excess > 0 && !p.ghost) fail(`Bạn phải bỏ bớt ${excess} lá trước khi kết thúc lượt.`);
       this.addLog(`${p.name} kết thúc lượt.`);
       this.nextTurn();
     } else fail('Hành động không hợp lệ.');
@@ -932,7 +1220,7 @@ class Game {
     const p = this.players[pend ? pend.player : this.turn];
     if (pend?.type === 'blackJack') {
       this.recordTransfer(p, [pend.card], 'reveal', null, true);
-      if (pend.red) this.give(p, 1);
+      if (!pend.red || !this.give(p, 1)) this.recordSound(EFFECT_SOUNDS.draw, this.idx(p.name));
       this.pending = null;
       this.phase = 'play';
       this.afterAction();
@@ -954,16 +1242,82 @@ class Game {
       }
       if (pend.type === 'kit') action = { type: 'kit', cardIds: pend.cards.slice(0, 2).map((c) => c.id) };
       if (pend.type === 'store') action = { type: 'pick', cardId: pend.cards[0].id };
+      if (pend.type === 'poker') action = { type: 'poker', cardIds: [] };
+      if (pend.type === 'valleyDiscard' && pend.name !== 'Bandidos') {
+        action = { type: 'valleyDiscard', cardIds: p.hand.slice(0, pend.count).map((c) => c.id) };
+      }
       this.act(p.name, action);
     } else {
       const excess = p.hand.length - this.handLimit(p);
-      if (excess > 0) this.act(p.name, { type: 'discard', cardIds: p.hand.slice(0, excess).map((c) => c.id) });
+      if (excess > 0 && !p.ghost) this.act(p.name, { type: 'discard', cardIds: p.hand.slice(0, excess).map((c) => c.id) });
       this.act(p.name, { type: 'endTurn' });
     }
   }
 
   respond(pi, p, pend, a) {
+    if (a.type === 'escape') {
+      const card = this.escapeCards(p).find((c) => c.id === a.cardId);
+      if (!pend.canEscape || !card) fail('Không thể né hiệu ứng này bằng lá đã chọn.');
+      this.toDiscard(this.takeFromHand(p, card.id));
+      this.recordPlay(pi, card);
+      if (card.name === 'Escape') this.recordSound(EFFECT_SOUNDS.escape);
+      this.addLog(`${p.name} né hiệu ứng bằng ${card.name}.`);
+      this.mollyDraw(p, pend);
+      this.noteMass(pend, { card });
+      return this.finishResponse(pend);
+    }
     switch (pend.type) {
+      case 'saved': return this.resolveSaved(pi, p, pend, a);
+      case 'lemonade': {
+        if (a.type !== 'take') {
+          const card = p.hand.find((c) => c.id === a.cardId);
+          if (a.type !== 'lemonade' || !card || !this.canHeal(p)) fail('Chọn một lá trên tay để hồi máu.');
+          this.toDiscard(this.takeFromHand(p, card.id));
+          this.recordPlay(pi, card, 'discard');
+          p.hp++;
+          this.stats[pi].healed++;
+          this.addLog(`${p.name} bỏ một lá để hồi 1 máu (Lemonade Jim).`);
+        }
+        return this.nextPending();
+      }
+      case 'avoid': {
+        if (a.type !== 'take') fail('Chọn né hoặc chấp nhận hiệu ứng.');
+        this.pending = null;
+        pend.apply();
+        if (!this.pending) this.nextPending();
+        return;
+      }
+      case 'valleyDiscard': {
+        if (a.type === 'take' && pend.name === 'Bandidos') {
+          return this.resolveDamage(pi, 1, pend.source, pend, () => this.finishResponse(pend));
+        }
+        const ids = a.cardIds;
+        if (pend.name === 'Bandidos' && !pend.count) fail('Bạn phải chịu đòn khi tay không có bài.');
+        if (a.type !== 'valleyDiscard' || !Array.isArray(ids) || ids.length !== pend.count ||
+            new Set(ids).size !== ids.length || !ids.every((id) => p.hand.some((c) => c.id === id))) {
+          fail(`Chọn đúng ${pend.count} lá trên tay.`);
+        }
+        const cards = ids.map((id) => this.takeFromHand(p, id));
+        if (pend.name === 'Poker') pend.collect(cards);
+        else {
+          this.toDiscard(...cards);
+          for (const card of cards) {
+            this.recordPlay(pi, card, 'discard');
+            if (pend.name === 'Bandidos') this.mollyDraw(p);
+          }
+        }
+        return this.nextPending();
+      }
+      case 'poker': {
+        const ids = a.cardIds;
+        if (a.type !== 'poker' || !Array.isArray(ids) || ids.length > 2 || new Set(ids).size !== ids.length ||
+            !ids.every((id) => pend.ids.includes(id) && this.discard.some((c) => c.id === id))) fail('Chọn tối đa hai lá đã bỏ.');
+        const cards = ids.map((id) => this.discard.splice(this.discard.findIndex((c) => c.id === id), 1)[0]);
+        p.hand.push(...cards);
+        this.recordTransfer(p, cards, 'discard', null, true);
+        if (cards.length) this.recordSound(EFFECT_SOUNDS.draw, pi);
+        return this.nextPending();
+      }
       case 'copyAbility': {
         const target = this.players[this.idx(a.target)];
         if (a.type !== 'copyAbility' || !target?.alive || target === p) fail('Chọn một nhân vật khác còn sống.');
@@ -983,31 +1337,53 @@ class Game {
           this.pending = { type: 'kit', player: pi, cards: this.draw(3), stage: this.drawStageSeq };
           return;
         }
+        if (a.from === 'evelyn') {
+          const targets = Array.isArray(a.targets) ? a.targets.map((name) => this.idx(name)) : [];
+          if (!targets.length || targets.length > 2 || new Set(targets).size !== targets.length ||
+              targets.some((i) => i === pi || !this.players[i]?.alive || this.distance(pi, i) > this.range(p))) {
+            fail('Chọn một hoặc hai mục tiêu khác nhau trong tầm súng.');
+          }
+          this.give(p, 2 - targets.length);
+          this.phase = 'play';
+          this.queue = targets.map((i) => ({ run: () => this.startShot(pi, i) }));
+          return this.nextPending();
+        }
         if (a.from === 'player') {
           const ti = this.idx(a.target);
           const t = this.players[ti];
           if (!t || ti === pi || !t.alive || !t.hand.length) fail('Chọn người có bài trên tay.');
           this.noteTarget(pi, ti, 'Jesse Jones');
-          this.stealRandom(t, p);
-          this.give(p, 1);
-          this.addLog(`${p.name} lấy 1 lá từ tay ${t.name} và rút 1 lá.`);
+          this.pending = null;
+          this.phase = 'play';
+          return this.beforeRemoval(pi, ti, () => {
+            if (this.stealRandom(t, p)) {
+              this.give(p, 1);
+              this.addLog(`${p.name} lấy 1 lá từ tay ${t.name} và rút 1 lá.`);
+            } else this.give(p, 2);
+          });
         } else if (a.from === 'discard') {
           const c = this.discard.pop();
           p.hand.push(c);
           this.recordTransfer(p, [c], 'discard');
-          this.give(p, 1);
+          if (!this.give(p, 1)) this.recordSound(EFFECT_SOUNDS.draw, pi);
           this.addLog(`${p.name} lấy ${cardStr(c)} từ chồng bài bỏ và rút 1 lá.`);
         } else if (a.from === 'equipment') {
           const ti = this.idx(a.target), target = this.players[ti];
           const index = target?.alive ? target.eq.findIndex((c) => c.id === a.cardId) : -1;
           if (index < 0) fail('Chọn một lá trang bị đang đặt trên bàn.');
           this.noteTarget(pi, ti, 'Pat Brennan');
-          const [c] = target.eq.splice(index, 1);
-          target.coolingGreen.delete(c.id);
-          p.hand.push(c);
-          this.recordTransfer(p, [c], ti, null, true);
-          if (pi !== ti) this.recordSound(randomSound(STEAL_SOUNDS));
-          this.addLog(`${p.name} lấy ${cardStr(c)} của ${target.name} (Pat Brennan).`);
+          const selected = target.eq[index];
+          this.pending = null;
+          this.phase = 'play';
+          return this.beforeRemoval(pi, ti, () => {
+            if (!target.eq.includes(selected)) return this.give(p, 2);
+            const c = this.removeTargetCard(target, selected);
+            p.hand.push(c);
+            this.recordTransfer(p, [c], ti, null, true);
+            if (pi === ti) this.recordSound(EFFECT_SOUNDS.draw, pi);
+            else this.recordSound(randomSound(STEAL_SOUNDS));
+            this.addLog(`${p.name} lấy ${cardStr(c)} của ${target.name} (Pat Brennan).`);
+          });
         } else {
           this.normalDraw(p);
           if (this.pending?.type === 'blackJack') return;
@@ -1037,6 +1413,7 @@ class Game {
         if (i < 0) fail('Lá không hợp lệ.');
         const c = pend.cards.splice(i, 1)[0];
         p.hand.push(c);
+        this.recordSound(EFFECT_SOUNDS.draw, pi);
         this.addLog(`${p.name} chọn ${cardStr(c)} ở General Store.`);
         if (this.store) { this.store.picks.push({ i: pi, card: c }); this.store.t = Date.now(); }
         pend.order.shift();
@@ -1063,18 +1440,20 @@ class Game {
             this.toDiscard(this.takeFromHand(p, c.id));
             this.recordPlay(pi, c);
             if (c.name === 'Dodge') this.deferResponseDraw(pend, pi, CARD_INFO[c.name].draw);
-            this.mollyDraw(p, c, pend);
+            this.mollyDraw(p, pend);
           }
           pend.got++;
           this.stats[pi].dodged++;
-          this.recordSound(randomSound(equipped && c.name === 'Iron Plate' ? IRON_PLATE_SOUNDS : MISSED_SOUNDS));
+          const missed = equipped && c.name === 'Iron Plate' ? IRON_PLATE_SOUNDS : MISSED_SOUNDS;
+          this.recordSound(c.name === 'Backfire' ? EFFECT_SOUNDS.backfire : randomSound(missed));
           if (pend.got >= pend.need) this.noteAvoid(pi);
           this.addLog(`${p.name} dùng ${c.name === 'Bang' ? 'Bang! (như Missed!)' : c.name === 'Missed' ? 'Missed!' : c.name}.`);
+          if (c.name === 'Backfire' && this.players[pend.source].alive) {
+            this.queue.unshift({ run: () => this.startShot(pi, pend.source) });
+          }
           if (pend.got >= pend.need) this.noteMass(pend, { card: c });
         } else if (a.type === 'take') {
-          this.damage(pi, 1, pend.source, pend);
-          this.noteMass(pend, { hurt: 1 });
-          return this.finishResponse(pend);
+          return this.takeResponse(pend);
         } else fail('Hành động không hợp lệ.');
         if (pend.got >= pend.need) { this.addLog(`${p.name} đã né được!`); this.finishResponse(pend); }
         return;
@@ -1087,16 +1466,14 @@ class Game {
           if (!ok) fail('Cần dùng lá Bang!.');
           this.toDiscard(this.takeFromHand(p, c.id));
           this.recordPlay(pi, c);
-          this.mollyDraw(p, c, pend.type === 'duel' ? pend : null);
+          this.mollyDraw(p, pend.type === 'duel' ? pend : null);
           this.addLog(`${p.name} bỏ một Bang!.`);
           this.noteAvoid(pi);
           this.noteMass(pend, { card: c });
-          if (pend.type === 'duel') this.pending = { ...pend, player: pend.other, other: pi };
+          if (pend.type === 'duel') this.pending = { ...pend, player: pend.other, other: pi, canEscape: false };
           else this.nextPending();
         } else if (a.type === 'take') {
-          this.damage(pi, 1, pend.type === 'duel' ? pend.other : pend.source, pend.type === 'duel' ? pend : null);
-          this.noteMass(pend, { hurt: 1 });
-          this.finishResponse(pend);
+          return this.takeResponse(pend);
         } else fail('Hành động không hợp lệ.');
         return;
       }
@@ -1110,9 +1487,17 @@ class Game {
     const card = pile.find((c) => c.id === a.cardId);
     if (!card) fail('Bạn không có lá bài này.');
     let name = card.name;
-    const skill = this.ability(p);
-    if (name === 'Missed' && skill === 'Calamity Janet') name = 'Bang';
-    const info = CARD_INFO[card.name];
+    const aim = !activate && name === 'Aim' && !a.asBang;
+    let bang = card;
+    if (!activate && a.asBang) {
+      if (!this.hasLeMat(p)) fail('Bạn cần trang bị LeMat để dùng lá này như Bang!.');
+      name = 'Bang';
+    } else if (aim) {
+      bang = p.hand.find((c) => c.id === a.bangCardId && c !== card);
+      if (!bang || (!this.bangCard(p, bang) && !this.hasLeMat(p))) fail('Chọn một lá Bang! dùng kèm Aim.');
+      name = 'Bang';
+    } else if (this.bangCard(p, card)) name = 'Bang';
+    const info = CARD_INFO[name];
     if (activate) {
       if (info.type !== 'green' || !info.activate) fail('Lá này không dùng được trong lượt.');
       if (p.coolingGreen.has(card.id)) fail('Lá này sẽ sẵn sàng ở lượt kế tiếp của bạn.');
@@ -1151,17 +1536,40 @@ class Game {
         const range = regularBang || info.maxDistance === 'weapon' ? this.range(p) : (info.maxDistance ?? Infinity);
         const [ti, t] = needTarget((ti) => { if (this.distance(pi, ti) > range) fail('Mục tiêu ngoài tầm bắn.'); });
         use(); this.toDiscard(card);
+        if (aim) {
+          this.toDiscard(this.takeFromHand(p, bang.id));
+          this.recordPlay(pi, bang, 'discard');
+        }
         this.noteTarget(pi, ti, regularBang ? 'Bang!' : card.name);
         if (regularBang) {
           this.bangsPlayed++;
           this.stats[pi].bangs++;
-          this.recordSound(randomSound(GUN_SOUNDS[this.gun(p)?.name] || GUN_SOUNDS.default));
+          this.recordSound(aim ? AIM_SOUNDS.play : randomSound(GUN_SOUNDS[this.gun(p)?.name] || GUN_SOUNDS.default));
         }
         if (info.draw) this.give(p, info.draw);
-        if (this.ignoredCard(t, card)) return;
-        this.addLog(`💥 ${p.name} bắn ${t.name}${regularBang ? '' : ` bằng ${name}`}!`);
-        this.pending = this.attackPrompt(pi, ti, regularBang && skill === 'Slab the Killer' ? 2 : 1);
+        if (this.ignoredCard(t, bang)) return;
+        this.addLog(`💥 ${p.name} bắn ${t.name}${aim ? ' bằng Aim' : regularBang ? '' : ` bằng ${name}`}!`);
+        this.startShot(pi, ti, {
+          trueBang: regularBang, aim, amount: aim ? 2 : 1, canEscape: !regularBang && info.type === 'brown',
+          projectile: regularBang ? 'bullet' : PROJECTILE_BY_CARD[card.name] ?? 'bullet',
+        });
         return;
+      }
+      case 'Fanning': {
+        if (this.bangsPlayed && !this.unlimitedBang(p)) fail('Mỗi lượt chỉ được dùng 1 Bang!.');
+        const [ti] = needTarget((i) => { if (this.distance(pi, i) > this.range(p)) fail('Mục tiêu ngoài tầm bắn.'); });
+        const choices = this.fanningTargets(pi, ti);
+        const second = this.idx(a.secondTarget);
+        if (choices.length && !choices.includes(second)) fail('Chọn mục tiêu thứ hai ở khoảng cách 1 từ mục tiêu đầu.');
+        use(); this.toDiscard(card);
+        this.bangsPlayed++;
+        this.stats[pi].bangs++;
+        const targets = choices.length ? [ti, second] : [ti];
+        this.queue = targets.map((i) => ({ run: () => {
+          this.noteTarget(pi, i, name);
+          this.startShot(pi, i, { canEscape: true });
+        } }));
+        return this.nextPending();
       }
       case 'Missed': return fail('Missed! chỉ dùng khi bị bắn.');
       case 'dodge': return fail(`${name} chỉ dùng khi bị bắn.`);
@@ -1170,20 +1578,21 @@ class Game {
       case 'heal': {
         if (name === 'Beer' && this.alive().length <= 2) fail('Beer vô dụng khi chỉ còn 2 người.');
         const [ti, target] = info.effect === 'healOther' ? needTarget() : [pi, p];
-        if (target.hp >= target.maxHp) fail(target === p ? 'Bạn đang đầy máu.' : 'Người này đang đầy máu.');
+        if (!this.canHeal(target)) fail('Mục tiêu không thể hồi máu lúc này.');
         const heal = Math.min(target.maxHp - target.hp, name === 'Beer' ? this.beerHealing(p) : info.heal);
         use(); this.toDiscard(card);
         if (target !== p && this.ignoredCard(target, card)) return;
         target.hp += heal;
         this.stats[ti].healed += heal;
         this.addLog(name === 'Beer' ? `🍺 ${p.name} uống Beer (+${heal} máu).` : `${p.name} dùng ${name}${target === p ? '' : ` cho ${target.name}`} (+${heal} máu).`);
+        if (name === 'Beer') { this.offerLemonade(p); this.nextPending(); }
         return;
       }
       case 'Saloon': {
         use(); this.toDiscard(card);
         for (const i of this.alive()) {
           const q = this.players[i];
-          if (q.hp < q.maxHp) { q.hp++; this.stats[i].healed++; }
+          if (this.canHeal(q)) { q.hp++; this.stats[i].healed++; }
         }
         this.addLog(`🥃 ${p.name} mở Saloon: mọi người hồi 1 máu.`);
         return;
@@ -1219,19 +1628,24 @@ class Game {
         use(); this.toDiscard(card);
         this.noteTarget(pi, ti, name === 'Panic' ? 'Panic!' : card.name);
         if (this.ignoredCard(t, card)) return;
-        const taken = this.removeTargetCard(t, selected);
-        const sourceZone = a.targetCard === 'hand' ? 'hand' : 'eq';
-        if (name === 'Panic' || info.effect === 'take') {
-          p.hand.push(taken);
-          this.recordTransfer(p, [taken], ti, null, sourceZone === 'eq', null, sourceZone);
-          this.recordSound(randomSound(STEAL_SOUNDS));
-          this.addLog(`😱 ${p.name} lấy ${a.targetCard === 'hand' ? '1 lá trên tay' : cardStr(taken)} của ${t.name}.`);
-        } else {
-          this.toDiscard(taken);
-          this.recordTransfer(t, [taken], ti, 'discard', true, null, sourceZone);
-          this.recordSound(TARGET_DISCARD_SOUND);
-          this.addLog(`💃 ${p.name} buộc ${t.name} bỏ ${cardStr(taken)}.`);
-        }
+        const remove = () => this.beforeRemoval(pi, ti, () => {
+          if (selected ? !t.eq.includes(selected) : !t.hand.length) return;
+          const taken = this.removeTargetCard(t, selected);
+          const sourceZone = selected ? 'eq' : 'hand';
+          if (name === 'Panic' || info.effect === 'take') {
+            p.hand.push(taken);
+            this.recordTransfer(p, [taken], ti, null, sourceZone === 'eq', null, sourceZone);
+            this.recordSound(randomSound(STEAL_SOUNDS));
+            this.addLog(`😱 ${p.name} lấy ${selected ? cardStr(taken) : '1 lá trên tay'} của ${t.name}.`);
+          } else {
+            this.toDiscard(taken);
+            this.recordTransfer(t, [taken], ti, 'discard', true, null, sourceZone);
+            this.recordSound(TARGET_DISCARD_SOUND);
+            this.addLog(`💃 ${p.name} buộc ${t.name} bỏ ${cardStr(taken)}.`);
+          }
+        });
+        if (info.type === 'brown') this.applyBrown(pi, ti, name, remove);
+        else remove();
         return;
       }
       case 'discardAll': {
@@ -1245,22 +1659,55 @@ class Game {
           return { i, target, selected: this.targetCard(target, selections.get(target.name)) };
         });
         use(); this.toDiscard(card);
-        for (const { i, target, selected } of removals) {
+        this.queue = removals.map(({ i, target, selected }) => ({ run: () => {
+          if (!p.alive || !target.alive) return;
           this.stats[i].targeted++;
-          if (this.ignoredCard(target, card)) continue;
-          const removed = this.removeTargetCard(target, selected);
-          this.toDiscard(removed);
-          this.addLog(`${p.name} dùng ${name}: ${target.name} bỏ ${cardStr(removed)}.`);
-        }
-        return;
+          if (this.ignoredCard(target, card)) return;
+          this.applyBrown(pi, i, name, () => this.beforeRemoval(pi, i, () => {
+            if (selected ? !target.eq.includes(selected) : !target.hand.length) return;
+            const removed = this.removeTargetCard(target, selected);
+            this.toDiscard(removed);
+            this.addLog(`${p.name} dùng ${name}: ${target.name} bỏ ${cardStr(removed)}.`);
+          }));
+        } }));
+        return this.nextPending();
       }
       case 'Duel': {
         const [ti, t] = needTarget();
         use(); this.toDiscard(card);
         this.noteTarget(pi, ti, 'Duel');
         this.addLog(`🤠 ${p.name} thách đấu ${t.name}!`);
-        this.pending = { type: 'duel', player: ti, other: pi };
+        this.pending = { type: 'duel', player: ti, other: pi, canEscape: true };
         return;
+      }
+      case 'Bandidos':
+      case 'Poker':
+      case 'Tornado': {
+        use(); this.toDiscard(card);
+        const group = name === 'Poker' ? others() : [pi, ...others()];
+        const discards = [], discardBy = [], draws = [];
+        this.addLog(`${p.name} dùng ${name}.`);
+        this.queue = group.map((i) => ({ run: () => {
+          if (i !== pi && this.ignoredCard(this.players[i], card)) return;
+          const apply = () => {
+            const count = Math.min(name === 'Bandidos' ? 2 : 1, this.players[i].hand.length);
+            if (name === 'Tornado') draws.push(i);
+            if (count || name === 'Bandidos') {
+              this.pending = { type: 'valleyDiscard', player: i, source: pi, name, count };
+              if (name === 'Poker') this.pending.collect = ([card]) => { discards.push(card); discardBy.push(i); };
+            }
+          };
+          this.applyBrown(pi, i, name, apply);
+        } }));
+        this.queue.push({ cards: discards, run: () => {
+          this.toDiscard(...discards);
+          discards.forEach((c, i) => this.recordPlay(discardBy[i], c, 'discard'));
+          for (const i of draws) if (this.players[i].alive) this.give(this.players[i], 2);
+          if (p.alive && discards.length && !discards.some((c) => c.rank === 'A')) {
+            this.pending = { type: 'poker', player: pi, ids: discards.map((c) => c.id) };
+          }
+        } });
+        return this.nextPending();
       }
       case 'Indians':
       case 'attackAll':
@@ -1272,8 +1719,8 @@ class Game {
         this.massSeq = (this.massSeq || 0) + 1;
         this.mass = { seq: this.massSeq, by: pi, card, targets: targets.map((i) => ({ i, res: null })), t: Date.now(), t0: Date.now() };
         this.queue = targets.map((j) => name === 'Indians'
-          ? { type: 'indians', player: j, source: pi, mass: this.massSeq }
-          : { ...this.attackPrompt(pi, j, 1), mass: this.massSeq });
+          ? { type: 'indians', player: j, source: pi, mass: this.massSeq, canEscape: true }
+          : { ...this.attackPrompt(pi, j, 1), mass: this.massSeq, canEscape: info.type === 'brown' });
         this.nextPending();
         return;
       }
@@ -1289,6 +1736,29 @@ class Game {
         this.jailSeq = (this.jailSeq || 0) + 1;
         t.jailed = this.jailSeq; // hiện song sắt từ lúc bị đặt Jail đến khi rút kiểm tra
         this.addLog(`⛓️ ${p.name} bỏ tù ${t.name}.`);
+        return;
+      }
+      case 'Ghost': {
+        const t = this.players[this.idx(a.target)];
+        if (!t || t.alive || t.forfeited) fail('Chọn một người đã bị loại và còn ở trong phòng.');
+        use();
+        t.alive = true;
+        t.ghost = true;
+        t.hp = 0;
+        t.eq.push(card);
+        this.addLog(`👻 ${t.name} trở lại dưới dạng Ghost.`);
+        return;
+      }
+      case 'Rattlesnake':
+      case 'Bounty': {
+        const t = this.players[this.idx(a.target)];
+        if (!t?.alive || this.hasEq(t, name)) fail(`Chọn người đang chơi chưa có ${name}.`);
+        use();
+        if (t !== p && this.ignoredCard(t, card)) this.toDiscard(card);
+        else {
+          t.eq.push(card);
+          this.addLog(`${p.name} đặt ${name} trước ${t.name}.`);
+        }
         return;
       }
       default: {
@@ -1491,8 +1961,16 @@ class Game {
     if (pend) {
       pending = { type: pend.type, player: pend.player };
       if (pend.type === 'character' && pend.player === me) pending.options = [...pend.options];
-      if (pend.type === 'bang') Object.assign(pending, { source: pend.source, need: pend.need, got: pend.got, barrels: pend.barrels });
+      if (pend.type === 'bang') Object.assign(pending, { source: pend.source, need: pend.need, got: pend.got, barrels: pend.barrels, amount: pend.amount ?? 1 });
       if (pend.type === 'bang' && pend.player === me) pending.responseCardIds = this.dodgeCards(this.players[me]).map((c) => c.id);
+      if (pend.canEscape && pend.player === me) pending.escapeIds = this.escapeCards(this.players[me]).map((c) => c.id);
+      if (pend.type === 'saved') Object.assign(pending, { target: pend.target, amount: pend.amount });
+      if (['avoid', 'valleyDiscard'].includes(pend.type)) Object.assign(pending, { name: pend.name, count: pend.count });
+      if (pend.type === 'poker' && pend.player === me) pending.cards = this.discard.filter((c) => pend.ids.includes(c.id));
+      if (meAlive && this.hasSaved(this.players[me])) {
+        const reaction = this.savedReaction(pend, me);
+        if (reaction) pending.savedReaction = { target: reaction.player };
+      }
       if (pend.type === 'indians') pending.source = pend.source;
       if (pend.type === 'duel') pending.other = pend.other;
       if (pend.type === 'store') pending.cards = pend.cards;
@@ -1504,16 +1982,19 @@ class Game {
         pending.kind = pend.kind;
         if (pend.resume) Object.assign(pending, { source: pend.resume.source, need: pend.resume.need, got: pend.resume.got });
       }
+      const attack = pend.type === 'check' ? pend.resume : pend;
+      if (attack?.type === 'bang' && attack.mass == null && !attack.area) pending.directAttack = true;
     }
     return {
       players: this.players.map((p, i) => ({
         name: p.name, char: p.char, ability: this.ability(p), hp: p.hp, maxHp: p.maxHp, alive: p.alive,
+        ghost: !!p.ghost, revivable: !p.alive && !p.forfeited,
         handCount: p.hand.length,
         eq: p.eq.map((c) => {
           const disabled = !this.equipmentActive(p);
           return CARD_INFO[c.name].type === 'green' ? { ...c, ready: !p.coolingGreen.has(c.id), disabled } : disabled ? { ...c, disabled } : c;
         }),
-        role: (p.role === 'Sheriff' || !p.alive || i === me || this.winner) ? p.role : null,
+        role: (p.role === 'Sheriff' || !p.alive || p.ghost || i === me || this.winner) ? p.role : null,
         distance: meAlive && p.alive ? this.distance(me, i) : null,
         winner: this.isWinner(p),
         // Jail có thể bị gỡ bằng Panic!/Cat Balou → chỉ hiện khi lá Jail còn trên bàn
@@ -1523,6 +2004,9 @@ class Game {
         index: me, hand: this.players[me].hand, range: this.range(this.players[me]), unlimitedBang: this.unlimitedBang(this.players[me]),
         handLimit: this.handLimit(this.players[me]),
         activeSkill: !this.winner && me === this.turn && !pend && this.phase === 'play' ? this.activeSkill(this.players[me]) : null,
+        lemat: me === this.turn && this.hasLeMat(this.players[me]),
+        fanningTargets: meAlive && me === this.turn && this.players[me].hand.some((c) => c.name === 'Fanning')
+          ? this.alive().filter((i) => i !== me).map((i) => [this.players[i].name, this.fanningTargets(me, i).map((j) => this.players[j].name)]) : [],
       } : null,
       turn: this.turn, phase: this.phase, bangsPlayed: this.bangsPlayed,
       deckCount: this.deck.length, discardTop: this.discard[this.discard.length - 1] || null,
@@ -1534,6 +2018,7 @@ class Game {
       lastCheck: this.lastCheck || null, // lá rút kiểm tra gần nhất (đã công khai ở chồng bài bỏ)
       soundSeq: this.soundSeq,
       sounds: this.sounds.filter((cue) => cue.player === null || cue.player === me).map(({ seq, files }) => ({ seq, files })),
+      combatEffects: this.combatEffects.slice(),
       plays: (this.plays || []).map((event) => ({ ...event })),
       transfers: (this.transfers || []).map((event) => ({
         seq: event.seq, to: event.to, from: event.from,
@@ -1545,4 +2030,5 @@ class Game {
 }
 
 module.exports = { Game, GameError, CARD_INFO, CHAR_INFO, ROLE_INFO, SUIT_SYMBOL, RULES_PREVIEW, SOUND_FILES,
-  greenCardCount: DODGE_CITY.greenCount, dodgeCityCardCount: DODGE_CITY.cards.length, dodgeCityRevision: DODGE_CITY.revision };
+  greenCardCount: DODGE_CITY.greenCount, dodgeCityCardCount: DODGE_CITY.cards.length, dodgeCityRevision: DODGE_CITY.revision,
+  valleyOfShadowCardCount: VALLEY.cards.length, valleyOfShadowRevision: VALLEY.revision };

@@ -71,6 +71,10 @@ try {
   if ($LASTEXITCODE -ne 0) { throw 'Game chưa nạp dữ liệu Dodge City. Hãy kiểm tra mã game và tệp dữ liệu.' }
   $dodgeCityData = $dodgeCityData | ConvertFrom-Json
   Say "Dữ liệu Dodge City: $dodgeCityFile ($($dodgeCityData.count) lá)" Green
+  $valleyData = & $node -e "const g=require('./game'); console.log(JSON.stringify({count:g.valleyOfShadowCardCount,revision:g.valleyOfShadowRevision}));"
+  if ($LASTEXITCODE -ne 0) { throw 'Không đọc được dữ liệu Valley of Shadow.' }
+  $valleyData = $valleyData | ConvertFrom-Json
+  if ($valleyData.count) { Say "Dữ liệu Valley of Shadow: $($valleyData.count) lá" Green }
   $revision = & $node -e "const fs=require('fs'),crypto=require('crypto'); console.log(crypto.createHash('sha256').update(Buffer.concat(['server.js','game.js','power.js','room-timer.js','room-pause.js','room-bots.js'].map(f=>fs.readFileSync(f)))).digest('hex'));"
   if ($LASTEXITCODE -ne 0) { throw 'Không đọc được mã nguồn game trong thư mục hiện tại.' }
 
@@ -85,13 +89,14 @@ try {
     Say "Server Bang đang chạy: $([bool]$isBang)"
     Say "Server đã nạp mã mới nhất: $([bool]($health -and $health.revision -eq $revision))"
     Say "Server đã nạp dữ liệu Dodge City mới nhất: $([bool]($health -and $health.greenCardsRevision -eq $dodgeCityData.revision -and $health.dodgeCityCardCount -eq $dodgeCityData.count))"
+    Say "Server đã nạp dữ liệu Valley of Shadow mới nhất: $([bool]($health -and $health.valleyOfShadowRevision -eq $valleyData.revision -and $health.valleyOfShadowCardCount -eq $valleyData.count))"
     exit 0
   }
   if ($listenerId -or $health -or $meta) {
     if (-not $isBang) { throw "Cổng $Port đang được chương trình khác sử dụng. Game chưa được khởi động." }
-    $stale = -not $health -or $health.revision -ne $revision -or $health.greenCardsRevision -ne $dodgeCityData.revision -or $health.dodgeCityCardCount -ne $dodgeCityData.count
+    $stale = -not $health -or $health.revision -ne $revision -or $health.greenCardsRevision -ne $dodgeCityData.revision -or $health.dodgeCityCardCount -ne $dodgeCityData.count -or $health.valleyOfShadowRevision -ne $valleyData.revision -or $health.valleyOfShadowCardCount -ne $valleyData.count
     if ($stale -and -not $Restart) {
-      Say 'Server đang chạy mã hoặc dữ liệu Dodge City cũ. Mở lại trình duyệt sẽ chưa áp dụng bản mới.' Yellow
+      Say 'Server đang chạy mã hoặc dữ liệu bản mở rộng cũ. Mở lại trình duyệt sẽ chưa áp dụng bản mới.' Yellow
       Say 'Khởi động lại sẽ mất các phòng/ván đang mở; tài khoản vẫn được giữ.' Yellow
       # Mặc định khởi động lại: server cũ không có thống kê/danh hiệu cuối ván và các luật mới.
       $answer = Read-Host 'Nhấn Enter để khởi động lại server (nên chọn), hoặc nhập K để giữ server cũ'
@@ -145,7 +150,7 @@ try {
     $process.Refresh()
     if ($process.HasExited) { throw "Server vừa khởi động đã dừng (mã lỗi $($process.ExitCode)). Xem thông báo Node.js phía trên." }
     $running = Read-JsonUrl "$localUrl/api/health"
-    if ($running.pid -eq $process.Id -and $running.revision -eq $revision -and $running.greenCardsRevision -eq $dodgeCityData.revision -and $running.dodgeCityCardCount -eq $dodgeCityData.count) { $ready = $true; break }
+    if ($running.pid -eq $process.Id -and $running.revision -eq $revision -and $running.greenCardsRevision -eq $dodgeCityData.revision -and $running.dodgeCityCardCount -eq $dodgeCityData.count -and $running.valleyOfShadowRevision -eq $valleyData.revision -and $running.valleyOfShadowCardCount -eq $valleyData.count) { $ready = $true; break }
     Start-Sleep -Milliseconds 250
   }
   if (-not $ready) { throw 'Server chưa sẵn sàng. Không mở lại nhầm server cũ.' }

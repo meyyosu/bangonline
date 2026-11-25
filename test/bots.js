@@ -5,12 +5,12 @@ const { Game } = require('../game');
 const { tickBots } = require('../room-bots');
 const { pauseAction } = require('../room-pause');
 
-for (const dodgeCity of [false, true]) test(`bots finish games, preserve cards and private views (Dodge City: ${dodgeCity})`, () => {
-  for (let seed = 1; seed <= 30; seed++) {
+for (const [dodgeCity, valleyOfShadow] of [[false, false], [true, false], [false, true], [true, true]]) test(`25 bot games conserve cards and finish (Dodge City: ${dodgeCity}, Valley of Shadow: ${valleyOfShadow})`, () => {
+  for (let seed = 1; seed <= 25; seed++) {
     let state = seed;
     const rng = () => { state = (state * 1664525 + 1013904223) >>> 0; return state / 4294967296; };
     const bots = Array.from({ length: 4 + seed % (dodgeCity ? 5 : 4) }, (_, i) => `Bot ${i + 1}`);
-    const game = new Game(bots, { rng, characterChoices: 3, dodgeCity });
+    const game = new Game(bots, { rng, characterChoices: 3, dodgeCity, valleyOfShadow });
     const room = { game, bots, players: bots, status: 'playing', turnSeconds: 0, characterSeconds: 0, chat: [] };
     let moves = 0;
     for (let now = 0; !game.winner; now += 1000) {
@@ -19,10 +19,111 @@ for (const dodgeCity of [false, true]) test(`bots finish games, preserve cards a
       const count = game.deck.length + game.discard.length
         + game.players.reduce((n, p) => n + p.hand.length + p.eq.length, 0)
         + (game.pending?.cards?.length || 0) + game.queue.reduce((n, q) => n + (q.cards?.length || 0), 0);
-      assert.equal(count, dodgeCity ? 114 : 80);
+      assert.equal(count, game.fullDeck.length);
       assert.ok(game.viewFor(null).players.every((p) => !('hand' in p)));
     }
   }
+});
+
+function targetingGame(roles) {
+  const names = roles.map((_, i) => `Player ${i + 1}`);
+  const game = new Game(names, { valleyOfShadow: true, rng: () => 0.4 });
+  for (const [i, player] of game.players.entries()) {
+    player.role = roles[i];
+    player.char = 'Willy the Kid';
+    game.toDiscard(...player.hand);
+    player.hand = [];
+  }
+  game.turn = 0;
+  game.phase = 'play';
+  game.pending = null;
+  game.bangsPlayed = 0;
+  const room = { game, status: 'playing', bots: [game.players[game.turn].name], botNextAt: 0 };
+  return { game, room };
+}
+
+function deal(game, player, name) {
+  const pile = [game.deck, game.discard].find((cards) => cards.some((c) => c.name === name));
+  assert.ok(pile, `Missing ${name}`);
+  const [card] = pile.splice(pile.findIndex((c) => c.name === name), 1);
+  player.hand.push(card);
+  return card;
+}
+
+function revive(game, player, target) {
+  game.kill(game.idx(target.name), null);
+  const card = deal(game, player, 'Ghost');
+  game.act(player.name, { type: 'play', cardId: card.id, target: target.name });
+  return card;
+}
+
+test('a bot shoots a living target even when it could reach a Ghost first', () => {
+  const { game, room } = targetingGame(['Sheriff', 'Outlaw', 'Renegade', 'Outlaw']);
+  const [bot, ghost, , other] = game.players;
+  revive(game, bot, ghost);
+  deal(game, bot, 'Bang');
+  assert.equal(tickBots(room, 0), true);
+  assert.equal(game.pending.type, 'bang');
+  assert.equal(game.players[game.pending.player], other);
+});
+
+test('a bot using Fanning prefers a living secondary target over Ghost', () => {
+  const { game, room } = targetingGame(['Sheriff', 'Outlaw', 'Outlaw', 'Renegade', 'Deputy']);
+  const [bot, first, ghost, second] = game.players;
+  first.char = 'Rose Doolan';
+  revive(game, bot, ghost);
+  deal(game, bot, 'Fanning');
+  assert.equal(tickBots(room, 0), true);
+  assert.equal(game.players[game.pending.player], first);
+  game.act(first.name, { type: 'take' });
+  assert.equal(game.players[game.pending.player], second);
+});
+
+test('a Renegade attacks the third player and waits for the final duel to attack Sheriff', () => {
+  const { game, room } = targetingGame(['Renegade', 'Sheriff', 'Outlaw', 'Outlaw']);
+  const [bot, sheriff, other] = game.players;
+  game.kill(3, null);
+  other.hp = 1;
+  const fanning = deal(game, bot, 'Fanning');
+  const gatling = deal(game, bot, 'Gatling');
+  deal(game, bot, 'Bang');
+  assert.equal(tickBots(room, 0), true);
+  assert.equal(game.pending.type, 'bang');
+  assert.equal(game.players[game.pending.player], other);
+  assert.ok(bot.hand.includes(fanning) && bot.hand.includes(gatling));
+  game.act(other.name, { type: 'take' });
+  assert.equal(tickBots(room, 1000), true);
+  assert.equal(game.pending.type, 'bang');
+  assert.equal(game.players[game.pending.player], sheriff);
+});
+
+test('a Renegade holds the shot when only Sheriff is in range with three players left', () => {
+  const { game, room } = targetingGame(['Renegade', 'Sheriff', 'Outlaw', 'Outlaw']);
+  const [bot, , other] = game.players;
+  game.kill(3, null);
+  other.char = 'Paul Regret';
+  const bang = deal(game, bot, 'Bang');
+  assert.equal(tickBots(room, 0), true);
+  assert.ok(bot.hand.includes(bang));
+  assert.equal(game.combatEffects.length, 0);
+  assert.notEqual(game.turn, 0);
+});
+
+test('a Renegade removes the third player’s Ghost equipment before shooting Sheriff', () => {
+  const { game, room } = targetingGame(['Renegade', 'Sheriff', 'Outlaw', 'Outlaw']);
+  const [bot, sheriff, third] = game.players;
+  game.kill(3, null);
+  const ghost = revive(game, bot, third);
+  deal(game, third, 'Missed');
+  const bang = deal(game, bot, 'Bang');
+  deal(game, bot, 'Cat Balou');
+  assert.equal(tickBots(room, 0), true);
+  assert.equal(third.alive, false);
+  assert.ok(game.discard.includes(ghost));
+  assert.ok(bot.hand.includes(bang));
+  assert.equal(tickBots(room, 1000), true);
+  assert.equal(game.pending.type, 'bang');
+  assert.equal(game.players[game.pending.player], sheriff);
 });
 
 test('bots accept pauses, remain frozen, and never play a human turn', () => {

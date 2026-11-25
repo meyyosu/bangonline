@@ -501,7 +501,7 @@ for (const dodgeCity of [false, true]) test(`room API protects settings and pass
     assert.deepEqual((await view(0, code)).bots, []);
     assert.equal((await request(0, url + '/settings', { turnSeconds: 601, password: '' })).status, 400);
     let room = await view(0, code);
-    assert.deepEqual(room.server, { features: ['endSummary', 'freeReset'], stale: false });
+    assert.deepEqual(room.server, { features: ['endSummary', 'freeReset', 'winProb3'], stale: false });
     assert.equal(room.hasPassword, true);
     assert.equal(room.turnSeconds, 10);
     assert.ok(!JSON.stringify(room).includes('room-secret'));
@@ -696,10 +696,10 @@ test('room view warns when the code on disk is newer than the running server', a
       return JSON.parse(text.split('\n\n')[0].slice(6)).room.server;
     }
     await new Promise((resolve) => setTimeout(resolve, 300));
-    assert.deepEqual(await server(), { features: ['endSummary', 'freeReset'], stale: false });
+    assert.deepEqual(await server(), { features: ['endSummary', 'freeReset', 'winProb3'], stale: false });
     fs.appendFileSync(path.join(dir, 'game.js'), '\n// cập nhật giả lập\n');
     await new Promise((resolve) => setTimeout(resolve, 400));
-    assert.deepEqual(await server(), { features: ['endSummary', 'freeReset'], stale: true });
+    assert.deepEqual(await server(), { features: ['endSummary', 'freeReset', 'winProb3'], stale: true });
   } finally {
     child.kill();
     await new Promise((resolve) => child.exitCode !== null ? resolve() : child.once('exit', resolve));
