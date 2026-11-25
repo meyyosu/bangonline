@@ -1181,13 +1181,25 @@ function watchDock() {
 }
 PHONE_MQ.addEventListener('change', () => { if (ROOM?.game) renderGame(); });
 
-// ---------- pop-up đánh chung (Indians / Gatling) ----------
+// ---------- pop-up đánh chung ----------
 // Hiện giữa bàn: lá đã đánh ➜ mỗi người bị nhắm một cột (tên + cách phản hồi). Xong hết thì thu gọn rồi tự ẩn.
 const MASS_MINI_MS = 2500, MASS_HIDE_MS = 5000;
-const massDone = (g, m) => m.targets.every((t) => t.res || !g.players[t.i].alive);
-function massResHTML(r, dead, flip) {
+const massDone = (g, m) => !(m.card.name === 'Poker' && g.pending?.type === 'poker') &&
+  m.targets.every((t) => t.res || !g.players[t.i].alive);
+function massResHTML(r, dead, flip, picks) {
   const f = flip ? ' flip' : '';
   if (r?.card) return cardHTML(r.card, 'mp-res ok' + f);
+  if (r?.faceDown) return '<div class="card-back mp-facedown">Đã chọn</div>';
+  if (r?.discarded) {
+    return `<div class="mp-res mp-batch${f}">
+      ${r.discarded.map((c) => {
+        const picked = picks?.includes(c.id);
+        return `<div class="mp-discard-row">${cardHTML(c, 'mp-discard')}${picked ? '<span class="mp-picked">Đã lấy</span>' : ''}</div>`;
+      }).join('') || '<span>Không bỏ lá</span>'}
+      ${r.drawn != null ? `<span class="mp-drawn">Rút ${r.drawn} lá</span>` : ''}
+    </div>`;
+  }
+  if (r?.immune) return '<div class="mp-res">Miễn nhiễm</div>';
   if (r?.saved) return `<div class="mp-res ok${f}"><div class="ic">🛟</div>Saved!</div>`;
   if (r?.ghost) return `<div class="mp-res ok${f}"><div class="ic">👻</div>Ghost</div>`;
   if (r?.barrel) return `<div class="mp-res barrel ok${f}"><div class="ic">🛢️</div>Barrel<br>né được</div>`;
@@ -1195,7 +1207,15 @@ function massResHTML(r, dead, flip) {
   if (r?.hurt) return `<div class="mp-res hurt${f}"><div class="big">−${r.hurt}</div>máu</div>`;
   return '<div class="mp-res wait">chờ…</div>';
 }
-const massSum = (r, dead) => r?.card ? cardInfo(r.card).icon : r?.saved ? '🛟' : r?.ghost ? '👻' : r?.barrel ? '🛢️' : r?.dead || dead ? '💀' : r?.hurt ? `−${r.hurt}❤` : '…';
+function massSum(r, dead) {
+  if (r?.faceDown) return 'Đã chọn';
+  if (r?.discarded) {
+    const n = r.discarded.length;
+    return r.drawn != null ? `−${n}/+${r.drawn} lá` : `Bỏ ${n} lá`;
+  }
+  if (r?.immune) return 'Miễn nhiễm';
+  return r?.card ? cardInfo(r.card).icon : r?.saved ? '🛟' : r?.ghost ? '👻' : r?.barrel ? '🛢️' : r?.dead || dead ? '💀' : r?.hurt ? `−${r.hurt}❤` : '…';
+}
 
 function renderMassPopup(g) {
   $('.mass-pop:not(.store-pop):not(.out)')?.remove();
@@ -1217,23 +1237,31 @@ function renderMassPopup(g) {
     }, MASS_MINI_MS);
   }
   const by = g.players[m.by];
-  const active = g.pending ? m.targets.find((t) => !t.res && g.players[t.i].alive) : null;
-  const fresh = m.targets.filter((t) => (t.res || !g.players[t.i].alive) && !st.seen.has(t.i));
+  const active = m.targets.find((t) => t.i === g.pending?.player && !t.res && g.players[t.i].alive);
+  const fresh = m.targets.filter((t) => (t.res || !g.players[t.i].alive) && !t.res?.faceDown && !st.seen.has(t.i));
+  const group = ['Poker', 'Tornado', 'Bandidos'].includes(m.card.name);
+  let footer = '';
+  if (m.card.name === 'Poker') {
+    if (m.ace == null) footer = 'Các lá sẽ lật cùng lúc';
+    else if (m.ace) footer = 'Có lá Át · Poker kết thúc';
+    else if (g.pending?.type === 'poker') footer = `${esc(by.name)} đang chọn tối đa 2 lá`;
+  }
+  const targets = `<div class="mp-targets">${m.targets.map((t) => {
+    const p = g.players[t.i], dead = !p.alive && !t.res, mine = t.i === g.me?.index;
+    return `<div class="mp-col${mine ? ' mine' : ''}${t === active ? ' active' : ''}">
+      <div class="mp-name" title="${esc(p.name)}" data-sum="${massSum(t.res, dead)}">${mine ? 'Bạn' : esc(p.name)}</div>
+      <div class="mp-slot">${massResHTML(t.res, dead, fresh.includes(t) && !st.enter, m.picks)}</div></div>`;
+  }).join('')}</div>`;
   // Lúc có người đang rút kiểm tra (Barrel) thì thu gọn để lộ chồng bài
   const mini = st.mini || g.pending?.type === 'check';
   const el = document.createElement('div');
-  el.className = `mass-pop${mini ? ' mini' : ''}${st.enter ? ' enter' : ''}`;
+  el.className = `mass-pop${group ? ' group-pop' : ''}${mini ? ' mini' : ''}${st.enter ? ' enter' : ''}`;
   el.setAttribute('role', 'status');
   el.title = mini ? 'Bấm để mở rộng' : 'Bấm để thu gọn';
   el.innerHTML = `
     <div class="mp-src"><div class="who"><span class="mini-ic">${cardInfo(m.card).icon} </span>${esc(by.name)}</div>${cardHTML(m.card)}</div>
     <div class="mp-arrow">➜</div>
-    <div class="mp-targets">${m.targets.map((t) => {
-      const p = g.players[t.i], dead = !p.alive && !t.res, mine = t.i === g.me?.index;
-      return `<div class="mp-col${mine ? ' mine' : ''}${t === active ? ' active' : ''}">
-        <div class="mp-name" title="${esc(p.name)}" data-sum="${massSum(t.res, dead)}">${mine ? 'Bạn' : esc(p.name)}</div>
-        <div class="mp-slot">${massResHTML(t.res, dead, fresh.includes(t) && !st.enter)}</div></div>`;
-    }).join('')}</div>
+    ${group ? `<div class="mp-group-content">${targets}${footer ? `<div class="mp-group-footer">${footer}</div>` : ''}</div>` : targets}
     <button type="button" class="mp-close" title="Đóng" aria-label="Đóng">✕</button>`;
   el.onclick = (e) => {
     if (e.target.closest('.mp-close')) return hideMassPopup(st);
@@ -1260,7 +1288,7 @@ function hideMassPopup(st) {
   setTimeout(() => el.remove(), 600); // phòng khi tắt hiệu ứng
 }
 
-// Pop-up Indians/Gatling và General Store dùng chung chỗ giữa bàn: chỉ hiện cái đang diễn ra / mới nhất
+// Các pop-up dùng chung chỗ giữa bàn: chỉ hiện cái đang diễn ra / mới nhất
 function centerPopupKind(g) {
   if (g.pending?.type === 'store') return 'store';
   if (g.mass && !massDone(g, g.mass)) return 'mass';

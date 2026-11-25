@@ -827,7 +827,7 @@ body.match-result-open { overflow: hidden; }
   .result-continue { transition: none; }
 }
 
-/* ---------- pop-up đánh chung (Indians / Gatling) ----------
+/* ---------- pop-up đánh chung ----------
    Nằm giữa .arena (che chồng bài trong lúc giải quyết), không phủ tối bàn; bấm để thu gọn/mở rộng. */
 .mass-pop {
   --ty: -50%; position: absolute; left: 50%; top: 50%; transform: translate(-50%, var(--ty));
@@ -872,6 +872,27 @@ body.match-result-open { overflow: hidden; }
 .mp-res.ok { box-shadow: 0 0 0 2px #4caf50, 0 0 10px rgba(76,175,80,.6); }
 .mp-res.wait { border: 2px dashed rgba(244,228,193,.35); color: rgba(244,228,193,.6); }
 
+.mp-group-content { min-width: 0; }
+.group-pop .mp-targets { flex-wrap: wrap; justify-content: center; }
+.group-pop:not(.mini) .mp-col { width: 68px; }
+.group-pop:not(.mini) .mp-slot { width: 100%; height: auto; min-height: 52px; display: grid; }
+.mp-group-footer { margin-top: 6px; color: var(--gold); font-size: 11px; text-align: center; }
+.group-pop.mini .mp-group-footer { display: none; }
+.group-pop .mp-batch { gap: 3px; justify-content: flex-start; }
+.mp-discard-row { width: 100%; }
+.mp-batch .mp-discard {
+  width: 100%; height: auto; min-height: 29px; padding: 2px;
+  border-width: 2px; line-height: 1;
+}
+.mp-discard .corner { position: static; font-size: 10px; }
+.mp-discard .cname { margin: 2px 0 0; font-size: 9px; overflow-wrap: anywhere; }
+.mp-discard .icon, .mp-discard .range { display: none; }
+.mp-picked, .mp-drawn { color: var(--gold); font-size: 9px; }
+.arena .group-pop .mp-facedown {
+  width: 100%; height: 52px; font: 700 10px system-ui, sans-serif;
+  border-width: 2px; box-shadow: none;
+}
+
 .mp-close { position: absolute; top: -10px; right: -10px; width: 22px; height: 22px; padding: 0; border-radius: 50%; border: 2px solid var(--gold); background: var(--wood); color: var(--paper); cursor: pointer; font-size: 11px; line-height: 1; }
 
 /* thu gọn: một dải nhỏ, dời lên mép trên mặt bàn để lộ chồng bài */
@@ -893,6 +914,7 @@ body.match-result-open { overflow: hidden; }
   .mp-col { width: 42px; } .mp-slot { width: 38px; height: 52px; }
   .mass-pop .mp-res.card .cname, .mass-pop .mp-src .card .cname { display: none; }
   .mass-pop .mp-src .card { width: 40px; height: 54px; }
+  .group-pop .mp-src .card .cname, .group-pop .mp-res.card .cname { display: block; }
 }
 @media (prefers-reduced-motion: reduce) { .mass-pop, .mp-res, .player.mp-hit .av { animation: none !important; } }
 

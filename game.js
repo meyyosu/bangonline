@@ -904,12 +904,19 @@ class Game {
     return p.role === this.winner;
   }
 
-  // Ghi cách một người phản hồi lá đánh chung (Indians/Gatling) để giao diện hiện pop-up kết quả
+  startMass(by, card, players) {
+    this.massSeq = (this.massSeq || 0) + 1;
+    const now = Date.now();
+    this.mass = { seq: this.massSeq, by, card, targets: players.map((i) => ({ i, res: null })), t: now, t0: now };
+    return this.mass;
+  }
+
+  // Chỉ ghi các lựa chọn mà cả bàn được phép thấy.
   noteMass(pend, res) {
     const m = this.mass;
     if (!m || !pend?.mass || pend.mass !== m.seq) return;
     const t = m.targets.find((x) => x.i === pend.player);
-    if (!t || t.res) return;
+    if (!t || (t.res && !t.res.faceDown)) return;
     if (res.hurt && !this.players[pend.player].alive) res = { dead: true };
     t.res = res;
     m.t = Date.now();
@@ -955,10 +962,10 @@ class Game {
     return p.hand.filter((c) => c.name === 'Escape' || (this.ability(p) === 'Mick Defender' && c.name === 'Missed'));
   }
 
-  applyBrown(source, player, name, apply) {
+  applyBrown(source, player, name, apply, mass) {
     if (!this.players[player].alive || this.winner) return;
     if (this.escapeCards(this.players[player]).length) {
-      this.pending = { type: 'avoid', source, player, name, apply, canEscape: true };
+      this.pending = { type: 'avoid', source, player, name, apply, canEscape: true, mass };
     } else apply();
   }
 
@@ -1305,7 +1312,7 @@ class Game {
       }
       case 'valleyDiscard': {
         if (a.type === 'take' && pend.name === 'Bandidos') {
-          return this.resolveDamage(pi, 1, pend.source, pend, () => this.finishResponse(pend));
+          return this.takeResponse(pend);
         }
         const ids = a.cardIds;
         if (pend.name === 'Bandidos' && !pend.count) fail('Bạn phải chịu đòn khi tay không có bài.');
@@ -1314,13 +1321,16 @@ class Game {
           fail(`Chọn đúng ${pend.count} lá trên tay.`);
         }
         const cards = ids.map((id) => this.takeFromHand(p, id));
-        if (pend.name === 'Poker') pend.collect(cards);
-        else {
+        if (pend.name === 'Poker') {
+          pend.collect(cards);
+          this.noteMass(pend, { faceDown: true });
+        } else {
           this.toDiscard(...cards);
           for (const card of cards) {
             this.recordPlay(pi, card, 'discard');
             if (pend.name === 'Bandidos') this.mollyDraw(p);
           }
+          this.noteMass(pend, { discarded: cards });
         }
         return this.nextPending();
       }
@@ -1332,6 +1342,10 @@ class Game {
         p.hand.push(...cards);
         this.recordTransfer(p, cards, 'discard', null, true);
         if (cards.length) this.recordSound(EFFECT_SOUNDS.draw, pi);
+        if (this.mass?.seq === pend.mass) {
+          this.mass.picks = cards.map((c) => c.id);
+          this.mass.t = Date.now();
+        }
         return this.nextPending();
       }
       case 'copyAbility': {
@@ -1707,26 +1721,39 @@ class Game {
       case 'Tornado': {
         use(); this.toDiscard(card);
         const group = name === 'Poker' ? others() : [pi, ...others()];
+        const mass = this.startMass(pi, card, group);
         const discards = [], discardBy = [], draws = [];
         this.addLog(`${p.name} dùng ${name}.`);
         this.queue = group.map((i) => ({ run: () => {
-          if (i !== pi && this.ignoredCard(this.players[i], card)) return;
+          const step = { player: i, mass: mass.seq };
+          if (i !== pi && this.ignoredCard(this.players[i], card)) return this.noteMass(step, { immune: true });
           const apply = () => {
             const count = Math.min(name === 'Bandidos' ? 2 : 1, this.players[i].hand.length);
             if (name === 'Tornado') draws.push(i);
             if (count || name === 'Bandidos') {
-              this.pending = { type: 'valleyDiscard', player: i, source: pi, name, count };
+              this.pending = { type: 'valleyDiscard', ...step, source: pi, name, count };
               if (name === 'Poker') this.pending.collect = ([card]) => { discards.push(card); discardBy.push(i); };
-            }
+            } else this.noteMass(step, { discarded: [] });
           };
-          this.applyBrown(pi, i, name, apply);
+          this.applyBrown(pi, i, name, apply, mass.seq);
         } }));
         this.queue.push({ cards: discards, run: () => {
           this.toDiscard(...discards);
-          discards.forEach((c, i) => this.recordPlay(discardBy[i], c, 'discard'));
-          for (const i of draws) if (this.players[i].alive) this.give(this.players[i], 2);
-          if (p.alive && discards.length && !discards.some((c) => c.rank === 'A')) {
-            this.pending = { type: 'poker', player: pi, ids: discards.map((c) => c.id) };
+          discards.forEach((c, i) => {
+            this.recordPlay(discardBy[i], c, 'discard');
+            this.noteMass({ player: discardBy[i], mass: mass.seq }, { discarded: [c] });
+          });
+          for (const target of mass.targets) {
+            if (draws.includes(target.i) && this.players[target.i].alive) {
+              target.res = { ...target.res, drawn: this.give(this.players[target.i], 2) };
+            }
+          }
+          if (draws.length) mass.t = Date.now();
+          if (name === 'Poker') {
+            mass.ace = discards.some((c) => c.rank === 'A');
+            if (p.alive && discards.length && !mass.ace) {
+              this.pending = { type: 'poker', player: pi, ids: discards.map((c) => c.id), mass: mass.seq };
+            }
           }
         } });
         return this.nextPending();
@@ -1738,11 +1765,10 @@ class Game {
         if (name === 'Indians' || name === 'Gatling') this.stats[pi].mass++;
         this.addLog(name === 'Indians' ? `🪶 ${p.name} thả thổ dân tấn công!` : `🔫 ${p.name} dùng ${name}!`);
         const targets = others().filter((j) => !this.ignoredCard(this.players[j], card));
-        this.massSeq = (this.massSeq || 0) + 1;
-        this.mass = { seq: this.massSeq, by: pi, card, targets: targets.map((i) => ({ i, res: null })), t: Date.now(), t0: Date.now() };
+        const mass = this.startMass(pi, card, targets);
         this.queue = targets.map((j) => name === 'Indians'
-          ? { type: 'indians', player: j, source: pi, mass: this.massSeq, canEscape: true }
-          : { ...this.attackPrompt(pi, j, 1), mass: this.massSeq, canEscape: info.type === 'brown' });
+          ? { type: 'indians', player: j, source: pi, mass: mass.seq, canEscape: true }
+          : { ...this.attackPrompt(pi, j, 1), mass: mass.seq, canEscape: info.type === 'brown' });
         this.nextPending();
         return;
       }

@@ -334,7 +334,13 @@ test('the Bandidos caster can select the required cards from their hand and disc
     assert.equal(actor.hp, hp);
     assert.equal(actor.hand.length, 0);
     assert.ok(hand.every((card) => game.discard.includes(card)));
-    assert.equal(game.pending.player, game.idx(target.name));
+    const actorIndex = game.idx(actor.name);
+    const targetIndex = game.idx(target.name);
+    assert.equal(game.pending.player, targetIndex);
+    const actorResult = game.viewFor(null).mass.targets.find(({ i }) => i === actorIndex).res;
+    assert.deepEqual([...actorResult.discarded], hand);
+    game.act(target.name, { type: 'take' });
+    assert.deepEqual(game.viewFor(null).mass.targets.find(({ i }) => i === targetIndex).res, { hurt: 1 });
     assertConservation(game);
   }
 });
@@ -347,14 +353,36 @@ test('Poker keeps discards hidden until everyone chooses and then lets the caste
   play(game, actor, 'Poker');
   assert.deepEqual(game.viewFor(null).sounds.at(-1).files, ['poker']);
   game.act(target.name, { type: 'valleyDiscard', cardIds: [beer.id] });
-  assert.equal(game.viewFor(other.name).discardTop.name, 'Poker');
-  assert.ok(!game.viewFor(other.name).plays.some((event) => event.card.id === beer.id));
+  const hidden = game.viewFor(other.name);
+  assert.equal(hidden.discardTop.name, 'Poker');
+  assert.ok(!hidden.plays.some((event) => event.card.id === beer.id));
+  assert.deepEqual(hidden.mass.targets.slice(0, 2).map((entry) => entry.res), [{ faceDown: true }, null]);
   game.act(other.name, { type: 'valleyDiscard', cardIds: [missed.id] });
   assert.deepEqual(game.viewFor(actor.name).pending.cards, [beer, missed]);
+  const revealed = game.viewFor(null).mass;
+  assert.deepEqual(revealed.targets.slice(0, 2).map((entry) => entry.res), [{ discarded: [beer] }, { discarded: [missed] }]);
+  assert.equal(revealed.ace, false);
   const before = game.soundSeq;
   game.act(actor.name, { type: 'poker', cardIds: [beer.id, missed.id] });
   assert.deepEqual(actor.hand, [beer, missed]);
+  assert.deepEqual(game.viewFor(null).mass.picks, [beer.id, missed.id]);
   assert.deepEqual(game.viewFor(actor.name).sounds.filter((cue) => cue.seq > before).flatMap((cue) => cue.files), ['drawcard']);
+  assertConservation(game);
+});
+
+test('Tornado shows the discarded cards and draw counts while keeping Escape private until played', () => {
+  const { game, actor, target } = setup();
+  const beer = deal(game, actor, 'Beer');
+  const escape = deal(game, target, 'Escape');
+  play(game, actor, 'Tornado');
+  game.act(actor.name, { type: 'valleyDiscard', cardIds: [beer.id] });
+  assert.equal(game.viewFor(null).pending.player, null);
+  assert.equal(game.viewFor(null).mass.targets[1].res, null);
+  game.act(target.name, { type: 'escape', cardId: escape.id });
+  const { mass } = game.viewFor(null);
+  assert.deepEqual(mass.targets[0].res, { discarded: [beer], drawn: 2 });
+  assert.deepEqual(mass.targets[1].res, { card: escape });
+  assert.ok(mass.targets.slice(2).every(({ res }) => res.discarded.length === 0 && res.drawn === 2));
   assertConservation(game);
 });
 
