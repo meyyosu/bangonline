@@ -12,7 +12,7 @@ Giải nén rồi bấm đúp **`CHAY-GAME.bat`**. Script sẽ tự:
 1. Tải Node.js bản portable vào thư mục `node/` (chỉ lần đầu, cần Internet). Không cài gì vào hệ thống.
 2. Mở cổng 3000 trên tường lửa (chỉ lần đầu; khi Windows hỏi quyền Administrator thì bấm **Yes**).
 3. Tìm IP Radmin VPN (26.x.x.x), copy link cho bạn bè vào clipboard và mở trình duyệt.
-4. Tự nạp dữ liệu Dodge City và Valley of Shadow để chủ phòng chọn bản mở rộng khi tạo phòng.
+4. Tự nạp dữ liệu Dodge City và Valley of Shadows để chủ phòng chọn bản mở rộng khi tạo phòng.
 
 Giữ cửa sổ đen mở trong lúc chơi; đóng nó là tắt server. Bạn bè chỉ cần mở link bằng trình duyệt, không phải cài gì.
 
@@ -43,11 +43,11 @@ Mở [127.0.0.1:3001](http://127.0.0.1:3001) trên máy này và đăng ký tài
 
 ### Bật Dodge City
 
-`CHAY-GAME.bat` và `node server.js` đều tự nạp `dodge-city.json` trong thư mục game. Chủ phòng tích **Bản mở rộng: Dodge City** ở mục **Tạo phòng** để dùng 114 lá và danh sách 31 nhân vật. Phòng mặc định dùng 80 lá và 16 nhân vật. Launcher phát hiện server còn dùng dữ liệu cũ và hỏi khởi động lại.
+`CHAY-GAME.bat` và `node server.js` đều tự nạp `dodge-city.json` trong thư mục game. Chủ phòng tích **Bản mở rộng: Dodge City** ở mục **Tạo phòng** để dùng 114 lá và danh sách 32 nhân vật. Phòng mặc định dùng 80 lá và 17 nhân vật. Launcher phát hiện server còn dùng dữ liệu cũ và hỏi khởi động lại.
 
-**Valley of Shadow** được nạp từ `valley-of-shadow.json` và có ô riêng trong sảnh. Bật riêng Valley of Shadow dùng 96 lá và 24 nhân vật. Bật cả hai mở rộng dùng 130 lá và 39 nhân vật. Ghost tham gia với 0 máu, có thể dùng trang bị và bị Jail. Hết lượt, Ghost tự bỏ bài trên tay cùng các lá đặt trước mặt, trừ chính lá Ghost. Dynamite và phép tính khoảng cách đều bỏ qua ghế Ghost. Ghost đứng ngoài các hiệu ứng cả bàn, kể cả khi tự đánh lá đó. Khi Sheriff bị hạ, chỉ người thực sự còn sống được tính khi xét thắng cho Renegade.
+**Valley of Shadows** được nạp từ `valley-of-shadow.json` và có ô riêng trong sảnh. Bật riêng Valley of Shadows dùng 96 lá và 25 nhân vật. Bật cả hai mở rộng dùng 130 lá và 40 nhân vật. Ghost tham gia với 0 máu, có thể dùng trang bị và bị Jail. Hết lượt, Ghost tự bỏ bài trên tay cùng các lá đặt trước mặt, trừ chính lá Ghost. Dynamite và phép tính khoảng cách đều bỏ qua ghế Ghost. Ghost đứng ngoài các hiệu ứng cả bàn, kể cả khi tự đánh lá đó. Khi Sheriff bị hạ, chỉ người thực sự còn sống được tính khi xét thắng cho Renegade.
 
-Chọn **Nhân vật thưởng: Annie Versary** khi tạo phòng để thêm cô ấy vào nhóm chọn nhân vật. Annie có 4 máu và có thể dùng một lá bất kỳ trên tay như Bang!. Khi dùng để bắn, lá đó tính vào giới hạn Bang! của lượt và có thể nhận thưởng Bounty nếu bắn trúng.
+**Annie Versary** có mặt trong danh sách nhân vật của mọi phòng. Annie có 4 máu và có thể dùng một lá bất kỳ trên tay như Bang!. Khi dùng để bắn, lá đó tính vào giới hạn Bang! của lượt và có thể nhận thưởng Bounty nếu bắn trúng.
 
 Người cầm **Saved!** có thể cứu ngay khi mục tiêu đang chờ phản ứng với đòn tấn công. Lá này chặn 1 sát thương và kết thúc bước phản ứng của mục tiêu. Đòn Aim vẫn gây 1 sát thương còn lại.
 
@@ -115,7 +115,7 @@ Cách chơi: mỗi người tự đăng ký tài khoản → chủ phòng bấm 
 - Các lá bỏ bớt cuối lượt bay lần lượt từ tay xuống bài bỏ cho cả bàn cùng thấy, kể cả khi server tự bỏ do hết giờ. Lá xanh/súng bị bỏ cũng đi xuống bài bỏ.
 - Countdown hiện ở đầu phòng và ngay khu vực chơi/chọn nhân vật. Bấm bắt đầu sẽ lưu luôn cài đặt đang hiển thị trong phòng chờ.
 - Có thể rời phòng giữa ván: người còn sống được tính là bỏ cuộc và bị loại, chủ phòng được chuyển cho người còn lại. Nếu rời trong bước chọn nhân vật, phòng trở về trạng thái chờ.
-- Đủ luật bản gốc: 80 lá bài, 16 nhân vật với kỹ năng riêng, 4 vai trò, khoảng cách và tầm súng, Dynamite, Jail, Barrel, General Store, Duel, Indians, Gatling, phần thưởng khi hạ Outlaw và hình phạt khi Sheriff giết Deputy
+- Đủ luật bản gốc: 80 lá bài, 16 nhân vật gốc cùng Annie Versary, 4 vai trò, khoảng cách và tầm súng, Dynamite, Jail, Barrel, General Store, Duel, Indians, Gatling, phần thưởng khi hạ Outlaw và hình phạt khi Sheriff giết Deputy
 
 ### Một số chỗ đơn giản hoá
 

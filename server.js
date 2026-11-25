@@ -57,7 +57,7 @@ function newCode() {
 function roomCapacity(r) { return r.dodgeCity ? 8 : 7; }
 
 function roomSummary(r) {
-  return { code: r.code, name: r.name, host: r.host, players: r.players, bots: r.bots, spectators: r.spectators, status: r.status, max: roomCapacity(r), hasPassword: !!r.passwordHash, turnSeconds: r.turnSeconds, characterChoices: r.characterChoices, characterSeconds: r.characterSeconds, dodgeCity: r.dodgeCity, valleyOfShadow: r.valleyOfShadow, annieVersary: r.annieVersary, fasterBots: r.fasterBots };
+  return { code: r.code, name: r.name, host: r.host, players: r.players, bots: r.bots, spectators: r.spectators, status: r.status, max: roomCapacity(r), hasPassword: !!r.passwordHash, turnSeconds: r.turnSeconds, characterChoices: r.characterChoices, characterSeconds: r.characterSeconds, dodgeCity: r.dodgeCity, valleyOfShadow: r.valleyOfShadow, fasterBots: r.fasterBots };
 }
 
 function roomView(r, user) {
@@ -239,9 +239,8 @@ const server = http.createServer(async (req, res) => {
       const body = await readBody(req);
       if (body.dodgeCity !== undefined && typeof body.dodgeCity !== 'boolean') return err(res, 'Tuỳ chọn Dodge City phải là bật hoặc tắt.');
       if (body.dodgeCity && !dodgeCityCardCount) return err(res, 'Máy chủ chưa nạp dữ liệu Dodge City.');
-      if (body.valleyOfShadow !== undefined && typeof body.valleyOfShadow !== 'boolean') return err(res, 'Tuỳ chọn Valley of Shadow phải là bật hoặc tắt.');
-      if (body.valleyOfShadow && !valleyOfShadowCardCount) return err(res, 'Máy chủ chưa nạp dữ liệu Valley of Shadow.');
-      if (body.annieVersary !== undefined && typeof body.annieVersary !== 'boolean') return err(res, 'Tuỳ chọn Annie Versary phải là bật hoặc tắt.');
+      if (body.valleyOfShadow !== undefined && typeof body.valleyOfShadow !== 'boolean') return err(res, 'Tuỳ chọn Valley of Shadows phải là bật hoặc tắt.');
+      if (body.valleyOfShadow && !valleyOfShadowCardCount) return err(res, 'Máy chủ chưa nạp dữ liệu Valley of Shadows.');
       const { name } = body;
       const code = newCode();
       const r = { code, name: String(name || `Phòng của ${user}`).slice(0, 40), host: user, players: [user], bots: [], spectators: [], status: 'waiting', game: null, chat: [] };
@@ -250,7 +249,6 @@ const server = http.createServer(async (req, res) => {
       r.characterSeconds = 60;
       r.dodgeCity = body.dodgeCity === true;
       r.valleyOfShadow = body.valleyOfShadow === true;
-      r.annieVersary = body.annieVersary === true;
       r.fasterBots = false;
       updateSettings(r, body);
       rooms.set(code, r);
@@ -335,7 +333,7 @@ const server = http.createServer(async (req, res) => {
         if (r.players.length < 4) return err(res, 'Cần ít nhất 4 người để chơi Bang!.');
         updateSettings(r, body);
         r.pause = null; r.clock = null; r.botNextAt = null;
-        r.game = new Game(r.players, { characterChoices: r.characterChoices, dodgeCity: r.dodgeCity, valleyOfShadow: r.valleyOfShadow, annieVersary: r.annieVersary });
+        r.game = new Game(r.players, { characterChoices: r.characterChoices, dodgeCity: r.dodgeCity, valleyOfShadow: r.valleyOfShadow });
         r.status = 'playing';
         r.chat.push({ system: true, text: 'Ván đấu bắt đầu!' });
       } else if (sub === 'reset') {

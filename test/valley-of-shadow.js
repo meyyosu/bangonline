@@ -65,21 +65,19 @@ test('Valley appends all 16 ranked copies and gates the eight characters by room
     'Backfire QC', 'Bandidos QD', 'Escape 3H', 'Fanning 2S', 'Last Call 8D', 'Poker JH', 'Saved! 5H', 'Tomahawk AD', 'Tornado AC',
   ]);
   assert.equal(both.fullDeck.length, 130);
-  assert.equal(base.characterPool.length, 16);
-  assert.equal(valley.characterPool.length, 24);
-  assert.equal(both.characterPool.length, 39);
+  assert.equal(base.characterPool.length, 17);
+  assert.equal(valley.characterPool.length, 25);
+  assert.equal(both.characterPool.length, 40);
   assert.equal(CHAR_INFO['Tuco Franziskaner'].hp, 5);
   assert.equal(CARD_INFO.Bible.type, 'green');
 });
 
-test('Annie Versary is an optional four-life character who does not change the deck', () => {
-  const base = new Game(names, { characterChoices: 3 });
-  const promo = new Game(names, { characterChoices: 3, annieVersary: true });
-  assert.ok(!base.characterPool.includes('Annie Versary'));
+test('Annie Versary is a four-life character in every room', () => {
   assert.equal(CHAR_INFO['Annie Versary'].hp, 4);
-  assert.equal(promo.characterPool.filter((name) => name === 'Annie Versary').length, 1);
-  assert.equal(promo.characterPool.length, base.characterPool.length + 1);
-  assert.deepEqual(promo.fullDeck, base.fullDeck);
+  for (const [dodgeCity, valleyOfShadow] of [[false, false], [true, false], [false, true], [true, true]]) {
+    const { characterPool } = new Game(names, { characterChoices: 3, dodgeCity, valleyOfShadow });
+    assert.equal(characterPool.filter((name) => name === 'Annie Versary').length, 1);
+  }
 });
 
 test('Ghost can equip a gun plus blue and green cards and clears them at end of turn', () => {

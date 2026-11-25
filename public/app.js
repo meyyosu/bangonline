@@ -297,6 +297,10 @@ function showLobby() {
   $('#fanHand')?.remove();
   ROOM = null;
   history.replaceState(null, '', '/');
+  const valleyCount = META.valleyOfShadowCardCount;
+  const valleyDescription = valleyCount
+    ? `Thêm ${valleyCount} lá và cơ chế mới từ phiên bản mở rộng Valley of Shadows.`
+    : 'Máy chủ chưa nạp dữ liệu Valley of Shadows.';
   app.innerHTML = `
     <div class="lobby">
       <div class="panel">
@@ -310,8 +314,7 @@ function showLobby() {
           ${fasterBotsField()}
           <label><input type="checkbox" name="dodgeCity" aria-describedby="dodgeCityDetails" ${(META.dodgeCityCardCount ?? META.greenCardCount) ? '' : 'disabled'}> Bản mở rộng: Dodge City</label>
           <p class="muted" id="dodgeCityDetails">${(META.dodgeCityCardCount ?? META.greenCardCount) ? `Thêm ${META.dodgeCityCardCount ?? META.greenCardCount} lá Dodge City vào bộ bài của phòng.` : 'Máy chủ chưa nạp dữ liệu Dodge City.'}</p>
-          <label><input type="checkbox" name="valleyOfShadow" ${META.valleyOfShadowCardCount ? '' : 'disabled'}> Bản mở rộng: Valley of Shadow</label>
-          <label><input type="checkbox" name="annieVersary" ${META.chars?.['Annie Versary'] ? '' : 'disabled'}> Nhân vật thưởng: Annie Versary</label>
+          <label ${tooltipAttrs('Valley of Shadows', valleyDescription)}><input type="checkbox" name="valleyOfShadow" aria-description="${esc(valleyDescription)}" ${valleyCount ? '' : 'disabled'}> Bản mở rộng: Valley of Shadows</label>
           <button class="btn" style="width:100%;margin-top:10px">🎲 Tạo phòng mới</button>
         </form>
         <h2 style="margin-top:22px">Vào bằng mã</h2>
@@ -329,7 +332,7 @@ function showLobby() {
   $('#createForm').onsubmit = run(async (e) => {
     e.preventDefault();
     const f = new FormData(e.target);
-    const r = await api('/api/rooms', { name: f.get('name'), password: f.get('password'), turnSeconds: Number(f.get('turnSeconds')), characterChoices: Number(f.get('characterChoices')), characterSeconds: Number(f.get('characterSeconds')), dodgeCity: f.has('dodgeCity'), valleyOfShadow: f.has('valleyOfShadow'), annieVersary: f.has('annieVersary'), fasterBots: f.has('fasterBots') });
+    const r = await api('/api/rooms', { name: f.get('name'), password: f.get('password'), turnSeconds: Number(f.get('turnSeconds')), characterChoices: Number(f.get('characterChoices')), characterSeconds: Number(f.get('characterSeconds')), dodgeCity: f.has('dodgeCity'), valleyOfShadow: f.has('valleyOfShadow'), fasterBots: f.has('fasterBots') });
     enterRoom(r.code);
   });
   $('#joinForm').onsubmit = run(async (e) => {
@@ -347,7 +350,7 @@ function showLobby() {
     list.innerHTML = d.rooms.map((r) => `
       <div class="room-item">
         <div>
-          <div><b>${esc(r.name)}</b> <span class="code">${r.code}</span> ${r.hasPassword ? '🔒' : ''} ${r.dodgeCity ? '· Dodge City' : ''} ${r.valleyOfShadow ? '· Valley of Shadow' : ''} ${r.fasterBots ? '· Faster Bots' : ''}</div>
+          <div><b>${esc(r.name)}</b> <span class="code">${r.code}</span> ${r.hasPassword ? '🔒' : ''} ${r.dodgeCity ? '· Dodge City' : ''} ${r.valleyOfShadow ? '· Valley of Shadows' : ''} ${r.fasterBots ? '· Faster Bots' : ''}</div>
           <div class="muted">Chủ phòng: ${esc(r.host)} · ${r.players.length}/${r.max} người chơi · ${(r.spectators || []).length} khán giả · ${r.turnSeconds ? r.turnSeconds + ' giây/lượt' : 'Không giới hạn giờ'}</div>
         </div>
         <div class="row">
@@ -555,8 +558,7 @@ function renderWaiting() {
       <div class="room-settings">
         <h3>Cài đặt phòng</h3>
         ${r.dodgeCity ? '<p>Bản mở rộng: Dodge City</p>' : ''}
-        ${r.valleyOfShadow ? '<p>Bản mở rộng: Valley of Shadow</p>' : ''}
-        ${r.annieVersary ? '<p>Nhân vật thưởng: Annie Versary</p>' : ''}
+        ${r.valleyOfShadow ? '<p>Bản mở rộng: Valley of Shadows</p>' : ''}
         <p>${r.hasPassword ? '🔒 Có mật khẩu' : '🔓 Không có mật khẩu'} · ${r.turnSeconds ? r.turnSeconds + ' giây/lượt' : 'Không giới hạn thời gian'}</p>
         <p>Chọn 1 trong ${r.characterChoices} nhân vật · ${r.characterSeconds ? r.characterSeconds + ' giây/người để chọn' : 'Không giới hạn giờ chọn nhân vật'}</p>
         ${!isHost && r.fasterBots ? '<p>Faster Bots</p>' : ''}

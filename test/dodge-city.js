@@ -76,9 +76,9 @@ function assertDeck(g) {
 test('Dodge City adds 15 characters only to the expansion pool', () => {
   const regular = makeGame({ dodgeCity: false, characterChoices: 4 });
   const expansion = makeGame({ characterChoices: 4 });
-  assert.equal(regular.characterPool.length, 16);
+  assert.equal(regular.characterPool.length, 17);
   assert.equal(regular.deck.length, 80);
-  assert.equal(expansion.characterPool.length, 31);
+  assert.equal(expansion.characterPool.length, 32);
   assert.equal(expansion.deck.length, 114);
   assert.ok(expansion.characterPool.includes('Vera Custer'));
   assert.ok(expansion.characterPool.includes('Apache Kid'));
