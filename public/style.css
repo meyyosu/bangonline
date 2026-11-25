@@ -378,8 +378,15 @@ select { width: 100%; padding: 9px 10px; border-radius: 8px; border: 2px solid #
 /* Khung trang bị trên đầu nhân vật. --eq đổi theo ⚙️ Cài đặt; --eqs là cỡ thực (thu nhỏ trên điện thoại) */
 :root { --eq: 44px; --eqs: var(--eq); }
 body.eq-sm { --eq: 34px; } body.eq-md { --eq: 44px; } body.eq-lg { --eq: 56px; }
-.eqframe { position: absolute; bottom: calc(100% + 10px); left: 50%; transform: translateX(-50%); z-index: 5; display: flex; gap: 6px; padding: 7px 7px 5px;
+.eqframe { --eq-gap: 6px; position: absolute; bottom: calc(100% + 10px); left: 50%; transform: translateX(-50%); z-index: 5; display: flex; flex-wrap: wrap; justify-content: center; gap: var(--eq-gap); padding: 7px 7px 5px;
+  box-sizing: content-box; width: max-content; max-width: calc(3 * var(--eqs) + 2 * var(--eq-gap)); /* Tối đa 3 trang bị mỗi hàng. */
   background: linear-gradient(#3d2616, #2a160a); border: 2px solid var(--gold); border-radius: 9px; box-shadow: 0 6px 14px rgba(0,0,0,.55); white-space: nowrap; }
+.eqframe.eq-unlimited { max-width: none; flex-wrap: nowrap; }
+.eq-collapsible:not(.is-expanded) > .eq-older { display: none; }
+.eq-collapsible.is-expanded > .eq-more { display: none; }
+.eq-collapsible.is-expanded { z-index: 8; }
+.eqt.eq-more { background: #3d2616; color: var(--paper); border-color: var(--gold); box-shadow: none; font: 700 calc(var(--eqs) * .5) / 1 system-ui; cursor: pointer; }
+.eq-more:focus-visible { outline: 3px solid white; outline-offset: 2px; }
 .eqframe::after { content: ''; position: absolute; left: 50%; bottom: -8px; transform: translateX(-50%) rotate(45deg); width: 12px; height: 12px;
   background: #2a160a; border-right: 2px solid var(--gold); border-bottom: 2px solid var(--gold); }
 .eqs { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 8px; }
@@ -505,13 +512,13 @@ body.fan-on main { padding-bottom: 110px; } /* chừa chỗ cho phần lá nhô 
   transition: transform .2s cubic-bezier(.2,.8,.3,1), box-shadow .2s, filter .2s; }
 #fanHand.instant .fan-slot, #fanHand.instant .fan-slot > .card { transition: none; }
 #fanHand .card .icon { font-size: 32px; }
-#fanHand .card .cname { font-size: 13px; margin-top: 7px; }
+#fanHand .card .cname { font-size: 11px; margin-top: 5px; }
 #fanHand .card .corner { font-size: 13px; }
-#fanHand .card .desc { font-size: 8.5px; line-height: 1.25; color: var(--muted); margin-top: 4px; opacity: 0; max-height: 0; overflow: hidden; transition: opacity .15s .05s; }
+#fanHand .card .desc { font-size: 7px; line-height: 1.2; color: var(--muted); margin-top: 4px; opacity: 0; max-height: 0; overflow: hidden; transition: opacity .15s .05s; }
 /* Đang trỏ: dựng thẳng, phóng to, đáy chạm mép màn hình */
 #fanHand .fan-slot.hover > .card { transform: rotate(calc(var(--r) * -1)) translateY(var(--lift)) scale(var(--zoom)); box-shadow: 0 18px 34px rgba(0,0,0,.6); }
 #fanHand .fan-slot.hover .desc { opacity: 1; max-height: 60px; }
-#fanHand .fan-slot.hover .icon.art { width: 58%; margin-top: 12%; } /* nhường chỗ cho dòng mô tả */
+#fanHand .fan-slot.hover .icon.art { width: 46%; margin-top: 2%; } /* nhường chỗ cho cả mô tả dài khi giảm cỡ chữ */
 #fanHand .icon.art { transition: width .2s; }
 /* Đã chọn (chờ chọn mục tiêu / lá trả giá): nhô lên nửa chừng, viền đỏ */
 #fanHand .fan-slot.selected:not(.hover) > .card { transform: translateY(calc(var(--ch) * -0.3)); }
@@ -574,7 +581,7 @@ body.fan-on main { padding-bottom: 110px; } /* chừa chỗ cho phần lá nhô 
   :root { --eqs: calc(var(--eq) * .62); }
   .eqt .nm { display: none; }
   .eqt .bd { min-width: 14px; height: 14px; font-size: 9px; top: -5px; right: -5px; }
-  .eqframe { gap: 3px; padding: 4px; }
+  .eqframe { --eq-gap: 3px; padding: 4px; }
   .arena { aspect-ratio: 1 / 1.15; }
   .felt { inset: 12% 14%; }
   .arena.capsule { height: 470px; }

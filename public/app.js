@@ -707,6 +707,42 @@ function discardStackHTML(g) {
 }
 // Thẻ trang bị vuông: màu theo loại, huy hiệu góc = tầm bắn (súng) hoặc ±khoảng cách (ngựa/ống ngắm)
 const EQ_KIND = { Mustang: ['horse', '+1'], Scope: ['horse', '−1'], Binocular: ['', '−1'], Hideout: ['', '+1'], Jail: ['jail', ''], Dynamite: ['dyn', ''] };
+let equipmentCollapseTimer = null;
+let equipmentPointer = null;
+function equipmentContainsPointer(frame, event) {
+  if (!frame || !event) return false;
+  const rect = frame.getBoundingClientRect();
+  return frame.contains(event.target) || (event.clientX >= rect.left && event.clientX <= rect.right
+    && event.clientY >= rect.top && event.clientY <= rect.bottom);
+}
+function scheduleEquipmentCollapse(event) {
+  equipmentPointer = event;
+  clearTimeout(equipmentCollapseTimer);
+  equipmentCollapseTimer = setTimeout(() => {
+    // Render có thể thay cả khung: luôn kiểm tra khung đang hiển thị và vị trí chuột mới nhất.
+    const frame = document.querySelector('.eq-collapsible.is-expanded');
+    if (frame && !equipmentContainsPointer(frame, equipmentPointer)) setEquipmentExpanded(frame, false);
+  }, 120);
+}
+function setEquipmentExpanded(frame, expanded) {
+  if (!frame?.isConnected) return;
+  clearTimeout(equipmentCollapseTimer);
+  ui.equipmentExpanded = expanded ? frame.dataset.equipmentKey : null;
+  frame.classList.toggle('is-expanded', expanded);
+  frame.querySelector('.eq-more')?.setAttribute('aria-expanded', String(expanded));
+}
+document.addEventListener('pointerdown', (event) => {
+  const frame = document.querySelector('.eq-collapsible.is-expanded');
+  if (frame && !equipmentContainsPointer(frame, event)) setEquipmentExpanded(frame, false);
+});
+document.addEventListener('pointermove', (event) => {
+  if (event.pointerType === 'touch' || isPhone() || !ui.equipmentExpanded) return;
+  equipmentPointer = event;
+  const frame = document.querySelector('.eq-collapsible.is-expanded');
+  if (equipmentContainsPointer(frame, event)) clearTimeout(equipmentCollapseTimer);
+  else if (frame) scheduleEquipmentCollapse(event);
+});
+
 function eqTileHTML(c, extra = '', owner = null) {
   const info = cardInfo(c);
   const [kind, badge] = info.type === 'green' ? ['green', c.ready ? '✓' : '⏳']
@@ -1167,7 +1203,11 @@ function renderGame() {
     const dist = isMe || p.distance == null ? ''
       : `<span class="dist ${inRange ? 'in' : ''}" ${tooltipAttrs('Khoảng cách từ bạn', 'Khoảng cách để kiểm tra mục tiêu có nằm trong tầm của thẻ bài hay không.' + (inRange ? ' Trong tầm bắn.' : ''))}>${p.alive ? 'cách ' + p.distance : '☠️'}</span>`;
     const checking = pend?.type === 'check' && pend.player === i ? pend.kind : null;
-    const frame = p.eq.length ? `<div class="eqframe">${p.eq.map((c) => eqTileHTML(c, c.name === checking ? 'checking' : '', patDraw && p.alive ? p.name : null)).join('')}</div>` : '';
+    const collapseEquipment = n === 8 && isMe && p.eq.length > 2;
+    const equipmentKey = `${ROOM.code}:${p.name}`;
+    const expanded = collapseEquipment && ui.equipmentExpanded === equipmentKey;
+    const equipmentClass = n <= 4 || (n === 5 && isMe) ? ' eq-unlimited' : '';
+    const frame = p.eq.length ? `<div class="eqframe${equipmentClass}${collapseEquipment ? ' eq-collapsible' : ''}${expanded ? ' is-expanded' : ''}"${collapseEquipment ? ` data-equipment-key="${esc(equipmentKey)}"` : ''}>${p.eq.map((c, index) => eqTileHTML(c, [c.name === checking ? 'checking' : '', collapseEquipment && index < p.eq.length - 2 ? 'eq-older' : ''].filter(Boolean).join(' '), patDraw && p.alive ? p.name : null)).join('')}${collapseEquipment ? `<button type="button" class="eqt eq-more" aria-label="Xem tất cả ${p.eq.length} trang bị" aria-expanded="${expanded}">...</button>` : ''}</div>` : '';
     const shootControl = evelynDraw && tfilter?.(p) ? ` role="button" tabindex="0" aria-label="Bắn ${esc(p.name)}"` : '';
     return `<div class="player ${cls}" data-player="${esc(p.name)}" style="left:${x.toFixed(2)}%;top:${y.toFixed(2)}%"${shootControl}>
       ${frame}${dist}
@@ -2696,6 +2736,29 @@ function bindGame(g, meIdx, meP, canPlay, myPrompt) {
   if (!g.me) return;
   const main = $('#mainArea');
   const pend = g.pending;
+  const equipmentFrame = main.querySelector('.eq-collapsible');
+  if (equipmentFrame) {
+    equipmentFrame.onpointerenter = (event) => {
+      if (event.pointerType !== 'touch' && !isPhone()) setEquipmentExpanded(equipmentFrame, true);
+    };
+    equipmentFrame.onpointerleave = (event) => {
+      if (equipmentFrame.isConnected && event.pointerType !== 'touch' && !isPhone()) scheduleEquipmentCollapse(event);
+    };
+    equipmentFrame.addEventListener('click', (event) => {
+      if (!equipmentFrame.classList.contains('is-expanded')) {
+        event.preventDefault(); event.stopPropagation();
+        setEquipmentExpanded(equipmentFrame, true);
+      }
+    }, true);
+    equipmentFrame.querySelector('.eq-more').onclick = () => setEquipmentExpanded(equipmentFrame, true);
+    equipmentFrame.onkeydown = (event) => {
+      if (event.key === 'Escape') {
+        setEquipmentExpanded(equipmentFrame, false);
+        equipmentFrame.querySelector('.eq-more').focus();
+      }
+    };
+  }
+
   const infoBtn = $('#meInfoToggle');
   if (infoBtn) infoBtn.onclick = () => { ui.meInfo = !ui.meInfo; renderGame(); };
 
