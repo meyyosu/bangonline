@@ -558,6 +558,7 @@ class Game {
     if (p.char === 'Vera Custer') p.copiedAbility = null;
     this.bangsPlayed = 0;
     this.skillUses = 0;
+    this.evelynDrawAfterShot = 0;
     this.phase = 'start';
     this.addLog(`— Lượt của ${p.name} —`);
     this.recordSound('yourturn1', pi);
@@ -636,7 +637,7 @@ class Game {
     this.pending = bang;
   }
 
-  beginDraw() {
+  beginDraw(evelynRemaining = 2) {
     const pi = this.turn, p = this.players[pi];
     this.phase = 'draw';
     const skill = this.ability(p);
@@ -644,8 +645,12 @@ class Game {
     if (skill === 'Jesse Jones' && this.alive().some((i) => i !== pi && this.players[i].hand.length)) options.push('player');
     if (skill === 'Pedro Ramirez' && this.discard.length) options.push('discard');
     if (skill === 'Pat Brennan' && this.players.some((q) => q.alive && q.eq.length)) options.push('equipment');
-    if (skill === 'Evelyn Shebang' && this.alive().some((i) => i !== pi && this.distance(pi, i) <= this.range(p))) options.push('evelyn');
     this.pending = { type: 'draw', player: pi, options };
+    if (skill === 'Evelyn Shebang') {
+      this.pending.remaining = evelynRemaining;
+      options.push('deckOne');
+      if (this.alive().some((i) => i !== pi && this.distance(pi, i) <= this.range(p))) options.push('evelyn');
+    }
   }
 
   turnStartDamage(pi, amount, checkSnake, hitSound = null) {
@@ -1069,7 +1074,13 @@ class Game {
         this.addLog(`${p.name} hết bài, rút 1 lá (Suzy Lafayette).`);
       }
     }
-    if (!this.winner && !this.pending && !this.players[this.turn].alive) this.nextTurn();
+    if (this.winner || this.pending) return;
+    if (!this.players[this.turn].alive) return this.nextTurn();
+    if (this.evelynDrawAfterShot) {
+      const remaining = this.evelynDrawAfterShot;
+      this.evelynDrawAfterShot = 0;
+      this.beginDraw(remaining);
+    }
   }
 
   // ---------- hành động của người chơi ----------
@@ -1118,6 +1129,7 @@ class Game {
     if (skill === 'Black Flower') {
       this.noteTarget(pi, ti, skill);
       this.addLog(`${p.name} dùng lá Chuồn để bắn ${t.name} (${skill}).`);
+      this.recordSound(PLAY_SOUNDS.Springfield);
       return this.startShot(pi, ti, { trueBang: true });
     }
     if (skill === 'Doc Holyday') {
@@ -1341,16 +1353,22 @@ class Game {
           this.pending = { type: 'kit', player: pi, cards: this.draw(3), stage: this.drawStageSeq };
           return;
         }
-        if (a.from === 'evelyn') {
-          const targets = Array.isArray(a.targets) ? a.targets.map((name) => this.idx(name)) : [];
-          if (!targets.length || targets.length > 2 || new Set(targets).size !== targets.length ||
-              targets.some((i) => i === pi || !this.players[i]?.alive || this.distance(pi, i) > this.range(p))) {
-            fail('Chọn một hoặc hai mục tiêu khác nhau trong tầm súng.');
+        if (pend.remaining !== undefined) {
+          if (a.from === 'evelyn') {
+            const ti = this.idx(a.target), target = this.players[ti];
+            if (ti === pi || !target?.alive || this.distance(pi, ti) > this.range(p)) fail('Chọn người chơi khác trong tầm súng.');
+            this.evelynDrawAfterShot = pend.remaining - 1;
+            this.phase = 'play';
+            this.noteTarget(pi, ti, 'Evelyn Shebang');
+            this.addLog(`💥 ${p.name} bắn ${target.name} bằng kỹ năng Evelyn Shebang!`);
+            return this.startShot(pi, ti);
           }
-          this.give(p, 2 - targets.length);
+          const count = a.from === 'deckOne' ? 1 : pend.remaining;
+          this.addLog(`${p.name} rút ${this.give(p, count)} lá.`);
+          if (count < pend.remaining) return this.beginDraw(pend.remaining - count);
+          this.pending = null;
           this.phase = 'play';
-          this.queue = targets.map((i) => ({ run: () => this.startShot(pi, i) }));
-          return this.nextPending();
+          return;
         }
         if (a.from === 'player') {
           const ti = this.idx(a.target);
@@ -1979,7 +1997,10 @@ class Game {
       if (pend.type === 'indians') pending.source = pend.source;
       if (pend.type === 'duel') pending.other = pend.other;
       if (pend.type === 'store') pending.cards = pend.cards;
-      if (pend.type === 'draw') pending.options = pend.options;
+      if (pend.type === 'draw') {
+        pending.options = pend.options;
+        if (pend.remaining !== undefined) pending.remaining = pend.remaining;
+      }
       if (pend.type === 'kit') pending.cards = pend.player === me ? pend.cards : pend.cards.map(() => null);
       if (['kit', 'blackJack'].includes(pend.type)) pending.stage = pend.stage;
       if (pend.type === 'blackJack') Object.assign(pending, { card: pend.card, red: pend.red });

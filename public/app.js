@@ -972,6 +972,7 @@ function renderGame() {
   const myPrompt = pend && pend.player === meIdx;
   const canPlay = myTurn && !pend && g.phase === 'play' && meP.alive;
   const patDraw = myPrompt && pend.type === 'draw' && pend.options.includes('equipment');
+  const evelynDraw = myPrompt && pend.type === 'draw' && pend.remaining !== undefined;
   const cardChoice = myPrompt && ['kit', 'valleyDiscard'].includes(pend.type) ? pend.type : null;
 
   if (!g.me) { ui.mode = null; ui.selected = []; }
@@ -1002,6 +1003,7 @@ function renderGame() {
   if (myPrompt && pend.type === 'draw' && pend.options.includes('player')) {
     tfilter = (p) => p.alive && p.name !== ME && p.handCount > 0;
   }
+  if (evelynDraw && pend.options.includes('evelyn')) tfilter = (p) => docTarget(p, g);
   if (ui.mode?.kind === 'skill' && targetedSkill(ui.mode.skill) && ui.selected.length === skillCardCount(ui.mode.skill)) {
     tfilter = (p) => docTarget(p, g);
   }
@@ -1035,7 +1037,8 @@ function renderGame() {
       : `<span class="dist ${inRange ? 'in' : ''}" ${tooltipAttrs('Khoảng cách từ bạn', 'Khoảng cách để kiểm tra mục tiêu có nằm trong tầm của thẻ bài hay không.' + (inRange ? ' Trong tầm bắn.' : ''))}>${p.alive ? 'cách ' + p.distance : '☠️'}</span>`;
     const checking = pend?.type === 'check' && pend.player === i ? pend.kind : null;
     const frame = p.eq.length ? `<div class="eqframe">${p.eq.map((c) => eqTileHTML(c, c.name === checking ? 'checking' : '', patDraw && p.alive ? p.name : null)).join('')}</div>` : '';
-    return `<div class="player ${cls}" data-player="${esc(p.name)}" style="left:${x.toFixed(2)}%;top:${y.toFixed(2)}%">
+    const shootControl = evelynDraw && tfilter?.(p) ? ` role="button" tabindex="0" aria-label="Bắn ${esc(p.name)}"` : '';
+    return `<div class="player ${cls}" data-player="${esc(p.name)}" style="left:${x.toFixed(2)}%;top:${y.toFixed(2)}%"${shootControl}>
       ${frame}${dist}
       <div class="av">${playerAvatarHTML(p)}${jailBarsHTML(p)}
         ${handFanHTML(p.handCount)}${roleBadge(p)}</div>
@@ -1050,7 +1053,7 @@ function renderGame() {
     <div class="arena${capsule ? ' capsule' : ''}">
       <div class="felt"></div>
       <div class="piles">
-        <div class="pile"><div class="deck ${['check', 'draw'].includes(pend?.type) ? (myPrompt ? 'ready' : 'waiting') : ''}" id="deck"><div class="card-back">BANG!</div>
+        <div class="pile"><div class="deck ${['check', 'draw'].includes(pend?.type) ? (myPrompt ? 'ready' : 'waiting') : ''}" id="deck"${evelynDraw ? ' role="button" tabindex="0" aria-label="Rút 1 lá"' : ''}><div class="card-back">BANG!</div>
           ${['check', 'draw'].includes(pend?.type) && !myPrompt ? `<div class="tap other">⏳ ${esc(g.players[pend.player].name)} đang rút…</div>` : ''}</div>
           Chồng: ${g.deckCount}</div>
         <div class="pile ${myPrompt && pend?.type === 'draw' && pend.options.includes('discard') ? 'draw-source' : ''}" id="discardPile">${discardStackHTML(g)}<div>Bài bỏ</div></div>
@@ -1672,12 +1675,10 @@ function promptHTML(g, meIdx, meP) {
     case 'draw': {
       if (!mine) return `<h4>${P(pend.player)} đang chọn cách rút bài…</h4>`;
       const ability = abilityOf(meP);
-      if (pend.options.includes('evelyn')) {
-        const targets = g.players.filter((p) => docTarget(p, g));
-        return `<h4>Evelyn Shebang · Rút bài hoặc bắn</h4><p>Chọn tối đa hai mục tiêu khác nhau. Mỗi mục tiêu thay cho một lá rút.</p>
-          <div class="row">${targets.map((p) => `<label><input type="checkbox" data-evelyn-target value="${esc(p.name)}"> ${esc(p.name)}</label>`).join('')}</div>
-          <div class="row"><button class="btn" data-act="evelyn">Xác nhận mục tiêu</button>
-          <button class="btn secondary" data-act="draw" data-from="deck">Rút 2 lá</button></div>`;
+      if (pend.remaining !== undefined) {
+        const shoot = pend.options.includes('evelyn') ? 'Bấm người đang sáng để bắn hoặc bấm' : 'Bấm';
+        return `<h4>Evelyn Shebang · Còn ${pend.remaining} lựa chọn</h4><p>${shoot} chồng bài để rút 1 lá.</p>
+          <div class="row"><button class="btn secondary" data-act="draw" data-from="deck">${pend.remaining === 2 ? 'Draw 2 cards' : 'Draw 1 card'}</button></div>`;
       }
       if (ability === 'Pat Brennan') {
         const equipment = pend.options.includes('equipment')
@@ -2603,6 +2604,11 @@ function bindGame(g, meIdx, meP, canPlay, myPrompt) {
   });
 
   main.querySelectorAll('.player').forEach((el) => el.onclick = run(async () => {
+    if (myPrompt && pend.type === 'draw' && pend.options.includes('evelyn')) {
+      const target = g.players.find((p) => p.name === el.dataset.player);
+      if (target && docTarget(target, g)) return sendAction({ type: 'drawChoice', from: 'evelyn', target: target.name });
+      return;
+    }
     if (myPrompt && pend.type === 'draw' && pend.options.includes('player')) {
       const target = g.players.find((p) => p.name === el.dataset.player);
       if (!target?.alive || target.name === ME || !target.handCount) return;
@@ -2638,7 +2644,13 @@ function bindGame(g, meIdx, meP, canPlay, myPrompt) {
   const deckEl = main.querySelector('#deck.ready');
   if (deckEl) deckEl.onclick = run(async () => {
     deckEl.classList.remove('ready');
-    await sendAction(g.pending.type === 'draw' ? { type: 'drawChoice', from: 'deck' } : { type: 'checkDraw' });
+    if (pend.type !== 'draw') return sendAction({ type: 'checkDraw' });
+    return sendAction({ type: 'drawChoice', from: pend.options.includes('deckOne') ? 'deckOne' : 'deck' });
+  });
+  main.querySelectorAll('.player[role="button"], #deck[role="button"]').forEach((el) => el.onkeydown = (event) => {
+    if (!['Enter', ' '].includes(event.key)) return;
+    event.preventDefault();
+    el.click();
   });
   const discardEl = main.querySelector('#discardPile.draw-source');
   if (discardEl) discardEl.onclick = run(() => sendAction({ type: 'drawChoice', from: 'discard' }));
@@ -2674,11 +2686,6 @@ function bindGame(g, meIdx, meP, canPlay, myPrompt) {
       const cardIds = [...main.querySelectorAll('[data-valley-card]:checked')].map((input) => Number(input.value));
       if (cardIds.length > 2) return toast('Chọn tối đa hai lá.');
       return sendAction({ type: act, cardIds });
-    }
-    if (act === 'evelyn') {
-      const targets = [...main.querySelectorAll('[data-evelyn-target]:checked')].map((input) => input.value);
-      if (!targets.length || targets.length > 2) return toast('Chọn một hoặc hai mục tiêu.');
-      return sendAction({ type: 'drawChoice', from: 'evelyn', targets });
     }
     if (act === 'confirmBrawl' && ui.mode?.kind === 'brawl') {
       const { cardId, costCardId } = ui.mode;

@@ -20,7 +20,7 @@
     "Black Flower": { "hp": 4, "desc": "Một lần mỗi lượt, dùng một lá Chuồn trên tay như một Bang! bổ sung." },
     "Colorado Bill": { "hp": 4, "desc": "Khi dùng một lá Bang!, rút kiểm tra. Nếu lật lá Bích, mục tiêu không thể né đòn đó." },
     "Der Spot-Burst Ringer": { "hp": 4, "desc": "Một lần mỗi lượt, dùng một lá Bang! như Gatling mà vẫn giữ lượt Bang! thông thường." },
-    "Evelyn Shebang": { "hp": 4, "desc": "Trước khi rút đầu lượt, có thể đổi một hoặc cả hai lượt rút lấy đòn bắn vào các mục tiêu khác nhau trong tầm." },
+    "Evelyn Shebang": { "hp": 4, "desc": "Đầu lượt có hai lần lựa chọn. Mỗi lần, bạn có thể rút 1 lá hoặc bắn một người trong tầm súng. Có thể bắn cùng một người hai lần." },
     "Henry Block": { "hp": 4, "desc": "Khi người chơi định lấy hoặc bỏ một lá của bạn, bạn phản công trước khi lá đó được chuyển." },
     "Lemonade Jim": { "hp": 4, "desc": "Khi người khác dùng Beer, có thể bỏ một lá trên tay để hồi 1 máu." },
     "Mick Defender": { "hp": 4, "desc": "Khi hiệu ứng của một lá viền nâu nhắm vào bạn, dù trong hay ngoài lượt của mình, bạn có thể bỏ một lá Missed! trên tay để né hiệu ứng đó." },

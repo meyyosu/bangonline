@@ -120,6 +120,16 @@ test('Springfield, Tomahawk and Tornado use their own clips', () => {
   }
 });
 
+test('Black Flower’s ability fires the Springfield clip', () => {
+  const g = setup({ valleyOfShadow: true });
+  const player = g.players[g.turn], target = g.players[g.nextAlive(g.turn)];
+  player.char = 'Black Flower';
+  const club = give(g, player, 'Bounty');
+  g.act(player.name, { type: 'skill', cardIds: [club.id], target: target.name });
+  assert.equal(g.pending.type, 'bang');
+  assert.deepEqual(g.viewFor(null).sounds.at(-1).files, ['bangsound_springfield']);
+});
+
 test('room sound delivery plays new cues once and skips old snapshots and other rooms', () => {
   const source = fs.readFileSync(path.join(__dirname, '../public/app.js'), 'utf8');
   const start = source.indexOf('function showRoomSounds(');
