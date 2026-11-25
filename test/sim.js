@@ -51,7 +51,7 @@ function candidates(g, pi, rng) {
     const cost = pick(p.hand.filter((q) => q !== c));
     const second = tp?.alive ? pick(g.fanningTargets(pi, g.idx(t))) : undefined;
     const bang = p.hand.find((q) => q !== c && (g.bangCard(p, q) || g.hasLeMat(p)));
-    const targets = others.map((name) => g.players[g.idx(name)]).filter((q) => q.hand.length || q.eq.length)
+    const targets = others.map((name) => g.players[g.idx(name)]).filter((q) => !q.ghost && (q.hand.length || q.eq.length))
       .map((q) => ({ target: q.name, targetCard: targetCard(q) }));
     out.push({ type: p.eq.includes(c) ? 'activate' : 'play', cardId: c.id, target: t,
       targetCard: targetCard(tp), costCardId: cost?.id, bangCardId: bang?.id, secondTarget: g.players[second]?.name, targets });

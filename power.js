@@ -48,7 +48,7 @@ function strength(g, i, cardInfo = CARD_INFO) {
   const P = g.players, p = P[i];
   if (!p.alive) return 0;
   const alive = g.alive();
-  const seat = (a, b) => { const ia = alive.indexOf(a), ib = alive.indexOf(b), d = Math.abs(ia - ib); return Math.min(d, alive.length - d); };
+  const seat = (a, b) => g.seatDistance(a, b);
   const ab = (q) => g.ability(q);
   const has = (q, name) => q.eq.some((c) => c.name === name);
   const gunRange = (q) => { const gun = q.eq.find((c) => CARD_INFO[c.name].type === 'gun'); return gun ? CARD_INFO[gun.name].range : 1; };
@@ -86,8 +86,9 @@ function strength(g, i, cardInfo = CARD_INFO) {
 
   // ---------- 3. Giá trị bài (đơn vị lá) ----------
   const threat = enemies.length ? enemies.filter((j) => dist(j, i) <= gunRange(P[j])).length / enemies.length : 0;
-  const net = Math.max(0, enemies.length - allies.length);      // Gatling/Indians/Howitzer trúng cả đồng đội
-  const hurt = (list) => list.filter((j) => P[j].hp < P[j].maxHp).length;
+  const living = (j) => !P[j].ghost;
+  const net = Math.max(0, enemies.filter(living).length - allies.filter(living).length); // Gatling/Indians/Howitzer trúng cả đồng đội
+  const hurt = (list) => list.filter((j) => g.canHeal(P[j])).length;
   const jailable = enemies.some((j) => P[j].role !== 'Sheriff' && !has(P[j], 'Jail'));
   const reachNow = inRange(gunRange(p), has(p, 'Scope')).length > 0;
   const atOne = inRange(1, has(p, 'Scope')).length > 0;

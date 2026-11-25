@@ -1,5 +1,5 @@
 Bounty - Đặt một khoản thưởng trước mặt một người chơi. Ai đánh trúng người đó bằng lá Bang! sẽ rút 1 lá.
-Ghost - Đưa một người đã bị loại trở lại bàn dưới dạng Ghost với 0 máu.
+Ghost - Đưa một người đã bị loại trở lại bàn dưới dạng Ghost với 0 máu. Bỏ qua ghế Ghost khi chuyền Dynamite và tính khoảng cách. Ghost đứng ngoài các hiệu ứng cả bàn, kể cả khi tự đánh lá đó. Khi Sheriff bị hạ, chỉ người thực sự còn sống được tính khi xét thắng cho Renegade.
 LeMat - Trong lượt, có thể dùng một lá bất kỳ trên tay như Bang! trong giới hạn thông thường.
 Rattlesnake - Đặt trước mặt một người chơi. Đầu lượt, người đó rút kiểm tra và mất 1 máu nếu lật lá Bích.
 Shotgun - Khi lá Bang! của bạn trúng đích, người bị trúng chọn bỏ một lá trên tay.

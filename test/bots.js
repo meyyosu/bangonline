@@ -59,7 +59,8 @@ function revive(game, player, target) {
 
 test('a bot shoots a living target even when it could reach a Ghost first', () => {
   const { game, room } = targetingGame(['Sheriff', 'Outlaw', 'Renegade', 'Outlaw']);
-  const [bot, ghost, , other] = game.players;
+  const [bot, ghost, distant, other] = game.players;
+  distant.char = 'Paul Regret';
   revive(game, bot, ghost);
   deal(game, bot, 'Bang');
   assert.equal(tickBots(room, 0), true);
@@ -97,10 +98,10 @@ test('a Renegade attacks the third player and waits for the final duel to attack
   assert.equal(game.players[game.pending.player], sheriff);
 });
 
-test('a Renegade holds the shot when only Sheriff is in range with three players left', () => {
+test('a Renegade holds the shot when only Sheriff is in range with three living players and a Ghost', () => {
   const { game, room } = targetingGame(['Renegade', 'Sheriff', 'Outlaw', 'Outlaw']);
-  const [bot, , other] = game.players;
-  game.kill(3, null);
+  const [bot, , other, ghost] = game.players;
+  revive(game, bot, ghost);
   other.char = 'Paul Regret';
   const bang = deal(game, bot, 'Bang');
   assert.equal(tickBots(room, 0), true);
@@ -109,21 +110,20 @@ test('a Renegade holds the shot when only Sheriff is in range with three players
   assert.notEqual(game.turn, 0);
 });
 
-test('a Renegade removes the third player’s Ghost equipment before shooting Sheriff', () => {
+test('a Renegade can shoot Sheriff to win with an Outlaw Ghost at the table', () => {
   const { game, room } = targetingGame(['Renegade', 'Sheriff', 'Outlaw', 'Outlaw']);
   const [bot, sheriff, third] = game.players;
   game.kill(3, null);
   const ghost = revive(game, bot, third);
   deal(game, third, 'Missed');
-  const bang = deal(game, bot, 'Bang');
-  deal(game, bot, 'Cat Balou');
+  sheriff.hp = 1;
+  deal(game, bot, 'Bang');
   assert.equal(tickBots(room, 0), true);
-  assert.equal(third.alive, false);
-  assert.ok(game.discard.includes(ghost));
-  assert.ok(bot.hand.includes(bang));
-  assert.equal(tickBots(room, 2000), true);
   assert.equal(game.pending.type, 'bang');
   assert.equal(game.players[game.pending.player], sheriff);
+  game.act(sheriff.name, { type: 'take' });
+  assert.equal(game.winner, 'Renegade');
+  assert.ok(third.eq.includes(ghost));
 });
 
 test('bots hold a lone Missed! against Slab unless a Barrel check supplies the other dodge', () => {
