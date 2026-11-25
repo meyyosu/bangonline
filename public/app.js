@@ -281,7 +281,7 @@ function timerField(value = 60) {
 }
 function fasterBotsField(checked = false) {
   return `<label><input type="checkbox" name="fasterBots" ${checked ? 'checked' : ''}> Faster Bots</label>
-    <p class="muted">Bỏ khoảng chờ 0,5 giây giữa các hành động của bot.</p>`;
+    <p class="muted">Bỏ khoảng chờ 3 giây giữa các hành động của bot.</p>`;
 }
 function characterFields(choices = 3, seconds = 60) {
   return `<label for="characterChoices">Số nhân vật để chọn đầu game</label>

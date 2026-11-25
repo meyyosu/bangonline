@@ -13,7 +13,7 @@ for (const [dodgeCity, valleyOfShadow] of [[false, false], [true, false], [false
     const game = new Game(bots, { rng, characterChoices: 3, dodgeCity, valleyOfShadow });
     const room = { game, bots, players: bots, status: 'playing', turnSeconds: 0, characterSeconds: 0, chat: [] };
     let moves = 0;
-    for (let now = 0; !game.winner; now += 1000) {
+    for (let now = 0; !game.winner; now += 3000) {
       assert.ok(++moves < 20000, `stuck game ${seed}`);
       tickBots(room, now);
       const count = game.deck.length + game.discard.length
@@ -92,7 +92,7 @@ test('a Renegade attacks the third player and waits for the final duel to attack
   assert.equal(game.players[game.pending.player], other);
   assert.ok(bot.hand.includes(fanning) && bot.hand.includes(gatling));
   game.act(other.name, { type: 'take' });
-  assert.equal(tickBots(room, 1000), true);
+  assert.equal(tickBots(room, 3000), true);
   assert.equal(game.pending.type, 'bang');
   assert.equal(game.players[game.pending.player], sheriff);
 });
@@ -121,7 +121,7 @@ test('a Renegade removes the third player’s Ghost equipment before shooting Sh
   assert.equal(third.alive, false);
   assert.ok(game.discard.includes(ghost));
   assert.ok(bot.hand.includes(bang));
-  assert.equal(tickBots(room, 1000), true);
+  assert.equal(tickBots(room, 3000), true);
   assert.equal(game.pending.type, 'bang');
   assert.equal(game.players[game.pending.player], sheriff);
 });
@@ -145,8 +145,8 @@ test('bots hold a lone Missed! against Slab unless a Barrel check supplies the o
     assert.equal(tickBots(room, 0), true);
     if (suit) {
       assert.equal(game.pending.kind, 'Barrel');
-      assert.equal(tickBots(room, 1000), true);
-      assert.equal(tickBots(room, 2000), true);
+      assert.equal(tickBots(room, 3000), true);
+      assert.equal(tickBots(room, 6000), true);
     }
     assert.equal(game.pending, null);
     assert.equal(bot.hand.includes(missed), suit !== 'H');
@@ -165,7 +165,7 @@ test('a bot can spend two dodges to avoid Slab’s Bang!', () => {
   game.act(slab.name, { type: 'play', cardId: bang.id, target: bot.name });
   assert.equal(tickBots(room, 0), true);
   assert.equal(game.pending.got, 1);
-  assert.equal(tickBots(room, 1000), true);
+  assert.equal(tickBots(room, 3000), true);
   assert.equal(game.pending, null);
   assert.equal(bot.hp, hp);
   assert.ok(misses.every((card) => game.discard.includes(card)));
@@ -208,7 +208,7 @@ test('a Sheriff at one life pays for Springfield with a spare attack card', () =
   assert.ok(game.discard.includes(bang));
 });
 
-test('bots wait 500 ms between gameplay actions unless Faster Bots is enabled', () => {
+test('bots wait three seconds between gameplay actions unless Faster Bots is enabled', () => {
   for (const fasterBots of [false, true]) {
     const { game, room } = targetingGame(['Renegade', 'Sheriff', 'Outlaw', 'Outlaw']);
     const bot = game.players[0];
@@ -216,7 +216,8 @@ test('bots wait 500 ms between gameplay actions unless Faster Bots is enabled', 
     room.botNextAt = null;
     bot.hp = 1;
     const misses = [deal(game, bot, 'Missed'), deal(game, bot, 'Missed')];
-    const first = fasterBots ? 0 : 500;
+    const delay = 3000;
+    const first = fasterBots ? 0 : delay;
     if (!fasterBots) {
       assert.equal(tickBots(room, 0), false);
       assert.equal(tickBots(room, first - 1), false);
@@ -225,8 +226,8 @@ test('bots wait 500 ms between gameplay actions unless Faster Bots is enabled', 
     assert.equal(tickBots(room, first), true);
     assert.equal(bot.hand.length, 1);
     assert.equal(game.turn, 0);
-    if (!fasterBots) assert.equal(tickBots(room, first + 499), false);
-    assert.equal(tickBots(room, first + (fasterBots ? 250 : 500)), true);
+    if (!fasterBots) assert.equal(tickBots(room, first + delay - 1), false);
+    assert.equal(tickBots(room, first + (fasterBots ? 250 : delay)), true);
     assert.notEqual(game.turn, 0);
   }
 });
