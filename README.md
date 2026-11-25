@@ -47,6 +47,8 @@ Mở [127.0.0.1:3001](http://127.0.0.1:3001) trên máy này và đăng ký tài
 
 **Valley of Shadow** được nạp từ `valley-of-shadow.json` và có ô riêng trong sảnh. Bật riêng Valley of Shadow dùng 96 lá và 24 nhân vật. Bật cả hai mở rộng dùng 130 lá và 39 nhân vật. Ghost tham gia với 0 máu, có thể dùng trang bị và bị Jail. Hết lượt, Ghost tự bỏ bài trên tay cùng các lá đặt trước mặt, trừ chính lá Ghost. Dynamite và phép tính khoảng cách đều bỏ qua ghế Ghost. Ghost đứng ngoài các hiệu ứng cả bàn, kể cả khi tự đánh lá đó. Khi Sheriff bị hạ, chỉ người thực sự còn sống được tính khi xét thắng cho Renegade.
 
+Chọn **Nhân vật thưởng: Annie Versary** khi tạo phòng để thêm cô ấy vào nhóm chọn nhân vật. Annie có 4 máu và có thể dùng một lá bất kỳ trên tay như Bang!. Khi dùng để bắn, lá đó tính vào giới hạn Bang! của lượt và có thể nhận thưởng Bounty nếu bắn trúng.
+
 Người cầm **Saved!** có thể cứu ngay khi mục tiêu đang chờ phản ứng với đòn tấn công. Lá này chặn 1 sát thương và kết thúc bước phản ứng của mục tiêu. Đòn Aim vẫn gây 1 sát thương còn lại.
 
 Để thử dữ liệu riêng, có thể đặt `$env:BANG_DODGE_CITY_FILE` thành đường dẫn tới tệp JSON. Biến `$env:BANG_GREEN_CARDS_FILE` vẫn được hỗ trợ cho dữ liệu cũ.

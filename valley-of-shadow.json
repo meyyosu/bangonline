@@ -1,11 +1,11 @@
 {
   "cards": [
-    { "name": "Bounty", "type": "blue", "icon": "💰", "desc": "Đặt một khoản thưởng trước mặt một người chơi. Ai đánh trúng người đó bằng lá Bang! sẽ rút 1 lá.", "copies": [{ "rank": "9", "suit": "C" }] },
+    { "name": "Bounty", "type": "blue", "icon": "💰", "desc": "Đặt trước mặt người chơi khác. Khi lá Bang! hoặc lá dùng như Bang! tính vào giới hạn của lượt và làm người đó mất máu, người bắn rút 1 lá. Bounty ở lại bàn cho đến khi bị lấy hoặc bỏ.", "copies": [{ "rank": "9", "suit": "C" }] },
     { "name": "Ghost", "type": "blue", "icon": "👻", "desc": "Đưa một người đã bị loại trở lại bàn với 0 máu. Bỏ qua ghế Ghost khi chuyền Dynamite và tính khoảng cách. Ghost đứng ngoài các hiệu ứng cả bàn, kể cả khi tự đánh lá đó.", "copies": [{ "rank": "9", "suit": "S" }, { "rank": "10", "suit": "S" }] },
     { "name": "LeMat", "type": "gun", "range": 1, "icon": "🔫", "desc": "Trong lượt, có thể dùng một lá bất kỳ trên tay như Bang! trong giới hạn thông thường.", "copies": [{ "rank": "4", "suit": "D" }] },
     { "name": "Rattlesnake", "type": "blue", "icon": "🐍", "desc": "Đặt trước mặt một người chơi. Đầu lượt, người đó rút kiểm tra và mất 1 máu nếu lật lá Bích.", "copies": [{ "rank": "7", "suit": "H" }] },
     { "name": "Shotgun", "type": "gun", "range": 1, "icon": "🔫", "desc": "Khi lá Bang! của bạn trúng đích, người bị trúng chọn bỏ một lá trên tay.", "copies": [{ "rank": "K", "suit": "S" }] },
-    { "name": "Aim", "type": "brown", "icon": "🎯", "desc": "Dùng kèm một lá Bang! để gây 2 sát thương nếu trúng.", "copies": [{ "rank": "6", "suit": "C" }] },
+    { "name": "Aim", "type": "brown", "icon": "🎯", "desc": "Chọn Aim rồi chọn một lá dùng như Bang! để gây 2 sát thương nếu trúng. Lá Bang! đi kèm tính vào giới hạn Bang! của lượt.", "copies": [{ "rank": "6", "suit": "C" }] },
     { "name": "Backfire", "type": "brown", "icon": "↩️", "desc": "Dùng để né một đòn và phản công lại người đã tấn công bạn.", "defense": true, "copies": [{ "rank": "Q", "suit": "C" }] },
     { "name": "Bandidos", "type": "brown", "icon": "🤠", "desc": "Mỗi người chọn bỏ 2 lá trên tay (1 lá nếu chỉ còn 1) hoặc chịu 1 sát thương.", "copies": [{ "rank": "Q", "suit": "D" }] },
     { "name": "Escape", "type": "brown", "icon": "💨", "desc": "Né phần hiệu ứng nhắm vào bạn của một lá viền nâu, trừ lá đóng vai trò Bang!.", "copies": [{ "rank": "3", "suit": "H" }] },

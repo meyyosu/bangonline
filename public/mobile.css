@@ -88,6 +88,7 @@ main { padding: 6px 8px; }
   padding: 6px 8px; justify-content: center;
 }
 .mass-pop.mini { padding-right: 28px; }
+.mass-pop.poker-picking { max-height: calc(100dvh - var(--dock-h, 260px) - 12px); overflow: auto; }
 .mp-targets { flex-wrap: wrap; justify-content: center; gap: 3px; }
 .mp-arrow { display: none; }
 .mp-col { width: 40px; gap: 3px; }
