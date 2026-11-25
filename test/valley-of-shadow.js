@@ -327,6 +327,26 @@ test('Aim can be chosen first and shares the Bang limit in either play order', (
   }
 });
 
+test('Slab the Killer needs two dodges against Aim and still deals two damage after one dodge', () => {
+  for (const secondDodge of [false, true]) {
+    const { game, actor, target } = setup();
+    actor.char = 'Slab the Killer';
+    const bang = deal(game, actor, 'Bang');
+    const first = deal(game, target, 'Missed');
+    const second = secondDodge ? deal(game, target, 'Missed') : null;
+    const hp = target.hp;
+    play(game, actor, 'Aim', target, { bangCardId: bang.id });
+    assert.equal(game.viewFor(target.name).pending.need, 2);
+    game.act(target.name, { type: 'respond', cardId: first.id });
+    assert.equal(game.viewFor(target.name).pending.got, 1);
+    assert.equal(target.hp, hp);
+    game.act(target.name, second ? { type: 'respond', cardId: second.id } : { type: 'take' });
+    assert.equal(game.pending, null);
+    assert.equal(target.hp, second ? hp : hp - 2);
+    assertConservation(game);
+  }
+});
+
 test('Saved! can interrupt the Barrel check and Aim still deals one remaining damage', () => {
   const { game, actor, target } = setup();
   const saver = game.players.find((p) => p !== actor && p !== target);

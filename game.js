@@ -1001,7 +1001,7 @@ class Game {
   startShot(source, target, { projectile = 'bullet', trueBang = false, countsTowardBangLimit = false, amount = 1, canEscape = false, aim = false } = {}) {
     const p = this.players[source];
     if (!p.alive || !this.players[target].alive || this.winner) return;
-    const need = trueBang && amount === 1 && this.ability(p) === 'Slab the Killer' ? 2 : 1;
+    const need = trueBang && this.ability(p) === 'Slab the Killer' ? 2 : 1;
     const shot = { ...this.attackPrompt(source, target, need), amount, trueBang, countsTowardBangLimit, canEscape, aim };
     this.pending = shot;
     this.recordCombatEffect({ type: 'shot', source, target, projectile });

@@ -5,7 +5,7 @@
     { "name": "LeMat", "type": "gun", "range": 1, "icon": "🔫", "desc": "Trong lượt, có thể dùng một lá bất kỳ trên tay như Bang! trong giới hạn thông thường.", "copies": [{ "rank": "4", "suit": "D" }] },
     { "name": "Rattlesnake", "type": "blue", "icon": "🐍", "desc": "Đặt trước mặt một người chơi. Đầu lượt, người đó rút kiểm tra và mất 1 máu nếu lật lá Bích.", "copies": [{ "rank": "7", "suit": "H" }] },
     { "name": "Shotgun", "type": "gun", "range": 1, "icon": "🔫", "desc": "Khi lá Bang! của bạn trúng đích, người bị trúng chọn bỏ một lá trên tay.", "copies": [{ "rank": "K", "suit": "S" }] },
-    { "name": "Aim", "type": "brown", "icon": "🎯", "desc": "Chọn Aim rồi chọn một lá dùng như Bang! để gây 2 sát thương nếu trúng. Lá Bang! đi kèm tính vào giới hạn Bang! của lượt.", "copies": [{ "rank": "6", "suit": "C" }] },
+    { "name": "Aim", "type": "brown", "icon": "🎯", "desc": "Chọn Aim rồi chọn một lá dùng như Bang! để gây 2 sát thương nếu trúng. Lá Bang! đi kèm tính vào giới hạn Bang! của lượt. Nếu Slab the Killer bắn, mục tiêu cần né hai lần.", "copies": [{ "rank": "6", "suit": "C" }] },
     { "name": "Backfire", "type": "brown", "icon": "↩️", "desc": "Dùng để né một đòn và phản công lại người đã tấn công bạn.", "defense": true, "copies": [{ "rank": "Q", "suit": "C" }] },
     { "name": "Bandidos", "type": "brown", "icon": "🤠", "desc": "Mỗi người chọn bỏ 2 lá trên tay (1 lá nếu chỉ còn 1) hoặc chịu 1 sát thương.", "copies": [{ "rank": "Q", "suit": "D" }] },
     { "name": "Escape", "type": "brown", "icon": "💨", "desc": "Né phần hiệu ứng nhắm vào bạn của một lá viền nâu, trừ lá đóng vai trò Bang!.", "copies": [{ "rank": "3", "suit": "H" }] },
