@@ -680,6 +680,7 @@ function updateTurnRing() {
 
 // ---------- bàn chơi ----------
 const cardInfo = (c) => META.cards[c.name];
+const cardDisplayName = (c) => cardInfo(c).type === 'green' ? `⏳ ${c.name}` : c.name;
 // Bài trên tay: lá cùng tên đứng cạnh nhau (vd. 2 lá Missed), giữ thứ tự loại theo lần đầu xuất hiện
 function groupSameCards(cards) {
   const first = new Map();
@@ -697,11 +698,12 @@ function cardIconHTML(c, info) {
 }
 function cardHTML(c, cls = '', pressed = null) {
   const info = cardInfo(c);
+  const name = cardDisplayName(c);
   const red = c.suit === 'H' || c.suit === 'D';
   const choice = pressed === null ? '' : `role="button" tabindex="0" aria-pressed="${pressed}"`;
-  return `<div class="card ${info.type} ${cls}" data-card="${c.id}" ${tooltipAttrs(c.name, info.desc)} ${choice}>
+  return `<div class="card ${info.type} ${cls}" data-card="${c.id}" ${tooltipAttrs(name, info.desc)} ${choice}>
     <div class="corner ${red ? 'red' : ''}">${c.rank}${SUIT[c.suit]}</div>
-    ${cardIconHTML(c, info)}<div class="cname">${esc(c.name)}</div>
+    ${cardIconHTML(c, info)}<div class="cname">${esc(name)}</div>
     ${info.range ? `<div class="range">tầm ${info.range}</div>` : ''}</div>`;
 }
 // Chồng bài bỏ: 3 lá gần nhất, lá sau đè một phần lên lá trước
@@ -716,14 +718,15 @@ function discardStackHTML(g) {
 const EQ_KIND = { Mustang: ['horse', '+1'], Scope: ['horse', '−1'], Binocular: ['', '−1'], Hideout: ['', '+1'], Jail: ['jail', ''], Dynamite: ['dyn', ''] };
 function eqTileHTML(c, extra = '', owner = null) {
   const info = cardInfo(c);
+  const name = cardDisplayName(c);
   const [kind, badge] = info.type === 'green' ? ['green', c.ready ? '✓' : '⏳']
     : info.type === 'gun' ? ['gun', String(info.range)] : (EQ_KIND[c.name] || ['', '']);
   const tag = owner === null ? 'div' : 'button';
-  const action = owner === null ? '' : `type="button" data-act="patDraw" data-owner="${esc(owner)}" aria-label="Lấy ${esc(c.name)} của ${esc(owner)}"`;
+  const action = owner === null ? '' : `type="button" data-act="patDraw" data-owner="${esc(owner)}" aria-label="Lấy ${esc(name)} của ${esc(owner)}"`;
   const desc = c.disabled ? `${info.desc} Đang bị Belle Star vô hiệu hóa.` : info.desc;
   const art = CARD_ART.has(c.name);
-  return `<${tag} class="eqt ${kind} ${extra}${c.disabled ? ' inactive' : ''}${art ? ' has-art' : ''}" ${action} data-eq="${c.id}" ${tooltipAttrs(c.name, desc)}>
-    ${art ? `<span class="ic art"><img src="${cardArtSrc(c.name)}" alt="" draggable="false"></span>` : `<span class="ic">${info.icon}</span>`}<span class="nm">${esc(c.name)}</span>${badge ? `<span class="bd">${badge}</span>` : ''}</${tag}>`;
+  return `<${tag} class="eqt ${kind} ${extra}${c.disabled ? ' inactive' : ''}${art ? ' has-art' : ''}" ${action} data-eq="${c.id}" ${tooltipAttrs(name, desc)}>
+    ${art ? `<span class="ic art"><img src="${cardArtSrc(c.name)}" alt="" draggable="false"></span>` : `<span class="ic">${info.icon}</span>`}<span class="nm">${esc(name)}</span>${badge ? `<span class="bd">${badge}</span>` : ''}</${tag}>`;
 }
 // Thanh máu bằng viên đạn: đạn đồng = máu còn, vỏ đạn xám = máu đã mất
 function bulletSVG(full, h) {
@@ -1579,7 +1582,7 @@ function drawStageHTML(g) {
       const selected = card && ui.selected.includes(card.id);
       const content = card ? cardHTML(card, `small ${selected ? 'selected' : ''}`) : '<div class="card-back">BANG!</div>';
       const face = kit ? content : `<div class="stage-flip"><div class="stage-front">${content}</div><div class="stage-back"><div class="card-back">BANG!</div></div></div>`;
-      return kit && mine ? `<button type="button" class="draw-slot kit-choice" data-slot="${slot}" data-kit-id="${card.id}" aria-label="${esc(card.name)} ${esc(card.rank)}" aria-pressed="${!!selected}">${face}</button>`
+      return kit && mine ? `<button type="button" class="draw-slot kit-choice" data-slot="${slot}" data-kit-id="${card.id}" aria-label="${esc(cardDisplayName(card))} ${esc(card.rank)}" aria-pressed="${!!selected}">${face}</button>`
         : `<div class="draw-slot" data-slot="${slot}">${face}</div>`;
     }).join('')}</div>
     ${kit && mine ? `<button class="btn" data-act="confirmKit" ${ui.selected.length === Math.min(2, cards.length) ? '' : 'disabled'}>Giữ 2 lá đã chọn</button>` : ''}
@@ -1773,7 +1776,7 @@ function promptHTML(g, meIdx, meP) {
   if (g.winner) return '<h4>Ván đấu đã kết thúc.</h4><div class="muted">Xem kết quả ở trên.</div>';
   if (ui.mode?.kind === 'cost') {
     const c = g.me.hand.find((card) => card.id === ui.mode.cardId);
-    return `<h4>${esc(c.name)} · Chọn thêm 1 lá trên tay để bỏ</h4>
+    return `<h4>${esc(cardDisplayName(c))} · Chọn thêm 1 lá trên tay để bỏ</h4>
       <div class="row"><button class="btn secondary small" data-act="cancel">Huỷ</button></div>`;
   }
   if (['aim', 'asBang'].includes(ui.mode?.kind)) {
@@ -1789,7 +1792,7 @@ function promptHTML(g, meIdx, meP) {
   if (ui.mode?.kind === 'brawl') {
     return `<h4>Brawl · Chọn một lá để bỏ của từng người</h4>
       ${brawlTargets(g).map((p) => {
-        const choices = p.eq.map((c) => [String(c.id), `${c.name} ${c.rank}${SUIT[c.suit]}`]);
+        const choices = p.eq.map((c) => [String(c.id), `${cardDisplayName(c)} ${c.rank}${SUIT[c.suit]}`]);
         if (p.handCount) choices.unshift(['hand', 'Một lá ngẫu nhiên trên tay']);
         const picked = ui.mode.choices.get(p.name);
         return `<label>${esc(p.name)}<select data-brawl-target="${esc(p.name)}">${choices.map(([id, label]) => `<option value="${id}" ${id === picked ? 'selected' : ''}>${esc(label)}</option>`).join('')}</select></label>`;
@@ -1859,7 +1862,7 @@ function promptHTML(g, meIdx, meP) {
     case 'lemonade':
       if (!mine) return `<h4>${P(pend.player)} có thể dùng kỹ năng Lemonade Jim…</h4>`;
       return `<h4>Lemonade Jim · Bỏ một lá để hồi 1 máu</h4><div class="row">
-        ${g.me.hand.map((c) => `<button class="btn small" data-act="lemonade" data-card-id="${c.id}">${esc(c.name)} ${c.rank}${SUIT[c.suit]}</button>`).join('')}
+        ${g.me.hand.map((c) => `<button class="btn small" data-act="lemonade" data-card-id="${c.id}">${esc(cardDisplayName(c))} ${c.rank}${SUIT[c.suit]}</button>`).join('')}
         <button class="btn secondary" data-act="take">Bỏ qua</button></div>`;
     case 'copyAbility':
       if (!mine) return `<h4>${P(pend.player)} đang chọn kỹ năng để sao chép…</h4>`;
@@ -1871,7 +1874,7 @@ function promptHTML(g, meIdx, meP) {
       return `<h4>💥 ${P(pend.source)} bắn bạn!</h4>
         <div>Cần né thêm <b>${left}</b> lần${pend.need > 1 ? ' (Slab the Killer)' : ''}. Chọn lá đang sáng hoặc trang bị có thể dùng.</div>
         <div class="row">${pend.barrels > 0 ? `<button class="btn blue" data-act="barrel">🛢️ Dùng Barrel (${pend.barrels})</button>` : ''}
-        ${meP.eq.filter((c) => pend.responseCardIds?.includes(c.id)).map((c) => `<button class="btn green" data-act="respondEquipment" data-eqid="${c.id}">Dùng ${esc(c.name)}</button>`).join('')}
+        ${meP.eq.filter((c) => pend.responseCardIds?.includes(c.id)).map((c) => `<button class="btn green" data-act="respondEquipment" data-eqid="${c.id}">Dùng ${esc(cardDisplayName(c))}</button>`).join('')}
         ${escapeButtons()}<button class="btn secondary" data-act="take">${meP.ghost ? 'Chịu đòn' : `Chịu mất ${pend.amount ?? 1} máu`}</button></div>`;
     }
     case 'indians':
@@ -1939,7 +1942,7 @@ function actionsHTML(g, meP, canPlay) {
       if (cardInfo(c).effect === 'heal' && (meP.ghost || meP.hp >= meP.maxHp)) continue;
       const filter = targetFilter(c, g, meP);
       if (filter && !g.players.some(filter)) continue;
-      out.push(`<button class="btn green" data-act="activate" data-eqid="${c.id}">Dùng ${esc(c.name)}</button>`);
+      out.push(`<button class="btn green" data-act="activate" data-eqid="${c.id}">Dùng ${esc(cardDisplayName(c))}</button>`);
     }
     const conversion = bangConversion(g, meP);
     if (conversion && canFire(g) && g.me.hand.length && g.players.some((p) => docTarget(p, g))) {
@@ -2960,12 +2963,13 @@ function bindGame(g, meIdx, meP, canPlay, myPrompt) {
 
 function chooseTargetCard(card, p, type, costCardId) {
   const modal = $('#modal');
-  modal.innerHTML = `<div class="panel"><h3>${esc(card.name)}: chọn lá của ${esc(p.name)}</h3>
+  modal.innerHTML = `<div class="panel"><h3>${esc(cardDisplayName(card))}: chọn lá của ${esc(p.name)}</h3>
     <div class="row">
       ${p.handCount ? `<button class="btn" data-tc="hand">🂠 1 lá ngẫu nhiên trên tay (${p.handCount})</button>` : ''}
       ${p.eq.map((c) => {
         const info = cardInfo(c);
-        return `<button class="btn ${info.type === 'green' ? 'green' : 'blue'}" data-tc="${c.id}" ${tooltipAttrs(c.name, info.desc)}>${CARD_ART.has(c.name) ? `<img class="btn-art" src="${cardArtSrc(c.name)}" alt="">` : info.icon} ${esc(c.name)}</button>`;
+        const name = cardDisplayName(c);
+        return `<button class="btn ${info.type === 'green' ? 'green' : 'blue'}" data-tc="${c.id}" ${tooltipAttrs(name, info.desc)}>${CARD_ART.has(c.name) ? `<img class="btn-art" src="${cardArtSrc(c.name)}" alt="">` : info.icon} ${esc(name)}</button>`;
       }).join('')}
     </div>
     <div class="row" style="margin-top:14px"><button class="btn secondary small" data-tc="cancel">Huỷ</button></div></div>`;
